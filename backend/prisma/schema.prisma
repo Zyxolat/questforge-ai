@@ -1,0 +1,104 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String   @id @default(cuid())
+  wallet         String   @unique
+  username       String?
+  xp             Int      @default(0)
+  level          Int      @default(1)
+  questCount     Int      @default(0)
+  streak         Int      @default(0)
+  onchainActions Int      @default(0)
+  createdAt      DateTime @default(now())
+  quests         QuestHistory[]
+  rewards        Reward[]
+  nfts           NFT[]
+}
+
+model Quest {
+  id           String   @id @default(cuid())
+  title        String
+  description  String
+  metadata     Json
+  difficulty   Int
+  stakeAmount  Float
+  rewardAmount Float
+  status       QuestStatus @default(AVAILABLE)
+  creator      String
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
+  submissions  QuestHistory[]
+}
+
+enum QuestStatus {
+  AVAILABLE
+  ACTIVE
+  SUBMITTED
+  VERIFIED
+  CANCELLED
+}
+
+model QuestHistory {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  quest       Quest    @relation(fields: [questId], references: [id])
+  questId     String
+  action      String
+  proofUri    String?
+  xpEarned    Int      @default(0)
+  rewardId    String?
+  createdAt   DateTime @default(now())
+}
+
+model Reward {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  type        String
+  amount      Float
+  tokenTx     String?
+  createdAt   DateTime @default(now())
+}
+
+model NFT {
+  id            String   @id @default(cuid())
+  user          User     @relation(fields: [userId], references: [id])
+  userId        String
+  tokenId       String
+  metadataUri   String
+  rarity        String
+  xpEarned      Int
+  questHistory  String
+  mintedAt      DateTime @default(now())
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  user        User?    @relation(fields: [userId], references: [id])
+  userId      String?
+  wallet      String
+  type        String
+  chainId     Int
+  txHash      String
+  details     Json
+  createdAt   DateTime @default(now())
+}
+
+model Achievement {
+  id          String   @id @default(cuid())
+  user        User     @relation(fields: [userId], references: [id])
+  userId      String
+  title       String
+  description String
+  rarity      String
+  minted      Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
