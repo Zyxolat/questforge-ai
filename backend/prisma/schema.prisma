@@ -23,18 +23,30 @@ model User {
 }
 
 model Quest {
-  id           String   @id @default(cuid())
-  title        String
-  description  String
-  metadata     Json
-  difficulty   Int
-  stakeAmount  Float
-  rewardAmount Float
-  status       QuestStatus @default(AVAILABLE)
-  creator      String
-  createdAt    DateTime @default(now())
-  expiresAt    DateTime
-  submissions  QuestHistory[]
+  id              String   @id @default(cuid())
+  title           String
+  description     String
+  metadata        Json
+  difficulty      Int
+  questType       String?
+  objective       String?
+  lore            String?
+  stakeAmount     Float
+  rewardAmount    Float
+  chainQuestId    BigInt?  @db.BigInt
+  status          QuestStatus @default(AVAILABLE)
+  creator         String
+  player          User?    @relation(fields: [playerId], references: [id])
+  playerId        String?
+  startedAt       DateTime?
+  stakeTx         String?
+  missionTx       String?
+  proofTx         String?
+  verificationTx  String?
+  nftMintTx       String?
+  createdAt       DateTime @default(now())
+  expiresAt       DateTime
+  submissions     QuestHistory[]
 }
 
 enum QuestStatus {
@@ -101,4 +113,13 @@ model Achievement {
   rarity      String
   minted      Boolean  @default(false)
   createdAt   DateTime @default(now())
+}
+
+model NPCConversation {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id])
+  userId    String
+  npcType   String
+  messages  Json
+  createdAt DateTime @default(now())
 }

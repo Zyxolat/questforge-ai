@@ -1,10 +1,13 @@
 import { AnimatePresence, motion } from 'framer-motion';
+import { useState } from 'react';
 import { Route, Routes, Link, useLocation } from 'react-router-dom';
 import HomePage from './pages/HomePage';
 import CommandCenter from './pages/CommandCenter';
 import Leaderboards from './pages/Leaderboards';
 import InventoryPage from './pages/InventoryPage';
 import TavernPage from './pages/TavernPage';
+import WalletModal from './components/WalletModal';
+import { useWallet } from './context/WalletContext';
 
 const links = [
   { to: '/', label: 'Home' },
@@ -16,6 +19,8 @@ const links = [
 
 function App() {
   const location = useLocation();
+  const [walletModalOpen, setWalletModalOpen] = useState(false);
+  const { address, status } = useWallet();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-deepnavy via-navy to-[#030610] text-white">
@@ -32,8 +37,15 @@ function App() {
               </Link>
             ))}
           </nav>
+          <button
+            onClick={() => setWalletModalOpen(true)}
+            className="rounded-full border border-glowyellow/30 bg-glowyellow/10 px-4 py-2 text-sm font-semibold text-glowyellow transition hover:bg-glowyellow/15"
+          >
+            {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Connect Wallet'}
+          </button>
         </div>
       </header>
+      <WalletModal open={walletModalOpen} onClose={() => setWalletModalOpen(false)} />
 
       <AnimatePresence mode="wait">
         <Routes location={location} key={location.pathname}>

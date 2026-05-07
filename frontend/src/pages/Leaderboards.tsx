@@ -1,21 +1,36 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
+import { useWallet } from '../context/WalletContext';
 import { getPlayerStats } from '../lib/api';
 
 export default function Leaderboards() {
+  const { address, connectWallet, status } = useWallet();
   const [leaders, setLeaders] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
+      if (!address) return;
       try {
-        const response = await getPlayerStats('0x0000000000000000000000000000000000000000');
+        const response = await getPlayerStats(address);
         setLeaders(response.data.leaderboard);
       } catch (error) {
         console.error(error);
       }
     }
     load();
-  }, []);
+  }, [address]);
+
+  if (status !== 'connected') {
+    return (
+      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto flex min-h-[calc(100vh-96px)] items-center justify-center px-6 py-12">
+        <div className="glass-card w-full max-w-3xl rounded-3xl border border-white/10 bg-white/5 p-10 text-center shadow-strong backdrop-blur-xl">
+          <h2 className="text-3xl font-bold text-white">Connect to view the Leaderboards</h2>
+          <p className="mt-4 text-slate-300">ForgeChampion rankings update when your wallet is connected.</p>
+          <button onClick={connectWallet} className="mt-8 rounded-full bg-glowyellow px-6 py-3 text-sm font-semibold uppercase tracking-[0.2em] text-navy shadow-glow transition hover:brightness-110">Connect Wallet</button>
+        </div>
+      </motion.main>
+    );
+  }
 
   return (
     <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-6xl px-6 py-12">

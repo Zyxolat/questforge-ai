@@ -27,7 +27,8 @@ QuestForge AI is a premium onchain fantasy RPG platform built for hackathons. Pl
 cd backend
 cp .env.example .env
 npm install
-npx prisma db push
+npx prisma generate
+npx prisma migrate dev --name init
 npm run dev
 ```
 
@@ -39,19 +40,30 @@ npm install
 npx hardhat compile
 ```
 
+Deploy the contracts and update `backend/.env` with deployed addresses.
+
 ### 3. Frontend
 
 ```bash
 cd frontend
+cp .env.example .env
 npm install
 npm run dev
 ```
+
+Set the deployed contract addresses in `frontend/.env` before launching the app.
 
 ## Deployment
 
 - Frontend: Vercel
 - Backend: Railway
 - Contracts: Hardhat deploy to Celo
+
+## Deployment
+
+- Frontend: Vercel deploy from `frontend/`, use `VITE_API_BASE_URL` in environment variables.
+- Backend: Railway deploy from `backend/`, use `DATABASE_URL`, `OPENAI_API_KEY`, `PRIVATE_KEY`, and contract address variables from `.env.example`.
+- Contracts: deploy with Hardhat and set `FORGE_QUEST_MANAGER_ADDRESS`, `REWARD_NFT_ADDRESS`, `REPUTATION_ADDRESS`, and `TREASURY_ADDRESS` in backend and frontend env files.
 
 ## Notes
 
