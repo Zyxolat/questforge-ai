@@ -20,6 +20,10 @@ model User {
   quests         QuestHistory[]
   rewards        Reward[]
   nfts           NFT[]
+  playerQuests   Quest[]
+  transactions   Transaction[]
+  achievements   Achievement[]
+  npcConversations NPCConversation[]
 }
 
 model Quest {

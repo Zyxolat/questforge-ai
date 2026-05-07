@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import {
   generateQuest,
-  validateQuest,
   startQuest,
   recordTransaction,
   submitQuest,
@@ -18,7 +17,6 @@ apiRouter.post('/quests/generate', generateQuest);
 apiRouter.post('/quests/start', startQuest);
 apiRouter.post('/quests/record', recordTransaction);
 apiRouter.post('/quests/submit', submitQuest);
-apiRouter.post('/quests/validate', validateQuest);
 apiRouter.get('/quests/daily', getDailyMissions);
 apiRouter.get('/quests/active', getActiveQuests);
 apiRouter.get('/npc/dialogue', getNPCDialogue);

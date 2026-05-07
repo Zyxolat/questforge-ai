@@ -54,10 +54,10 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           const network = await browserProvider.getNetwork();
           setAddress(address);
           setSigner(signerInstance);
-          setChainId(network.chainId);
+          setChainId(Number(network.chainId));
           setNetwork(network.name);
           setStatus('connected');
-          const balance = await signerInstance.getBalance();
+          const balance = await browserProvider.getBalance(address);
           setBalance(formatBalance(balance));
         }
       } catch {
@@ -83,11 +83,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const signerInstance = await browserProvider.getSigner();
       const address = await signerInstance.getAddress();
       const network = await browserProvider.getNetwork();
-      const balance = await signerInstance.getBalance();
+      const balance = await browserProvider.getBalance(address);
       setProvider(browserProvider);
       setSigner(signerInstance);
       setAddress(address);
-      setChainId(network.chainId);
+      setChainId(Number(network.chainId));
       setNetwork(network.name);
       setBalance(formatBalance(balance));
       setStatus('connected');

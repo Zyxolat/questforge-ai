@@ -8,10 +8,10 @@ const privateKey = process.env.PRIVATE_KEY || '';
 const provider = new ethers.JsonRpcProvider(rpcUrl);
 const signer = privateKey ? new ethers.Wallet(privateKey, provider) : provider;
 
-const forgeQuestManagerAddress = process.env.FORGE_QUEST_MANAGER_ADDRESS || '';
-const rewardNFTAddress = process.env.REWARD_NFT_ADDRESS || '';
-const reputationAddress = process.env.REPUTATION_ADDRESS || '';
-const treasuryAddress = process.env.TREASURY_ADDRESS || '';
+const forgeQuestManagerAddress = process.env.FORGE_QUEST_MANAGER_ADDRESS || '0x0000000000000000000000000000000000000000';
+const rewardNFTAddress = process.env.REWARD_NFT_ADDRESS || '0x0000000000000000000000000000000000000000';
+const reputationAddress = process.env.REPUTATION_ADDRESS || '0x0000000000000000000000000000000000000000';
+const treasuryAddress = process.env.TREASURY_ADDRESS || '0x0000000000000000000000000000000000000000';
 
 const ForgeQuestManagerABI = [
   'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 durationSeconds) external',

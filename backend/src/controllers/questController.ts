@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { ethers } from 'ethers';
 import { generateQuestPrompt, validateQuestProofPrompt, generateNPCDialogue } from '../services/openai';
 import { prisma, normalizeWallet, upsertUser } from '../services/chain';
-import { contracts, parseJSON } from '../services/contracts';
+import { contracts } from '../services/contracts';
 
 const QUEST_LIFETIME_MS = 1000 * 60 * 60 * 6;
 
@@ -13,15 +13,14 @@ export async function generateQuest(req: Request, res: Response) {
   if (!wallet) return res.status(400).json({ error: 'Wallet is required' });
 
   try {
-    const raw = await generateQuestPrompt(wallet, chain);
-    const aiData = parseJSON(raw) || {};
+    const { raw, data: aiData } = await generateQuestPrompt(wallet, chain);
     const title = aiData.title || `Forge Mission for ${wallet.slice(0, 8)}`;
-    const description = aiData.description || aiData.story || 'A magical mission awaits.';
+    const description = aiData.description || 'A magical mission awaits.';
     const stakeAmount = Number(aiData.stakeAmount) || 0.02;
-    const rewardAmount = Number(aiData.rewardAmount) || 0.05;
+    const rewardAmount = Number(aiData.reward) || 0.05;
     const difficulty = Number(aiData.difficulty) || 3;
-    const objective = aiData.objective || aiData.task || 'Submit a proof of your journey.';
-    const lore = aiData.lore || aiData.story || 'The Forge Master conjures a new challenge.';
+    const objective = aiData.objective || 'Submit a proof of your journey.';
+    const lore = aiData.lore || 'The Forge Master conjures a new challenge.';
     const metadataUri = `QuestForgeAI://quest/${title.replace(/\s+/g, '-')}`;
     const durationSeconds = 60 * 60 * 6;
 
@@ -33,13 +32,13 @@ export async function generateQuest(req: Request, res: Response) {
       durationSeconds
     );
     const receipt = await tx.wait();
-    const log = receipt.logs.map((log) => {
+    const log = receipt?.logs.map((log: any) => {
       try {
         return contracts.forgeQuestManager.interface.parseLog(log);
       } catch {
         return null;
       }
-    }).find((item) => item?.name === 'QuestCreated');
+    }).find((item: any) => item?.name === 'QuestCreated');
     const chainQuestId = log?.args?.questId ? BigInt(log.args.questId.toString()) : BigInt(0);
 
     const user = await upsertUser(normalizeWallet(wallet));
@@ -132,8 +131,8 @@ export async function submitQuest(req: Request, res: Response) {
   try {
     const quest = await prisma.quest.findUnique({ where: { id: questId } });
     if (!quest) return res.status(404).json({ error: 'Quest not found' });
-    const validation = await validateQuestProofPrompt(wallet, quest.title, proofUri);
-    const verified = /true/i.test(validation);
+    const { data: validation } = await validateQuestProofPrompt(wallet, quest.title, proofUri);
+    const verified = validation.verified === true || String(validation.verified).toLowerCase() === 'true';
     const chainQuestId = quest.chainQuestId ?? BigInt(0);
 
     const verifyTx = await contracts.forgeQuestManager.verifyQuest(chainQuestId, verified);
@@ -145,7 +144,7 @@ export async function submitQuest(req: Request, res: Response) {
         status: verified ? 'VERIFIED' : 'CANCELLED',
         proofTx: txHash || quest.proofTx,
         verificationTx: receipt.transactionHash,
-        metadata: { ...quest.metadata, proofUri, aiValidation: validation }
+        metadata: { ...(quest.metadata as Record<string, any>), proofUri, aiValidation: validation }
       }
     });
 
