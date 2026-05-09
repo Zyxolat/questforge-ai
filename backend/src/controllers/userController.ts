@@ -1,17 +1,18 @@
 import { Request, Response } from 'express';
 import { prisma } from '../services/chain';
-import { normalizeWallet, upsertUser } from '../services/chain';
+import { normalizeWallet } from '../services/chain';
+import { logger } from '../services/logger';
 
 export async function getPlayerStats(req: Request, res: Response) {
   const wallet = req.query.wallet?.toString();
   if (!wallet) return res.status(400).json({ error: 'Wallet is required' });
   try {
     const normalized = normalizeWallet(wallet);
-    const user = await upsertUser(normalized);
+    const user = await prisma.user.findUnique({ where: { wallet: normalized } });
     const leaderboard = await prisma.user.findMany({ orderBy: [{ xp: 'desc' }], take: 10 });
     res.json({ user, leaderboard });
   } catch (error) {
-    console.error(error);
+    logger.error('Failed to fetch player stats', error, { wallet });
     res.status(500).json({ error: 'Unable to fetch stats' });
   }
 }
@@ -32,7 +33,7 @@ export async function getProgression(req: Request, res: Response) {
     };
     res.json({ progression });
   } catch (error) {
-    console.error(error);
+    logger.error('Failed to fetch progression', error, { wallet });
     res.status(500).json({ error: 'Unable to load progression' });
   }
 }

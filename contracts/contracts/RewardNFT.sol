@@ -6,8 +6,10 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract RewardNFT is ERC721URIStorage, AccessControl {
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    uint256 public constant MAX_METADATA_URI_LENGTH = 2048;
     uint256 private _tokenIds;
     mapping(uint256 => uint256) public questHistory;
+    mapping(uint256 => bool) public mintedQuestIds;
 
     event RewardMinted(address indexed player, uint256 indexed tokenId, uint256 questId);
 
@@ -21,11 +23,17 @@ contract RewardNFT is ERC721URIStorage, AccessControl {
         uint256 questId,
         string memory metadataUri
     ) external onlyRole(MINTER_ROLE) returns (uint256) {
+        require(player != address(0), "Invalid player");
+        require(bytes(metadataUri).length > 0, "Metadata required");
+        require(bytes(metadataUri).length <= MAX_METADATA_URI_LENGTH, "Metadata too long");
+        require(!mintedQuestIds[questId], "Quest reward already minted");
+
         _tokenIds++;
         uint256 newTokenId = _tokenIds;
         _safeMint(player, newTokenId);
         _setTokenURI(newTokenId, metadataUri);
         questHistory[newTokenId] = questId;
+        mintedQuestIds[questId] = true;
         emit RewardMinted(player, newTokenId, questId);
         return newTokenId;
     }

@@ -139,7 +139,7 @@ export const env = {
   NODE_ENV: nodeEnv,
   PORT: parsePort('PORT', 4000),
   DATABASE_URL: requireEnv('DATABASE_URL'),
-  OPENAI_API_KEY: requireEnv('OPENAI_API_KEY'),
+  OPENAI_API_KEY: optionalEnv('OPENAI_API_KEY') || '',
   FRONTEND_URL: frontendUrl.toString(),
   FRONTEND_ORIGIN: frontendUrl.origin,
   CORS_ORIGINS: corsOrigins,
@@ -151,6 +151,16 @@ export const env = {
   TREASURY_ADDRESS: parseEthereumAddress('TREASURY_ADDRESS', requireEnv('TREASURY_ADDRESS')),
   INDEXER_FROM_BLOCK: parsePositiveInt('INDEXER_FROM_BLOCK', optionalEnv('INDEXER_FROM_BLOCK') || '0', 0),
   INDEXER_POLL_INTERVAL_MS: parsePositiveInt('INDEXER_POLL_INTERVAL_MS', optionalEnv('INDEXER_POLL_INTERVAL_MS') || '10000'),
+  REDIS_URL: optionalEnv('REDIS_URL'),
+  VERIFIER_PRIVATE_KEY: optionalEnv('VERIFIER_PRIVATE_KEY') || optionalEnv('PRIVATE_KEY'),
+  VERIFICATION_WORKER_INTERVAL_MS: parsePositiveInt(
+    'VERIFICATION_WORKER_INTERVAL_MS',
+    optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '5000'
+  ),
+  VERIFICATION_BATCH_SIZE: parsePositiveInt(
+    'VERIFICATION_BATCH_SIZE',
+    optionalEnv('VERIFICATION_BATCH_SIZE') || '10'
+  ),
   AUTH_DOMAIN: optionalEnv('AUTH_DOMAIN') || authUri.host,
   AUTH_URI: authUri.toString(),
   AUTH_NONCE_TTL_MINUTES: parsePositiveInt('AUTH_NONCE_TTL_MINUTES', authNonceTtlRaw),
@@ -165,4 +175,3 @@ export const env = {
   JWT_EXPIRES_IN: jwtExpiresIn,
   JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(jwtExpiresIn)
 } as const;
-

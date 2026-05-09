@@ -8,26 +8,36 @@ datasource db {
 }
 
 model User {
-  id             String   @id @default(cuid())
-  wallet         String   @unique
-  username       String?
-  xp             Int      @default(0)
-  level          Int      @default(1)
-  questCount     Int      @default(0)
-  streak         Int      @default(0)
-  onchainActions Int      @default(0)
-  createdAt      DateTime @default(now())
-  quests         QuestHistory[]
-  rewards        Reward[]
-  nfts           NFT[]
-  playerQuests   Quest[]
-  transactions   Transaction[]
-  achievements   Achievement[]
-  npcConversations NPCConversation[]
+  id                     String                @id @default(cuid())
+  wallet                 String                @unique
+  username               String?
+  xp                     Int                   @default(0)
+  level                  Int                   @default(1)
+  questCount             Int                   @default(0)
+  streak                 Int                   @default(0)
+  streakDecayFactor      Float                 @default(1.0) // Multiplier for XP rewards (decreases with failures)
+  onchainActions         Int                   @default(0)
+  lastQuestCompletedAt   DateTime?
+  lastFailedAt           DateTime?
+  totalQuestsCompleted   Int                   @default(0)
+  totalQuestsFailed      Int                   @default(0)
+  createdAt              DateTime              @default(now())
+  quests                 QuestHistory[]
+  rewards                Reward[]
+  nfts                   NFT[]
+  playerQuests           Quest[]
+  transactions           Transaction[]
+  achievements           Achievement[]
+  npcConversations       NPCConversation[]
+  authChallenges         AuthChallenge[]
+  authSessions           AuthSession[]
+  cooldowns              QuestCooldown[]
+  dailyActivity          DailyActivity[]
+  proofHistory           ProofSubmission[]
 }
 
 model Quest {
-  id              String   @id @default(cuid())
+  id              String             @id @default(cuid())
   title           String
   description     String
   metadata        Json
@@ -37,20 +47,34 @@ model Quest {
   lore            String?
   stakeAmount     Float
   rewardAmount    Float
-  chainQuestId    BigInt?  @db.BigInt
-  status          QuestStatus @default(AVAILABLE)
+  xpReward        Int               @default(150)
+  maxRewardAmount Float?             // Max reward cap for this quest (security bound)
+  minStakeAmount  Float              @default(0.01) // Minimum stake
+  maxStakeAmount  Float              @default(10.0) // Maximum stake per quest
+  chainQuestId    BigInt?            @db.BigInt
+  status          QuestStatus        @default(AVAILABLE)
   creator         String
-  player          User?    @relation(fields: [playerId], references: [id])
+  player          User?              @relation(fields: [playerId], references: [id])
   playerId        String?
   startedAt       DateTime?
+  expiresAt       DateTime
+  completedAt     DateTime?
+  failedAt        DateTime?
   stakeTx         String?
-  missionTx       String?
+  stakeTxHash     String?            // Chain tx hash for verification
   proofTx         String?
+  proofTxHash     String?            // Chain tx hash for verification
   verificationTx  String?
   nftMintTx       String?
-  createdAt       DateTime @default(now())
-  expiresAt       DateTime
+  createdAt       DateTime           @default(now())
   submissions     QuestHistory[]
+  proofSubmissions ProofSubmission[]
+
+  @@index([creator])
+  @@index([playerId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([chainQuestId])
 }
 
 enum QuestStatus {
@@ -59,6 +83,7 @@ enum QuestStatus {
   SUBMITTED
   VERIFIED
   CANCELLED
+  FAILED
 }
 
 model QuestHistory {
@@ -126,4 +151,87 @@ model NPCConversation {
   npcType   String
   messages  Json
   createdAt DateTime @default(now())
+}
+
+model AuthChallenge {
+  id        String    @id @default(cuid())
+  wallet    String
+  nonce     String    @unique
+  message   String
+  chainId   Int
+  domain    String
+  uri       String
+  expiresAt DateTime
+  consumedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User?     @relation(fields: [userId], references: [id])
+  userId    String?
+
+  @@index([wallet, expiresAt])
+}
+
+model AuthSession {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  wallet     String
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastSeenAt DateTime?
+  user       User      @relation(fields: [userId], references: [id])
+  userId     String
+
+  @@index([wallet, expiresAt])
+  @@index([userId, expiresAt])
+}
+
+// ANTI-ABUSE MODELS
+
+model QuestCooldown {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  cooldownUntil DateTime
+  reason    String   // "quest_failure", "spam_prevention", "anti_sybil"
+  createdAt DateTime @default(now())
+
+  @@unique([userId])
+  @@index([userId, cooldownUntil])
+}
+
+model DailyActivity {
+  id                 String   @id @default(cuid())
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId             String
+  date               String   // YYYY-MM-DD format for efficient indexing
+  questsAttempted    Int      @default(0)
+  questsCompleted    Int      @default(0)
+  xpEarned           Int      @default(0)
+  rewardsEarned      Float    @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([userId, date])
+  @@index([userId, date])
+  @@index([date])
+}
+
+model ProofSubmission {
+  id              String   @id @default(cuid())
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId          String
+  quest           Quest    @relation(fields: [questId], references: [id], onDelete: Cascade)
+  questId         String
+  proofUri        String
+  proofHash       String   @unique // SHA256 hash of proof to prevent duplicates
+  submittedAt     DateTime @default(now())
+  verifiedAt      DateTime?
+  verificationResult String? // "approved", "rejected", "pending"
+  verificationReason String?
+  createdAt       DateTime @default(now())
+
+  @@index([userId, questId])
+  @@index([proofHash])
+  @@index([userId, submittedAt])
+  @@index([verificationResult])
 }

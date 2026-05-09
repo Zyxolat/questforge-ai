@@ -8,7 +8,19 @@ interface WalletModalProps {
 }
 
 export default function WalletModal({ open, onClose }: WalletModalProps) {
-  const { address, balance, network, status, connectWallet, disconnectWallet, switchCeloNetwork } = useWallet();
+  const {
+    address,
+    balance,
+    network,
+    status,
+    authStatus,
+    authMessage,
+    isAuthReady,
+    connectWallet,
+    authenticateWallet,
+    disconnectWallet,
+    switchCeloNetwork
+  } = useWallet();
   if (!open) return null;
 
   return (
@@ -29,12 +41,41 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
             <p className="mt-2 text-sm text-slate-400">Network: {network ?? 'Unknown'}</p>
             <p className="mt-2 text-sm text-slate-400">Balance: {balance} CELO</p>
             <p className="mt-2 text-sm text-slate-400">Address: {address ?? '---'}</p>
+            <p className="mt-2 text-sm text-slate-400">
+              Auth:{' '}
+              {authStatus === 'authenticated'
+                ? 'Signed In'
+                : authStatus === 'authenticating'
+                  ? 'Awaiting Signature'
+                  : authStatus === 'restoring'
+                    ? 'Restoring Session'
+                    : authStatus === 'expired'
+                      ? 'Session Expired'
+                      : authStatus === 'error'
+                        ? 'Attention Required'
+                        : 'Not Signed In'}
+            </p>
+            {authMessage ? <p className="mt-3 text-sm text-softyellow">{authMessage}</p> : null}
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">
-            <GlowButton label={address ? 'Disconnect' : 'Connect Wallet'} onClick={address ? disconnectWallet : connectWallet} />
+            <GlowButton label={address ? 'Disconnect' : 'Connect Wallet'} onClick={address ? () => void disconnectWallet() : connectWallet} />
             <GlowButton label="Switch to Celo" onClick={switchCeloNetwork} className="bg-white/10 text-white hover:bg-white/20" />
           </div>
+          {address && authStatus !== 'authenticated' ? (
+            <GlowButton
+              label={
+                authStatus === 'restoring'
+                  ? 'Restoring Session'
+                  : authStatus === 'expired'
+                    ? 'Sign In Again'
+                    : 'Sign In'
+              }
+              onClick={authenticateWallet}
+              className="w-full bg-white/10 text-white hover:bg-white/20"
+              disabled={!isAuthReady || authStatus === 'authenticating'}
+            />
+          ) : null}
         </div>
       </motion.div>
     </motion.div>
