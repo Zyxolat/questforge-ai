@@ -347,18 +347,12 @@ Tests for:
 
 ## 📋 Migration Path
 
-### For Testnet (Alfajores)
-1. Deploy new contracts
-2. Run migrations
-3. Update addresses
-4. Test all endpoints
-
 ### For Mainnet
-1. Deploy old version first (safety)
+1. Deploy contracts with `npm run deploy:mainnet`
 2. Smoke test all endpoints
-3. Monitor for 24h
-4. If issues, rollback
-5. If stable, enable new features via config
+3. Run `npm run validate:mainnet`
+4. Monitor for 24h
+5. If issues, rollback
 
 ---
 
@@ -371,7 +365,7 @@ Tests for:
 - [ ] No linting errors
 - [ ] No console.log in production code
 
-**Testnet Deployment:**
+**Mainnet Deployment:**
 - [ ] Contracts deploy successfully
 - [ ] Database migrations apply
 - [ ] Backend starts without errors

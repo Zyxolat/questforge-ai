@@ -53,7 +53,7 @@
 - [ ] Smart contracts compiled successfully
 - [ ] Tests passing: `npm test` (contracts)
 - [ ] Gas estimates reviewed
-- [ ] Deployment script tested on testnet
+- [ ] Deployment script tested against Celo Mainnet configuration
 - [ ] Contract addresses ready
 - [ ] Treasury funded with initial rewards
 
@@ -61,7 +61,7 @@
 
 ## Smart Contract Deployment
 
-### Step 1: Deploy on Celo Testnet (Alfajores) First
+### Step 1: Deploy on Celo Mainnet
 
 ```bash
 cd contracts
@@ -73,8 +73,11 @@ npm run compile
 # Test
 npm run test
 
-# Deploy to Alfajores
-npm run deploy:alfajores
+# Deploy to Celo Mainnet
+npm run deploy:mainnet
+
+# Validate deployed contracts and roles
+npm run validate:mainnet
 
 # Record deployed addresses
 # FORGE_QUEST_MANAGER_ADDRESS=0x...
@@ -87,20 +90,7 @@ npm run deploy:alfajores
 
 ```bash
 # Verify on Celo Explorer
-# https://alfajores.celoscan.io/
-
-# Upload source code and ABI for all 4 contracts:
-# - ForgeQuestManager
-# - Reputation
-# - RewardNFT
-# - Treasury
-```
-
-### Step 3: Deploy on Celo Mainnet
-
-```bash
-# Deploy to mainnet
-npm run deploy:mainnet
+# https://celoscan.io/
 
 # Save addresses to .env.production:
 FORGE_QUEST_MANAGER_ADDRESS=0x...
@@ -109,7 +99,7 @@ REWARD_NFT_ADDRESS=0x...
 TREASURY_ADDRESS=0x...
 ```
 
-### Step 4: Fund Treasury
+### Step 3: Fund Treasury
 
 ```bash
 # Send initial reward pool to Treasury contract
@@ -119,7 +109,7 @@ celocli transfer:dollars \
   --amount 100
 ```
 
-### Step 5: Grant Roles
+### Step 4: Grant Roles
 
 ```bash
 # Grant MINTER_ROLE to ForgeQuestManager
