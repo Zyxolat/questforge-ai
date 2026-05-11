@@ -58,6 +58,14 @@ function parsePositiveInt(name: string, raw: string, minimum = 1) {
   return value;
 }
 
+function parseSupportedChainId(name: string, raw: string) {
+  const value = parsePositiveInt(name, raw);
+  if (value !== 42220) {
+    throw new Error(`${name} must be 42220 for Celo Mainnet`);
+  }
+  return value;
+}
+
 function parseUrl(name: string, raw: string) {
   try {
     return new URL(raw);
@@ -144,7 +152,7 @@ export const env = {
   FRONTEND_ORIGIN: frontendUrl.origin,
   CORS_ORIGINS: corsOrigins,
   CELO_RPC_URL: requireEnvAlias('CELO_RPC_URL', ['CELO_NODE_URL']),
-  CELO_CHAIN_ID: parsePositiveInt('CELO_CHAIN_ID', requireEnv('CELO_CHAIN_ID')),
+  CELO_CHAIN_ID: parseSupportedChainId('CELO_CHAIN_ID', requireEnv('CELO_CHAIN_ID')),
   FORGE_QUEST_MANAGER_ADDRESS: parseEthereumAddress('FORGE_QUEST_MANAGER_ADDRESS', requireEnv('FORGE_QUEST_MANAGER_ADDRESS')),
   REWARD_NFT_ADDRESS: parseEthereumAddress('REWARD_NFT_ADDRESS', requireEnv('REWARD_NFT_ADDRESS')),
   REPUTATION_ADDRESS: parseEthereumAddress('REPUTATION_ADDRESS', requireEnv('REPUTATION_ADDRESS')),
