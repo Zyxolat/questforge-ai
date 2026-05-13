@@ -65,11 +65,12 @@ export function objectiveTypes(): ObjectiveType[] {
   return Object.keys(TEMPLATE_ALLOWLIST) as ObjectiveType[];
 }
 
-export function buildQuestTemplate(difficulty: number, wallet: string): QuestVerificationTemplate {
+export function buildQuestTemplateForType(
+  type: ObjectiveType,
+  wallet: string,
+  difficulty: number
+): QuestVerificationTemplate {
   const normalizedDifficulty = Math.max(1, Math.min(5, Math.round(difficulty)));
-  const types = objectiveTypes();
-  const index = (normalizedDifficulty - 1) % types.length;
-  const type = types[index];
   const base = TEMPLATE_ALLOWLIST[type];
   const shortWallet = `${wallet.slice(0, 6)}...${wallet.slice(-4)}`;
   const minValueCelo =
@@ -89,6 +90,14 @@ export function buildQuestTemplate(difficulty: number, wallet: string): QuestVer
     minValueCelo,
     objective: objectiveByType[type]
   };
+}
+
+export function buildQuestTemplate(difficulty: number, wallet: string): QuestVerificationTemplate {
+  const normalizedDifficulty = Math.max(1, Math.min(5, Math.round(difficulty)));
+  const types = objectiveTypes();
+  const index = (normalizedDifficulty - 1) % types.length;
+  const type = types[index];
+  return buildQuestTemplateForType(type, wallet, normalizedDifficulty);
 }
 
 export function isApprovalEvent(topics: readonly string[]) {

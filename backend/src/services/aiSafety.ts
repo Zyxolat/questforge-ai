@@ -24,6 +24,12 @@ interface AIQuestOutput {
   stakeAmount?: number;
 }
 
+type AIQuestCandidate = Partial<Record<keyof AIQuestOutput, unknown>>;
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
 const questOutputSchema = {
   type: 'object',
   properties: {
@@ -99,14 +105,14 @@ class AISafetyValidator {
   /**
    * Validate AI quest output against strict schema
    */
-  validateQuestSchema(data: any): {
+  validateQuestSchema(data: unknown): {
     valid: boolean;
     errors: string[];
     sanitized?: AIQuestOutput;
   } {
     const errors: string[] = [];
 
-    if (!data || typeof data !== 'object') {
+    if (!isObjectRecord(data)) {
       errors.push('AI output must be a JSON object');
       return { valid: false, errors };
     }
@@ -202,7 +208,7 @@ class AISafetyValidator {
   /**
    * Validate validation rules are reasonable
    */
-  validateValidationRules(rules: string[]): { valid: boolean; errors: string[] } {
+  validateValidationRules(rules: unknown[]): { valid: boolean; errors: string[] } {
     const errors: string[] = [];
 
     if (!Array.isArray(rules)) {
@@ -248,16 +254,23 @@ class AISafetyValidator {
   /**
    * Sanitize AI output to safe defaults
    */
-  sanitizeQuestOutput(data: any, wallet: string): AIQuestOutput {
+  sanitizeQuestOutput(data: unknown): AIQuestOutput {
+    const candidate: AIQuestCandidate = isObjectRecord(data) ? data : {};
     const sanitized: AIQuestOutput = {
-      title: this.sanitizeString(data.title || 'Forge Quest'),
-      description: this.sanitizeString(data.description || 'A blockchain mission awaits.'),
-      difficulty: Math.max(1, Math.min(5, Math.round(data.difficulty || 3))),
-      type: this.sanitizeString(data.type || 'Blockchain Quest', 50),
-      objective: this.sanitizeString(data.objective || 'Complete your quest objective on Celo.'),
-      lore: this.sanitizeString(data.lore || 'The Forge awaits your completion.'),
-      validationRules: Array.isArray(data.validationRules)
-        ? data.validationRules.filter((r: any): r is string => typeof r === 'string').slice(0, 5)
+      title: this.sanitizeString(typeof candidate.title === 'string' ? candidate.title : 'Forge Quest'),
+      description: this.sanitizeString(
+        typeof candidate.description === 'string' ? candidate.description : 'A blockchain mission awaits.'
+      ),
+      difficulty: Math.max(1, Math.min(5, Math.round(typeof candidate.difficulty === 'number' ? candidate.difficulty : 3))),
+      type: this.sanitizeString(typeof candidate.type === 'string' ? candidate.type : 'Blockchain Quest', 50),
+      objective: this.sanitizeString(
+        typeof candidate.objective === 'string' ? candidate.objective : 'Complete your quest objective on Celo.'
+      ),
+      lore: this.sanitizeString(
+        typeof candidate.lore === 'string' ? candidate.lore : 'The Forge awaits your completion.'
+      ),
+      validationRules: Array.isArray(candidate.validationRules)
+        ? candidate.validationRules.filter((rule): rule is string => typeof rule === 'string').slice(0, 5)
         : []
     };
 
@@ -287,21 +300,23 @@ class AISafetyValidator {
     return str
       .trim()
       .slice(0, maxLength)
-      .replace(/[<>\"'`]/g, '') // Remove HTML/injection chars
+      .replace(/[<>"'`]/g, '') // Remove HTML/injection chars
       .replace(/\n{3,}/g, '\n\n'); // Limit line breaks
   }
 
   /**
    * Comprehensive validation of AI quest output
    */
-  comprehensiveValidation(aiOutput: any, wallet: string): {
+  comprehensiveValidation(aiOutput: unknown, wallet: string): {
     valid: boolean;
     errors: string[];
     warnings: string[];
     sanitized: AIQuestOutput;
   } {
+    const candidate: AIQuestCandidate = isObjectRecord(aiOutput) ? aiOutput : {};
     const errors: string[] = [];
     const warnings: string[] = [];
+    void wallet;
 
     // 1. Schema validation
     const schemaCheck = this.validateQuestSchema(aiOutput);
@@ -310,42 +325,48 @@ class AISafetyValidator {
     }
 
     // 2. Difficulty validation
-    const diffCheck = this.validateDifficulty(aiOutput.difficulty);
+    const diffCheck = this.validateDifficulty(
+      typeof candidate.difficulty === 'number' ? candidate.difficulty : Number.NaN
+    );
     if (!diffCheck.valid) {
       errors.push(diffCheck.error || 'Invalid difficulty');
     }
 
     // 3. Objective validation
-    if (aiOutput.objective) {
-      const objCheck = this.validateObjective(aiOutput.objective);
+    if (typeof candidate.objective === 'string' && candidate.objective) {
+      const objCheck = this.validateObjective(candidate.objective);
       if (!objCheck.valid) {
         errors.push(objCheck.error || 'Invalid objective');
       }
     }
 
-    const typeCheck = this.validateQuestType(aiOutput.type);
+    const typeCheck = this.validateQuestType(typeof candidate.type === 'string' ? candidate.type : undefined);
     if (!typeCheck.valid) {
       warnings.push(typeCheck.error || 'Quest type is not allowed');
     }
 
     // 4. Hallucination detection
     const hallCheck = this.detectHallucinations(
-      `${aiOutput.title} ${aiOutput.description} ${aiOutput.objective} ${aiOutput.lore}`
+      `${typeof candidate.title === 'string' ? candidate.title : ''} ${
+        typeof candidate.description === 'string' ? candidate.description : ''
+      } ${typeof candidate.objective === 'string' ? candidate.objective : ''} ${
+        typeof candidate.lore === 'string' ? candidate.lore : ''
+      }`
     );
     if (hallCheck.isHallucinated) {
       warnings.push(hallCheck.reason || 'Possible hallucination detected');
     }
 
     // 5. Validation rules check
-    if (aiOutput.validationRules) {
-      const rulesCheck = this.validateValidationRules(aiOutput.validationRules);
+    if (Array.isArray(candidate.validationRules)) {
+      const rulesCheck = this.validateValidationRules(candidate.validationRules);
       if (!rulesCheck.valid) {
         warnings.push(...rulesCheck.errors);
       }
     }
 
     // Sanitize output regardless of validation status
-    const sanitized = this.sanitizeQuestOutput(aiOutput, wallet);
+    const sanitized = this.sanitizeQuestOutput(aiOutput);
 
     return {
       valid: errors.length === 0,

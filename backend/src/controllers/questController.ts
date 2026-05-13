@@ -1,107 +1,68 @@
 import { Request, Response } from 'express';
-import { generateNPCDialogue, generateQuestPrompt } from '../services/openai';
+import { Prisma, type QuestStatus } from '@prisma/client';
+import { aiQuestGenerationEngine } from '../services/aiQuestGenerationEngine';
 import { normalizeWallet, prisma, upsertUser } from '../services/chain';
 import {
-  calculateStreakMultiplier,
   checkDailyLimits,
   getDailyActivity,
-  getUserAntiAbuseState,
   incrementDailyActivity,
-  QUEST_CONFIG,
-  validateRewardBounds
+  QUEST_CONFIG
 } from '../services/antiAbuse';
 import { buildQuestTemplate } from '../services/questTemplates';
 import { logger } from '../services/logger';
+import { npcRelationshipEngine } from '../services/npcRelationshipEngine';
+import { questNarrativeEngine } from '../services/questNarrativeEngine';
+import { QuestValidationError } from '../services/questValidationEngine';
+import { realtimeEventPublisher } from '../services/realtimeEventPublisher';
 import { queueProofVerification } from '../services/verification';
+import { worldStateCoordinator } from '../services/worldStateCoordinator';
 
-const ACTIVE_QUEST_STATUSES = ['ACTIVE', 'SUBMITTED'] as const;
+const QUEST_FEED_STATUSES: QuestStatus[] = ['AVAILABLE', 'ACTIVE', 'SUBMITTED', 'VERIFIED', 'CANCELLED', 'FAILED'];
 
-type QuestMetadataPayload = {
-  version: 'questforge.quest.v2';
-  title: string;
-  description: string;
-  difficulty: number;
-  questType: string;
-  objective: string;
-  lore: string;
-  validationRules: string[];
-  chain: string;
-  verification: {
-    type: 'native_transfer' | 'contract_call' | 'token_approval';
-    questType: string;
-    minValueCelo: number;
-    allowContractTarget: boolean;
-    requireContractCall: boolean;
-    requireTokenApproval: boolean;
-  };
+type TreasuryPayoutRow = {
+  questId: string;
+  chainQuestId: bigint | string;
+  playerWallet: string | null;
+  rewardAmount: number;
+  stakeAmount: number;
+  totalAmount: number;
+  status: string;
+  reservationTx: string | null;
+  releaseTx: string | null;
+  payoutTx: string | null;
+  refundTx: string | null;
+  rewardReservedAt: Date | null;
+  rewardReleasedAt: Date | null;
+  rewardPaidAt: Date | null;
+  rewardRefundedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
-function getMaxDifficultyForLevel(level: number) {
-  if (level >= QUEST_CONFIG.MIN_LEVEL_FOR_DIFFICULTY[5]) return 5;
-  if (level >= QUEST_CONFIG.MIN_LEVEL_FOR_DIFFICULTY[4]) return 4;
-  if (level >= QUEST_CONFIG.MIN_LEVEL_FOR_DIFFICULTY[3]) return 3;
-  if (level >= QUEST_CONFIG.MIN_LEVEL_FOR_DIFFICULTY[2]) return 2;
-  return 1;
+function serializeMaybeBigInt(value: bigint | string | null | undefined) {
+  if (typeof value === 'bigint') {
+    return value.toString();
+  }
+
+  return value ?? null;
 }
 
-function selectDifficultyForUser(level: number) {
-  return Math.min(3, getMaxDifficultyForLevel(level));
-}
-
-function computeQuestEconomy(difficulty: number, streakMultiplier = 1) {
-  let stakeAmount = 0.01 + (difficulty - 1) * 0.005;
-  let rewardAmount = 0.03 + difficulty * 0.015;
-  const xpReward = 150 * difficulty;
-
-  rewardAmount *= streakMultiplier;
-
-  stakeAmount = Math.max(
-    QUEST_CONFIG.MIN_SINGLE_STAKE_CELO,
-    Math.min(QUEST_CONFIG.MAX_SINGLE_STAKE_CELO, Number(stakeAmount.toFixed(4)))
-  );
-  rewardAmount = Math.max(0.01, Math.min(QUEST_CONFIG.MAX_SINGLE_REWARD_CELO, Number(rewardAmount.toFixed(4))));
-
-  return {
-    stakeAmount,
-    rewardAmount,
-    xpReward: Math.round(xpReward)
-  };
-}
-
-function serializeQuest<T extends { chainQuestId?: bigint | null }>(quest: T) {
+function serializeQuest<
+  T extends {
+    chainQuestId?: bigint | null;
+    treasuryPayout?: { chainQuestId: bigint | string } | null;
+  }
+>(quest: T) {
   return {
     ...quest,
-    chainQuestId: typeof quest.chainQuestId === 'bigint' ? quest.chainQuestId.toString() : quest.chainQuestId ?? null
+    chainQuestId: serializeMaybeBigInt(quest.chainQuestId),
+    treasuryPayout: quest.treasuryPayout
+      ? {
+          ...quest.treasuryPayout,
+          chainQuestId: serializeMaybeBigInt(quest.treasuryPayout.chainQuestId)
+        }
+      : null
   };
-}
-
-function buildQuestMetadataPayload(data: {
-  title: string;
-  description: string;
-  difficulty: number;
-  questType: string;
-  objective: string;
-  lore: string;
-  validationRules: string[];
-  chain: string;
-  verification: QuestMetadataPayload['verification'];
-}): QuestMetadataPayload {
-  return {
-    version: 'questforge.quest.v2',
-    title: data.title,
-    description: data.description,
-    difficulty: data.difficulty,
-    questType: data.questType,
-    objective: data.objective,
-    lore: data.lore,
-    validationRules: data.validationRules,
-    chain: data.chain,
-    verification: data.verification
-  };
-}
-
-function encodeMetadataUri(metadata: QuestMetadataPayload) {
-  return `data:application/json;base64,${Buffer.from(JSON.stringify(metadata), 'utf8').toString('base64')}`;
 }
 
 export async function generateQuest(req: Request, res: Response) {
@@ -123,68 +84,58 @@ export async function generateQuest(req: Request, res: Response) {
       });
     }
 
-    const antiAbuseState = await getUserAntiAbuseState(user.id);
-    const difficulty = selectDifficultyForUser(user.level);
-    const streakMultiplier = calculateStreakMultiplier(user.streak, antiAbuseState?.streakDecayFactor ?? 1);
-    const economy = computeQuestEconomy(difficulty, streakMultiplier);
-    const rewardBounds = validateRewardBounds(economy.stakeAmount, economy.rewardAmount);
-
-    if (!rewardBounds.valid) {
-      return res.status(400).json({
-        error: 'Quest economy validation failed',
-        details: rewardBounds.errors
-      });
-    }
-
-    const aiQuest = await generateQuestPrompt(wallet, chain, difficulty);
-    const template = aiQuest.template;
+    const generated = await aiQuestGenerationEngine.generateQuest({ wallet, chain });
 
     await incrementDailyActivity(user.id, { questsAttempted: 1 });
     const activitySnapshot = await getDailyActivity(user.id);
 
-    const metadata = buildQuestMetadataPayload({
-      title: aiQuest.data.title || `Forge Mission for ${wallet.slice(0, 8)}`,
-      description: aiQuest.data.description || 'A deterministic onchain mission awaits.',
-      difficulty,
-      questType: template.questType,
-      objective: template.objective,
-      lore: aiQuest.data.lore || 'The Forge Master demands proof that survives onchain scrutiny.',
-      validationRules: template.validationRules,
-      chain,
-      verification: {
-        type: template.type,
-        questType: template.questType,
-        minValueCelo: template.minValueCelo,
-        allowContractTarget: template.allowContractTarget,
-        requireContractCall: template.requireContractCall,
-        requireTokenApproval: template.requireTokenApproval
-      }
-    });
-
     res.json({
       quest: {
-        title: metadata.title,
-        description: metadata.description,
-        difficulty,
-        questType: metadata.questType,
-        objective: metadata.objective,
-        lore: metadata.lore,
-        metadata,
-        metadataUri: encodeMetadataUri(metadata),
-        stakeAmount: economy.stakeAmount,
-        rewardAmount: economy.rewardAmount,
-        xpReward: economy.xpReward,
-        durationSeconds: 60 * 60 * 6,
-        status: 'AVAILABLE',
-        streakMultiplier: Number(streakMultiplier.toFixed(2)),
+        id: generated.quest.id,
+        orchestrationId: generated.quest.orchestrationId,
+        title: generated.quest.title,
+        description: generated.quest.description,
+        difficulty: generated.quest.difficulty,
+        questType: generated.quest.questType,
+        objective: generated.quest.objective,
+        lore: generated.quest.lore,
+        metadata: generated.quest.metadata,
+        metadataUri: generated.quest.metadataUri,
+        stakeAmount: generated.quest.stakeAmount,
+        rewardAmount: generated.quest.rewardAmount,
+        xpReward: generated.quest.xpReward,
+        durationSeconds: generated.quest.durationSeconds,
+        estimatedDurationSeconds: generated.quest.estimatedDurationSeconds,
+        status: generated.quest.status,
+        riskLevel: generated.quest.riskLevel,
+        streakMultiplier: generated.streakMultiplier,
+        difficultyReasoning: generated.difficultyProfile.reasoning,
+        rewardReasoning: generated.rewardProfile.reasoning,
+        adaptiveProfile: (generated.quest.metadata as { adaptive?: unknown }).adaptive ?? null,
+        economyProfile: (generated.quest.metadata as { economy?: unknown }).economy ?? null,
+        orchestrationProfile: (generated.quest.metadata as { orchestration?: unknown }).orchestration ?? null,
+        transactionCount: generated.quest.transactionCount,
+        requiredTxTypes: generated.quest.requiredTxTypes,
+        worldStateVersion: generated.quest.worldStateVersion,
+        npc: generated.quest.npc,
+        faction: generated.quest.faction,
+        expiresAt: generated.quest.expiresAt.toISOString(),
         remainingDailyCapacity: {
           quests: Math.max(0, QUEST_CONFIG.MAX_QUESTS_PER_DAY - (activitySnapshot?.questsAttempted || 0)),
           xp: Math.max(0, QUEST_CONFIG.MAX_XP_PER_DAY - (activitySnapshot?.xpEarned || 0)),
           rewards: Math.max(0, QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO - (activitySnapshot?.rewardsEarned || 0))
-        }
+        },
+        orchestrationDiagnostics: generated.orchestrationDiagnostics
       }
     });
   } catch (error) {
+    if (error instanceof QuestValidationError) {
+      return res.status(400).json({
+        error: error.message,
+        details: error.details
+      });
+    }
+
     logger.error('Quest generation failed', error, {
       wallet
     });
@@ -209,21 +160,136 @@ export async function getDailyMissions(_req: Request, res: Response) {
   res.json({ missions });
 }
 
+export async function getQuestOrchestrationDiagnostics(_req: Request, res: Response) {
+  try {
+    const worldState = await worldStateCoordinator.getCurrentWorldState('diagnostics');
+    res.json({
+      orchestration: aiQuestGenerationEngine.getDiagnostics(),
+      worldState: {
+        version: worldState.version,
+        season: worldState.season,
+        activeEvents: worldState.activeEvents.length,
+        factions: worldState.factions,
+        diagnostics: worldState.diagnostics
+      }
+    });
+  } catch (error) {
+    logger.error('Failed to fetch orchestration diagnostics', error);
+    res.status(500).json({ error: 'Unable to load orchestration diagnostics' });
+  }
+}
+
 export async function getNPCDialogue(req: Request, res: Response) {
   const npcType = req.query.type?.toString() || 'Guild Master';
   const playerName = req.query.player?.toString() || 'Traveler';
   const wallet = req.query.wallet?.toString();
 
   try {
-    const dialogue = await generateNPCDialogue(npcType, playerName);
+    const worldState = await worldStateCoordinator.getCurrentWorldState('npc_dialogue');
+    let dialogue = `${npcType} studies you in silence, ${playerName}.`;
+
     if (wallet) {
       const user = await upsertUser(normalizeWallet(wallet));
-      await prisma.nPCConversation.create({
+      const npc =
+        (await prisma.nPC.findFirst({
+          where: { name: npcType },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            personality: true
+          }
+        })) ??
+        (await prisma.nPC.create({
+          data: {
+            name: npcType,
+            type: npcType.toLowerCase().replace(/\s+/g, '_'),
+            personality: {
+              archetype: npcType,
+              role: 'lore_keeper',
+              traits: worldState.npcTones
+            },
+            lastInteractionAt: new Date()
+          },
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            personality: true
+          }
+        }));
+      const memory = await prisma.nPCMemory.findFirst({
+        where: {
+          npcId: npc.id,
+          wallet: normalizeWallet(wallet)
+        },
+        orderBy: { updatedAt: 'desc' }
+      });
+
+      dialogue = await questNarrativeEngine.generateNPCDialogue({
+        playerName,
+        npc: {
+          npcId: npc.id,
+          name: npc.name,
+          type: npc.type,
+          role:
+            typeof npc.personality === 'object' && npc.personality && !Array.isArray(npc.personality)
+              ? String((npc.personality as Record<string, unknown>).role ?? 'lore_keeper')
+              : 'lore_keeper',
+          relationshipScore: Number((memory?.importanceScore ?? 0.5).toFixed(3)),
+          personalitySummary:
+            typeof npc.personality === 'object' && npc.personality && !Array.isArray(npc.personality)
+              ? JSON.stringify(npc.personality).slice(0, 160)
+              : 'measured and observant',
+          openingDialogue: '',
+          memoryReferences: memory ? [memory.memory] : [`guild=${user.clanId ?? 'none'}`, `streak=${user.streak}`]
+        },
+        worldState,
+        relationshipSummary: memory ? [memory.memory] : [`successes=${user.totalQuestsCompleted}`, `streak=${user.streak}`]
+      });
+
+      const conversation = await prisma.nPCConversation.create({
         data: {
           userId: user.id,
-          npcType,
+          npcId: npc.id,
           messages: [{ role: 'npc', content: dialogue }, { role: 'player', content: `Hello ${playerName}` }]
         }
+      });
+
+      await prisma.nPC.update({
+        where: { id: npc.id },
+        data: { lastInteractionAt: new Date() }
+      });
+
+      await npcRelationshipEngine.updateRelationship({
+        userId: user.id,
+        wallet: normalizeWallet(wallet),
+        npcId: npc.id,
+        eventType: 'npc_dialogue',
+        summary: `${npc.name} referenced the player's remembered path during dialogue.`,
+        trustDelta: 0.03,
+        metadata: {
+          dialogue,
+          npcType
+        }
+      });
+
+      await realtimeEventPublisher.publish({
+        replayKey: `npc-dialogue:${conversation.id}`,
+        eventName: 'npc:interaction-updated',
+        sourceType: 'npc_dialogue',
+        sourceId: conversation.id,
+        payload: {
+          wallet: normalizeWallet(wallet),
+          npcId: npc.id,
+          npcName: npc.name,
+          dialogue,
+          timestamp: new Date().toISOString()
+        },
+        scopes: [
+          { type: 'user', key: normalizeWallet(wallet) },
+          { type: 'global', key: 'global' }
+        ]
       });
     }
 
@@ -252,16 +318,61 @@ export async function getActiveQuests(req: Request, res: Response) {
     const quests = await prisma.quest.findMany({
       where: {
         OR: [
-          { creator: normalizeWallet(wallet), status: { in: [...ACTIVE_QUEST_STATUSES] as Array<'ACTIVE' | 'SUBMITTED'> } },
-          { playerId: user.id, status: { in: [...ACTIVE_QUEST_STATUSES] as Array<'ACTIVE' | 'SUBMITTED'> } }
+          {
+            creator: normalizeWallet(wallet),
+            status: {
+              in: QUEST_FEED_STATUSES
+            }
+          },
+          {
+            playerId: user.id,
+            status: {
+              in: QUEST_FEED_STATUSES
+            }
+          }
         ]
       },
       orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
       take: 50
     });
 
+    const questIds = quests.map((quest) => quest.id);
+    const payouts = questIds.length
+      ? await prisma.$queryRaw<TreasuryPayoutRow[]>(
+          Prisma.sql`
+            SELECT
+              "questId",
+              "chainQuestId",
+              "playerWallet",
+              "rewardAmount",
+              "stakeAmount",
+              "totalAmount",
+              status::text AS status,
+              "reservationTx",
+              "releaseTx",
+              "payoutTx",
+              "refundTx",
+              "rewardReservedAt",
+              "rewardReleasedAt",
+              "rewardPaidAt",
+              "rewardRefundedAt",
+              "createdAt",
+              "updatedAt"
+            FROM "TreasuryPayout"
+            WHERE "questId" IN (${Prisma.join(questIds)})
+          `
+        )
+      : [];
+
+    const payoutsByQuestId = new Map(payouts.map((payout) => [payout.questId, payout]));
+
     res.json({
-      quests: quests.map(serializeQuest),
+      quests: quests.map((quest) =>
+        serializeQuest({
+          ...quest,
+          treasuryPayout: payoutsByQuestId.get(quest.id) || null
+        })
+      ),
       total: quests.length
     });
   } catch (error) {

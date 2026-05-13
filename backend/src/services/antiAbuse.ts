@@ -325,7 +325,7 @@ export function checkProgressionGate(playerLevel: number, difficulty: number): {
  */
 export async function checkProofReuse(userId: string, proofUri: string, questId: string): Promise<{
   isReuse: boolean;
-  previousSubmission: any | null;
+  previousSubmission: ProofSubmissionRow | null;
 }> {
   const proofHash = hashProofUri(proofUri);
   
