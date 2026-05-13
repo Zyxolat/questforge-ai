@@ -1,13 +1,13 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
 import { time } from '@nomicfoundation/hardhat-network-helpers';
-import type { Contract } from 'ethers';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import { Reputation__factory, type Reputation } from '../typechain-types';
 
 const { ethers } = hre;
 
 describe('Reputation', function () {
-  let reputation: Contract;
+  let reputation: Reputation;
   let owner: SignerWithAddress;
   let rewarder: SignerWithAddress;
   let player: SignerWithAddress;
@@ -16,7 +16,7 @@ describe('Reputation', function () {
   beforeEach(async function () {
     [owner, rewarder, player, other] = await ethers.getSigners();
 
-    const ReputationFactory = await ethers.getContractFactory('Reputation', owner);
+    const ReputationFactory = new Reputation__factory(owner);
     reputation = await ReputationFactory.deploy();
     await reputation.waitForDeployment();
 

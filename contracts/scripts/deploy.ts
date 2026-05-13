@@ -2,12 +2,41 @@ import hre, { ethers } from 'hardhat';
 import * as fs from 'fs';
 import * as path from 'path';
 
+const CELO_MAINNET_CHAIN_ID = 42220;
+const CELO_EXPLORER_BASE_URL = 'https://celoscan.io';
+
+function optionalEnv(name: string) {
+  const value = process.env[name]?.trim();
+  return value || undefined;
+}
+
+function parseOptionalEther(name: string) {
+  const raw = optionalEnv(name);
+  if (!raw) {
+    return null;
+  }
+
+  return ethers.parseEther(raw);
+}
+
 async function main() {
   const [deployer] = await ethers.getSigners();
   const networkName = hre.network.name;
+  const network = await ethers.provider.getNetwork();
+  const chainId = Number(network.chainId);
   console.log('Deploying contracts with account:', deployer.address);
 
+  if (!['hardhat', 'localhost', 'celo'].includes(networkName)) {
+    throw new Error(`Unsupported deployment network "${networkName}". QuestForge AI supports only local networks and Celo Mainnet.`);
+  }
+
+  if (networkName === 'celo' && chainId !== CELO_MAINNET_CHAIN_ID) {
+    throw new Error(`Connected chainId ${chainId} does not match Celo Mainnet (${CELO_MAINNET_CHAIN_ID}).`);
+  }
+
   let rewardTokenAddress = process.env.REWARD_TOKEN_ADDRESS;
+  const verifierAddress = optionalEnv('VERIFIER_ADDRESS');
+  const initialNativeRewardPool = parseOptionalEther('INITIAL_NATIVE_REWARD_POOL_CELO');
 
   if (!rewardTokenAddress) {
     if (networkName === 'hardhat' || networkName === 'localhost') {
@@ -71,6 +100,23 @@ async function main() {
   await grantRewardRoleTx.wait();
   console.log('✓ Granted Reputation REWARD_ROLE to ForgeQuestManager');
 
+  const questManagerRole = await treasury.QUEST_MANAGER_ROLE();
+  const grantQuestManagerRoleTx = await treasury.grantRole(questManagerRole, forgeQuestManagerAddress);
+  await grantQuestManagerRoleTx.wait();
+  console.log('✓ Granted Treasury QUEST_MANAGER_ROLE to ForgeQuestManager');
+
+  if (verifierAddress && verifierAddress.toLowerCase() !== deployer.address.toLowerCase()) {
+    const grantVerifierRoleTx = await forgeQuestManager.grantVerifier(verifierAddress);
+    await grantVerifierRoleTx.wait();
+    console.log('✓ Granted ForgeQuestManager VERIFIER_ROLE to:', verifierAddress);
+  }
+
+  if (initialNativeRewardPool && initialNativeRewardPool > 0n) {
+    const fundRewardPoolTx = await treasury.fundNativeRewardPool({ value: initialNativeRewardPool });
+    await fundRewardPoolTx.wait();
+    console.log('✓ Funded Treasury native reward pool with:', ethers.formatEther(initialNativeRewardPool), 'CELO');
+  }
+
   // 7. Export deployment addresses
   const deploymentAddresses = {
     REWARD_NFT_ADDRESS: rewardNFTAddress,
@@ -78,14 +124,26 @@ async function main() {
     REPUTATION_ADDRESS: reputationAddress,
     FORGE_QUEST_MANAGER_ADDRESS: forgeQuestManagerAddress,
     REWARD_TOKEN_ADDRESS: rewardTokenAddress,
+    VERIFIER_ADDRESS: verifierAddress || deployer.address,
     DEPLOYER_ADDRESS: deployer.address,
     NETWORK: networkName,
+    CHAIN_ID: chainId.toString(),
     DEPLOYMENT_BLOCK: (await ethers.provider.getBlockNumber()).toString(),
     DEPLOYMENT_TIME: new Date().toISOString(),
+    TREASURY_NATIVE_BALANCE: ethers.formatEther(await ethers.provider.getBalance(treasuryAddress)),
   };
 
   console.log('\n--- Deployment Addresses ---');
   console.log(JSON.stringify(deploymentAddresses, null, 2));
+  console.log('\n--- Explorer Links ---');
+  console.log('RewardNFT:', `${CELO_EXPLORER_BASE_URL}/address/${rewardNFTAddress}`);
+  console.log('Treasury:', `${CELO_EXPLORER_BASE_URL}/address/${treasuryAddress}`);
+  console.log('Reputation:', `${CELO_EXPLORER_BASE_URL}/address/${reputationAddress}`);
+  console.log('ForgeQuestManager:', `${CELO_EXPLORER_BASE_URL}/address/${forgeQuestManagerAddress}`);
+
+  if (!initialNativeRewardPool || initialNativeRewardPool === 0n) {
+    console.log('\n⚠️ Fund the Treasury native reward pool before creating quests.');
+  }
 
   // 8. Save deployment addresses to file
   const deploymentDir = path.join(__dirname, '../deployments');

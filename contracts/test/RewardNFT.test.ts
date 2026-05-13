@@ -1,12 +1,12 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
-import type { Contract } from 'ethers';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import { RewardNFT__factory, type RewardNFT } from '../typechain-types';
 
 const { ethers } = hre;
 
 describe('RewardNFT', function () {
-  let rewardNFT: Contract;
+  let rewardNFT: RewardNFT;
   let owner: SignerWithAddress;
   let minter: SignerWithAddress;
   let player: SignerWithAddress;
@@ -15,7 +15,7 @@ describe('RewardNFT', function () {
   beforeEach(async function () {
     [owner, minter, player, other] = await ethers.getSigners();
 
-    const RewardNFTFactory = await ethers.getContractFactory('RewardNFT', owner);
+    const RewardNFTFactory = new RewardNFT__factory(owner);
     rewardNFT = await RewardNFTFactory.deploy(owner.address);
     await rewardNFT.waitForDeployment();
 

@@ -1,260 +1,239 @@
 import { expect } from 'chai';
 import hre from 'hardhat';
-import type { Contract } from 'ethers';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
+import {
+  MockERC20__factory,
+  Treasury__factory,
+  type MockERC20,
+  type Treasury,
+} from '../typechain-types';
 
 const { ethers } = hre;
 
 describe('Treasury', function () {
-  let treasury: Contract;
-  let rewardToken: Contract;
+  let treasury: Treasury;
+  let rewardToken: MockERC20;
   let owner: SignerWithAddress;
+  let questManager: SignerWithAddress;
+  let guardian: SignerWithAddress;
   let player: SignerWithAddress;
   let other: SignerWithAddress;
 
-  beforeEach(async function () {
-    [owner, player, other] = await ethers.getSigners();
+  const reward = ethers.parseEther('0.03');
+  const stake = ethers.parseEther('0.01');
 
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20', owner);
+  beforeEach(async function () {
+    [owner, questManager, guardian, player, other] = await ethers.getSigners();
+
+    const MockERC20Factory = new MockERC20__factory(owner);
     rewardToken = await MockERC20Factory.deploy();
     await rewardToken.waitForDeployment();
     await rewardToken.mint(owner.address, ethers.parseEther('1000'));
 
-    const TreasuryFactory = await ethers.getContractFactory('Treasury', owner);
+    const TreasuryFactory = new Treasury__factory(owner);
     treasury = await TreasuryFactory.deploy(await rewardToken.getAddress());
     await treasury.waitForDeployment();
+
+    const questManagerRole = await treasury.QUEST_MANAGER_ROLE();
+    const guardianRole = await treasury.GUARDIAN_ROLE();
+
+    await treasury.grantRole(questManagerRole, questManager.address);
+    await treasury.grantRole(guardianRole, guardian.address);
+    await treasury.fundNativeRewardPool({ value: ethers.parseEther('1') });
   });
 
-  describe('Deployment', function () {
-    it('should set reward token address', async function () {
+  describe('deployment', function () {
+    it('stores the reward token and starts solvent', async function () {
       expect(await treasury.rewardToken()).to.equal(await rewardToken.getAddress());
+      expect(await treasury.isSolvent()).to.equal(true);
+      expect(await ethers.provider.getBalance(await treasury.getAddress())).to.equal(ethers.parseEther('1'));
     });
 
-    it('should revert with zero token address', async function () {
+    it('rejects a zero token address', async function () {
       const TreasuryFactory = await ethers.getContractFactory('Treasury', owner);
-      await expect(
-        TreasuryFactory.deploy(ethers.ZeroAddress)
-      ).to.be.revertedWith('Invalid token address');
+      await expect(TreasuryFactory.deploy(ethers.ZeroAddress)).to.be.revertedWith('Invalid token address');
     });
   });
 
-  describe('Staking', function () {
-    it('should record stake', async function () {
-      await treasury.stake(player.address, ethers.parseEther('100'), { value: 0 });
+  describe('reward reservation accounting', function () {
+    it('reserves rewards and updates native liquidity', async function () {
+      await expect(treasury.connect(questManager).reserveReward(1, owner.address, reward))
+        .to.emit(treasury, 'RewardReserved')
+        .withArgs(1, owner.address, reward, reward);
 
-      expect(await treasury.stakes(player.address)).to.equal(ethers.parseEther('100'));
+      const questFund = await treasury.questFunds(1);
+      expect(questFund.reservedReward).to.equal(reward);
+      expect(questFund.lockedStake).to.equal(0);
+      expect(questFund.player).to.equal(ethers.ZeroAddress);
+      expect(questFund.state).to.equal(1);
+      expect(await treasury.totalReservedRewards()).to.equal(reward);
+      expect(await treasury.availableRewardLiquidity()).to.equal(ethers.parseEther('0.97'));
     });
 
-    it('should accumulate stakes', async function () {
-      await treasury.stake(player.address, ethers.parseEther('100'), { value: 0 });
-      await treasury.stake(player.address, ethers.parseEther('50'), { value: 0 });
-
-      expect(await treasury.stakes(player.address)).to.equal(ethers.parseEther('150'));
-    });
-
-    it('should emit Staked event', async function () {
-      await expect(
-        treasury.stake(player.address, ethers.parseEther('100'), { value: 0 })
-      ).to.emit(treasury, 'Staked');
-    });
-
-    it('should revert with zero player address', async function () {
-      await expect(
-        treasury.stake(ethers.ZeroAddress, ethers.parseEther('100'), { value: 0 })
-      ).to.be.revertedWith('Invalid player');
-    });
-
-    it('should revert with zero amount', async function () {
-      await expect(
-        treasury.stake(player.address, 0, { value: 0 })
-      ).to.be.revertedWith('Invalid stake amount');
-    });
-
-    it('should revert when paused', async function () {
-      await treasury.pause();
+    it('rejects reservations beyond available treasury liquidity', async function () {
+      await treasury.setPayoutCaps(ethers.parseEther('0.8'), ethers.parseEther('10'), ethers.parseEther('10.8'));
+      await treasury.connect(questManager).reserveReward(1, owner.address, ethers.parseEther('0.8'));
 
       await expect(
-        treasury.stake(player.address, ethers.parseEther('100'), { value: 0 })
-      ).to.be.reverted;
+        treasury.connect(questManager).reserveReward(2, owner.address, ethers.parseEther('0.3'))
+      ).to.be.revertedWith('Insufficient treasury liquidity');
+    });
+
+    it('prevents duplicate reward reservations', async function () {
+      await treasury.connect(questManager).reserveReward(1, owner.address, reward);
+
+      await expect(
+        treasury.connect(questManager).reserveReward(1, owner.address, reward)
+      ).to.be.revertedWith('Reward already reserved');
     });
   });
 
-  describe('Payout', function () {
+  describe('stake locking and settlement lifecycle', function () {
     beforeEach(async function () {
-      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('300'));
-      await treasury.fundPool(ethers.parseEther('300'));
+      await treasury.connect(questManager).reserveReward(1, owner.address, reward);
     });
 
-    it('should pay reward tokens to a player', async function () {
-      await treasury.payout(player.address, ethers.parseEther('100'));
-
-      expect(await rewardToken.balanceOf(player.address)).to.equal(ethers.parseEther('100'));
-      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('200'));
-    });
-
-    it('should emit Payout event', async function () {
+    it('locks the player stake under the reserved quest record', async function () {
       await expect(
-        treasury.payout(player.address, ethers.parseEther('100'))
-      ).to.emit(treasury, 'Payout');
+        treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake })
+      ).to.emit(treasury, 'StakeLocked');
+
+      const questFund = await treasury.questFunds(1);
+      expect(questFund.lockedStake).to.equal(stake);
+      expect(questFund.player).to.equal(player.address);
+      expect(questFund.state).to.equal(2);
+      expect(await treasury.totalLockedStakes()).to.equal(stake);
     });
 
-    it('should revert with insufficient balance', async function () {
+    it('requires the exact native stake amount to be locked', async function () {
       await expect(
-        treasury.payout(player.address, ethers.parseEther('500'))
-      ).to.be.revertedWith('Insufficient reward pool');
+        treasury.connect(questManager).lockStake(1, player.address, stake, { value: reward })
+      ).to.be.revertedWith('Incorrect stake amount');
     });
 
-    it('should revert if not owner', async function () {
-      await expect(
-        treasury.connect(player).payout(player.address, ethers.parseEther('100'))
-      ).to.be.reverted;
-    });
+    it('settles a payout through treasury and clears reserved accounting', async function () {
+      await treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake });
 
-    it('should revert with zero amount', async function () {
-      await expect(
-        treasury.payout(player.address, 0)
-      ).to.be.revertedWith('Invalid payout amount');
-    });
-
-    it('should revert with zero recipient', async function () {
-      await expect(
-        treasury.payout(ethers.ZeroAddress, ethers.parseEther('100'))
-      ).to.be.revertedWith('Invalid player');
-    });
-
-    it('should revert when paused', async function () {
-      await treasury.pause();
+      const treasuryBalanceBefore = await ethers.provider.getBalance(await treasury.getAddress());
+      const playerBalanceBefore = await ethers.provider.getBalance(player.address);
 
       await expect(
-        treasury.payout(player.address, ethers.parseEther('100'))
-      ).to.be.reverted;
+        treasury.connect(questManager).settleQuestPayout(1, player.address, reward, stake)
+      )
+        .to.emit(treasury, 'RewardReleased')
+        .withArgs(1, player.address, reward, stake, reward + stake);
+
+      const treasuryBalanceAfter = await ethers.provider.getBalance(await treasury.getAddress());
+      const playerBalanceAfter = await ethers.provider.getBalance(player.address);
+      const questFund = await treasury.questFunds(1);
+
+      expect(playerBalanceAfter - playerBalanceBefore).to.equal(reward + stake);
+      expect(treasuryBalanceBefore - treasuryBalanceAfter).to.equal(reward + stake);
+      expect(await treasury.totalReservedRewards()).to.equal(0);
+      expect(await treasury.totalLockedStakes()).to.equal(0);
+      expect(questFund.state).to.equal(3);
+      expect(await treasury.isSolvent()).to.equal(true);
+    });
+
+    it('prevents double payouts for the same quest', async function () {
+      await treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake });
+      await treasury.connect(questManager).settleQuestPayout(1, player.address, reward, stake);
+
+      await expect(
+        treasury.connect(questManager).settleQuestPayout(1, player.address, reward, stake)
+      ).to.be.revertedWith('Quest not payable');
+    });
+
+    it('refunds locked stake and reward reservation on failure or cancel', async function () {
+      await treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake });
+      const playerBalanceBefore = await ethers.provider.getBalance(player.address);
+
+      await expect(
+        treasury
+          .connect(questManager)
+          .refundQuest(1, player.address, reward, stake, ethers.keccak256(ethers.toUtf8Bytes('QUEST_FAILED')))
+      )
+        .to.emit(treasury, 'RewardRefunded')
+        .withArgs(
+          1,
+          player.address,
+          reward,
+          stake,
+          ethers.keccak256(ethers.toUtf8Bytes('QUEST_FAILED'))
+        );
+
+      const playerBalanceAfter = await ethers.provider.getBalance(player.address);
+      const questFund = await treasury.questFunds(1);
+
+      expect(playerBalanceAfter - playerBalanceBefore).to.equal(stake);
+      expect(await treasury.totalReservedRewards()).to.equal(0);
+      expect(await treasury.totalLockedStakes()).to.equal(0);
+      expect(questFund.state).to.equal(4);
     });
   });
 
-  describe('Fund Pool', function () {
-    it('should fund the treasury reward pool', async function () {
-      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('100'));
-      await treasury.fundPool(ethers.parseEther('100'));
-
-      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('100'));
-    });
-
-    it('should revert if not owner', async function () {
-      await rewardToken.connect(player).mint(player.address, ethers.parseEther('100'));
-      await rewardToken.connect(player).approve(await treasury.getAddress(), ethers.parseEther('100'));
+  describe('permissions and circuit breaker controls', function () {
+    it('rejects unauthorized payout operations', async function () {
+      await expect(treasury.connect(other).reserveReward(1, owner.address, reward)).to.be.reverted;
+      await treasury.connect(questManager).reserveReward(1, owner.address, reward);
 
       await expect(
-        treasury.connect(player).fundPool(ethers.parseEther('100'))
+        treasury.connect(other).lockStake(1, player.address, stake, { value: stake })
+      ).to.be.reverted;
+      await treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake });
+
+      await expect(
+        treasury.connect(other).settleQuestPayout(1, player.address, reward, stake)
       ).to.be.reverted;
     });
 
-    it('should revert with zero amount', async function () {
-      await expect(
-        treasury.fundPool(0)
-      ).to.be.revertedWith('Invalid fund amount');
-    });
-
-    it('should revert when paused', async function () {
-      await treasury.pause();
-      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('100'));
+    it('pauses new reserve/lock/settle actions through the guardian role', async function () {
+      await treasury.connect(questManager).reserveReward(1, owner.address, reward);
+      await treasury.connect(guardian).pause();
 
       await expect(
-        treasury.fundPool(ethers.parseEther('100'))
-      ).to.be.reverted;
-    });
-  });
-
-  describe('Emergency Withdraw', function () {
-    beforeEach(async function () {
-      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('300'));
-      await treasury.fundPool(ethers.parseEther('300'));
-    });
-
-    it('should allow owner to withdraw reward tokens', async function () {
-      await treasury.emergencyWithdraw(player.address, ethers.parseEther('100'));
-
-      expect(await rewardToken.balanceOf(player.address)).to.equal(ethers.parseEther('100'));
-      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('200'));
-    });
-
-    it('should emit Withdrawn event when successful', async function () {
+        treasury.connect(questManager).reserveReward(2, owner.address, reward)
+      ).to.be.revertedWith('Pausable: paused');
       await expect(
-        treasury.emergencyWithdraw(player.address, ethers.parseEther('100'))
-      ).to.emit(treasury, 'Withdrawn');
-    });
-
-    it('should revert if not owner', async function () {
+        treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake })
+      ).to.be.revertedWith('Pausable: paused');
       await expect(
-        treasury.connect(player).emergencyWithdraw(other.address, ethers.parseEther('100'))
-      ).to.be.reverted;
-    });
+        treasury.connect(questManager).settleQuestPayout(1, player.address, reward, stake)
+      ).to.be.revertedWith('Pausable: paused');
 
-    it('should revert with zero recipient', async function () {
-      await expect(
-        treasury.emergencyWithdraw(ethers.ZeroAddress, ethers.parseEther('100'))
-      ).to.be.revertedWith('Invalid recipient');
-    });
-
-    it('should revert with zero amount', async function () {
-      await expect(
-        treasury.emergencyWithdraw(player.address, 0)
-      ).to.be.revertedWith('Invalid withdrawal amount');
-    });
-
-    it('should revert with insufficient balance', async function () {
-      await expect(
-        treasury.emergencyWithdraw(player.address, ethers.parseEther('500'))
-      ).to.be.revertedWith('Insufficient balance');
-    });
-  });
-
-  describe('Pause Functionality', function () {
-    it('should allow owner to pause', async function () {
-      await treasury.pause();
-
-      await expect(
-        treasury.stake(player.address, ethers.parseEther('100'), { value: 0 })
-      ).to.be.reverted;
-    });
-
-    it('should allow owner to unpause', async function () {
-      await treasury.pause();
       await treasury.unpause();
-
       await expect(
-        treasury.stake(player.address, ethers.parseEther('100'), { value: 0 })
+        treasury.connect(questManager).lockStake(1, player.address, stake, { value: stake })
       ).to.not.be.reverted;
     });
 
-    it('should not allow non-owner to pause', async function () {
+    it('supports a circuit breaker and surplus-only native emergency withdrawals', async function () {
+      await treasury.connect(questManager).reserveReward(1, owner.address, reward);
+      await treasury.connect(guardian).tripCircuitBreaker('suspicious activity');
+
       await expect(
-        treasury.connect(player).pause()
-      ).to.be.reverted;
+        treasury.emergencyWithdrawNative(other.address, ethers.parseEther('0.98'))
+      ).to.be.revertedWith('Insufficient surplus balance');
+
+      const recipientBalanceBefore = await ethers.provider.getBalance(other.address);
+      await treasury.emergencyWithdrawNative(other.address, ethers.parseEther('0.5'));
+      const recipientBalanceAfter = await ethers.provider.getBalance(other.address);
+
+      expect(recipientBalanceAfter - recipientBalanceBefore).to.equal(ethers.parseEther('0.5'));
+      expect(await treasury.totalReservedRewards()).to.equal(reward);
+      expect(await treasury.isSolvent()).to.equal(true);
     });
 
-    it('should not allow non-owner to unpause', async function () {
+    it('uses SafeERC20 for reward-token funding and emergency withdrawal', async function () {
+      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('10'));
+      await treasury.fundRewardTokenPool(ethers.parseEther('10'));
+      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('10'));
+
       await treasury.pause();
+      await treasury.emergencyWithdrawRewardToken(other.address, ethers.parseEther('4'));
 
-      await expect(
-        treasury.connect(player).unpause()
-      ).to.be.reverted;
-    });
-  });
-
-  describe('Ownership', function () {
-    it('should have owner set to deployer', async function () {
-      expect(await treasury.owner()).to.equal(owner.address);
-    });
-
-    it('should allow owner to transfer ownership', async function () {
-      await treasury.transferOwnership(player.address);
-      expect(await treasury.owner()).to.equal(player.address);
-    });
-
-    it('should not allow non-owner to transfer ownership', async function () {
-      await expect(
-        treasury.connect(player).transferOwnership(other.address)
-      ).to.be.reverted;
+      expect(await rewardToken.balanceOf(other.address)).to.equal(ethers.parseEther('4'));
+      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('6'));
     });
   });
 });

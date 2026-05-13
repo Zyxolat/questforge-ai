@@ -11,7 +11,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "resolveJsonModule": true,
-    "types": ["hardhat/console.log", "node"],
+    "types": ["node"],
     "outDir": "dist"
   },
   "include": ["./scripts", "./test", "./contracts", "./hardhat.config.ts"]

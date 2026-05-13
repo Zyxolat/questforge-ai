@@ -8,6 +8,27 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "./RewardNFT.sol";
 import "./Reputation.sol";
 
+interface ITreasury {
+    function reserveReward(uint256 questId, address creator, uint256 rewardAmount) external;
+
+    function lockStake(uint256 questId, address player, uint256 expectedStakeAmount) external payable;
+
+    function settleQuestPayout(
+        uint256 questId,
+        address payable player,
+        uint256 expectedRewardAmount,
+        uint256 expectedStakeAmount
+    ) external returns (uint256 totalPayout);
+
+    function refundQuest(
+        uint256 questId,
+        address payable recipient,
+        uint256 expectedRewardAmount,
+        uint256 expectedStakeAmount,
+        bytes32 reason
+    ) external returns (uint256 refundedStakeAmount);
+}
+
 contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl {
     bytes32 public constant VERIFIER_ROLE = keccak256("VERIFIER_ROLE");
 
@@ -45,8 +66,6 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     uint256 public constant MAX_QUEST_DURATION = 7 days;
 
     bool public rewardSystemHealthy = true;
-    uint256 public totalRewardsDistributed;
-    uint256 public maxRewardPoolSize = 1000 ether;
 
     mapping(address => uint256) public playerNonces;
     mapping(bytes32 => bool) public usedProofHashes;
@@ -59,12 +78,31 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     Reputation public immutable reputation;
     address public treasury;
 
-    event QuestCreated(uint256 indexed questId, address indexed creator, string title, uint256 rewardAmount, uint256 xpReward);
-    event QuestStarted(uint256 indexed questId, address indexed creator, address indexed player, uint256 stakeAmount);
+    event QuestCreated(
+        uint256 indexed questId,
+        address indexed creator,
+        string title,
+        uint256 rewardAmount,
+        uint256 xpReward
+    );
+    event QuestStarted(
+        uint256 indexed questId,
+        address indexed creator,
+        address indexed player,
+        uint256 stakeAmount
+    );
     event QuestSubmitted(uint256 indexed questId, address indexed player, bytes32 proofHash);
-    event QuestVerified(uint256 indexed questId, address indexed player, bool success, uint256 rewardAmount, uint256 xpReward, bytes32 proofHash);
+    event QuestVerified(
+        uint256 indexed questId,
+        address indexed player,
+        bool success,
+        uint256 rewardAmount,
+        uint256 xpReward,
+        bytes32 proofHash
+    );
     event QuestCancelled(uint256 indexed questId);
     event CircuitBreakerTriggered(string reason);
+    event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
 
     modifier onlyPlayer(uint256 questId) {
         require(quests[questId].player == msg.sender, "Not quest player");
@@ -102,7 +140,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 rewardAmount,
         uint256 xpReward,
         uint256 durationSeconds
-    ) external whenNotPaused rewardSystemActive {
+    ) external whenNotPaused rewardSystemActive nonReentrant {
         require(bytes(title).length > 0, "Title required");
         require(bytes(metadataUri).length > 0, "Metadata required");
         require(stakeAmount >= MIN_SINGLE_STAKE, "Stake too small");
@@ -113,10 +151,10 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         require(durationSeconds > 0, "Duration required");
         require(durationSeconds <= MAX_QUEST_DURATION, "Duration too long");
 
-        _ensureRewardPoolCapacity(rewardAmount);
-
         uint256 questId = nextQuestId;
         nextQuestId += 1;
+
+        ITreasury(treasury).reserveReward(questId, msg.sender, rewardAmount);
 
         quests[questId] = Quest({
             questId: questId,
@@ -140,7 +178,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         emit QuestCreated(questId, msg.sender, title, rewardAmount, xpReward);
     }
 
-    function startQuest(uint256 questId) external payable nonReentrant whenNotPaused {
+    function startQuest(uint256 questId) external payable nonReentrant whenNotPaused rewardSystemActive {
         Quest storage quest = quests[questId];
         require(quest.questId != 0, "Quest not found");
         require(quest.status == QuestStatus.Available, "Quest unavailable");
@@ -158,10 +196,17 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         playerQuestIndices[msg.sender].push(questId);
         reputation.initializePlayer(msg.sender);
 
+        ITreasury(treasury).lockStake{value: msg.value}(questId, msg.sender, quest.stakeAmount);
+
         emit QuestStarted(questId, quest.creator, msg.sender, quest.stakeAmount);
     }
 
-    function submitQuest(uint256 questId, string calldata proofUri) external whenNotPaused onlyPlayer(questId) {
+    function submitQuest(uint256 questId, string calldata proofUri)
+        external
+        whenNotPaused
+        rewardSystemActive
+        onlyPlayer(questId)
+    {
         Quest storage quest = quests[questId];
         require(quest.status == QuestStatus.Active, "Quest not active");
         require(block.timestamp <= quest.expiresAt, "Quest expired");
@@ -207,11 +252,13 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         }
     }
 
-    function cancelQuest(uint256 questId) external whenNotPaused nonReentrant {
+    function cancelQuest(uint256 questId) external nonReentrant {
         Quest storage quest = quests[questId];
         require(quest.questId != 0, "Quest not found");
         require(
-            quest.status == QuestStatus.Available || quest.status == QuestStatus.Active,
+            quest.status == QuestStatus.Available ||
+                quest.status == QuestStatus.Active ||
+                quest.status == QuestStatus.Submitted,
             "Cannot cancel"
         );
         require(
@@ -219,17 +266,26 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
             "Unauthorized"
         );
 
-        if (quest.status == QuestStatus.Active && quest.player != address(0)) {
-            _safeNativeTransfer(quest.player, quest.stakeAmount, "Refund failed");
-        }
-
         quest.status = QuestStatus.Cancelled;
+
+        ITreasury(treasury).refundQuest(
+            questId,
+            payable(quest.player),
+            quest.rewardAmount,
+            quest.player == address(0) ? 0 : quest.stakeAmount,
+            keccak256("QUEST_CANCELLED")
+        );
+
         emit QuestCancelled(questId);
     }
 
     function setTreasury(address newTreasury) external onlyOwner {
         require(newTreasury != address(0), "Invalid treasury");
+
+        address previousTreasury = treasury;
         treasury = newTreasury;
+
+        emit TreasuryUpdated(previousTreasury, newTreasury);
     }
 
     function grantVerifier(address verifier) external onlyOwner {
@@ -241,13 +297,9 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         revokeRole(VERIFIER_ROLE, verifier);
     }
 
-    function setMaxRewardPoolSize(uint256 newMax) external onlyOwner {
-        require(newMax > 0, "Invalid max");
-        maxRewardPoolSize = newMax;
-    }
-
     function pauseRewardSystem() external onlyOwner {
         rewardSystemHealthy = false;
+        emit CircuitBreakerTriggered("Reward system manually paused");
     }
 
     function unpauseRewardSystem() external onlyOwner {
@@ -266,43 +318,45 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         return super.supportsInterface(interfaceId);
     }
 
+    function transferOwnership(address newOwner) public override onlyOwner {
+        address previousOwner = owner();
+        super.transferOwnership(newOwner);
+
+        _grantRole(DEFAULT_ADMIN_ROLE, newOwner);
+        _grantRole(VERIFIER_ROLE, newOwner);
+
+        _revokeRole(VERIFIER_ROLE, previousOwner);
+        _revokeRole(DEFAULT_ADMIN_ROLE, previousOwner);
+    }
+
     function _completeQuest(uint256 questId, Quest storage quest) private {
-        require(quest.rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
-        require(quest.stakeAmount <= MAX_SINGLE_STAKE, "Stake exceeds maximum");
-
-        uint256 totalPayout = quest.stakeAmount + quest.rewardAmount;
-        require(address(this).balance >= totalPayout, "Insufficient reward reserve");
-
-        totalRewardsDistributed += quest.rewardAmount;
-        if (totalRewardsDistributed >= maxRewardPoolSize) {
-            rewardSystemHealthy = false;
-            emit CircuitBreakerTriggered("Reward pool exhausted");
-        }
-
         quest.status = QuestStatus.Verified;
+
+        ITreasury(treasury).settleQuestPayout(
+            questId,
+            payable(quest.player),
+            quest.rewardAmount,
+            quest.stakeAmount
+        );
 
         string memory rewardMetadataUri = bytes(quest.proofUri).length > 0 ? quest.proofUri : quest.metadataUri;
         rewardNFT.mintQuestReward(quest.player, questId, rewardMetadataUri);
         reputation.rewardXP(quest.player, quest.xpReward, 1);
-        _safeNativeTransfer(quest.player, totalPayout, "Transfer failed");
 
         emit QuestVerified(questId, quest.player, true, quest.rewardAmount, quest.xpReward, quest.proofHash);
     }
 
     function _failQuest(uint256 questId, Quest storage quest) private {
         quest.status = QuestStatus.Failed;
-        _safeNativeTransfer(treasury, quest.stakeAmount, "Treasury transfer failed");
+
+        ITreasury(treasury).refundQuest(
+            questId,
+            payable(quest.player),
+            quest.rewardAmount,
+            quest.stakeAmount,
+            keccak256("QUEST_FAILED")
+        );
+
         emit QuestVerified(questId, quest.player, false, quest.rewardAmount, quest.xpReward, quest.proofHash);
     }
-
-    function _ensureRewardPoolCapacity(uint256 pendingReward) private view {
-        require(totalRewardsDistributed + pendingReward <= maxRewardPoolSize, "Reward system paused");
-    }
-
-    function _safeNativeTransfer(address recipient, uint256 amount, string memory errorMessage) private {
-        (bool success, ) = payable(recipient).call{value: amount}("");
-        require(success, errorMessage);
-    }
-
-    receive() external payable {}
 }

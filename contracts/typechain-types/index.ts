@@ -38,8 +38,10 @@ export type { ERC165 } from "./@openzeppelin/contracts/utils/introspection/ERC16
 export { ERC165__factory } from "./factories/@openzeppelin/contracts/utils/introspection/ERC165__factory";
 export type { IERC165 } from "./@openzeppelin/contracts/utils/introspection/IERC165";
 export { IERC165__factory } from "./factories/@openzeppelin/contracts/utils/introspection/IERC165__factory";
-export type { ForgeQuestManager } from "./contracts/ForgeQuestManager";
-export { ForgeQuestManager__factory } from "./factories/contracts/ForgeQuestManager__factory";
+export type { ForgeQuestManager } from "./contracts/ForgeQuestManager.sol/ForgeQuestManager";
+export { ForgeQuestManager__factory } from "./factories/contracts/ForgeQuestManager.sol/ForgeQuestManager__factory";
+export type { ITreasury } from "./contracts/ForgeQuestManager.sol/ITreasury";
+export { ITreasury__factory } from "./factories/contracts/ForgeQuestManager.sol/ITreasury__factory";
 export type { MockERC20 } from "./contracts/mocks/MockERC20";
 export { MockERC20__factory } from "./factories/contracts/mocks/MockERC20__factory";
 export type { Reputation } from "./contracts/Reputation";

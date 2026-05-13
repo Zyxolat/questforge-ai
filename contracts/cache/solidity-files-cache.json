@@ -2,8 +2,8 @@
   "_format": "hh-sol-cache-2",
   "files": {
     "/home/zyxolat/Desktop/QuestForge AI/contracts/contracts/ForgeQuestManager.sol": {
-      "lastModificationDate": 1778325774306,
-      "contentHash": "1eb74fb8fd734c2a5f89c49985e1e0a2",
+      "lastModificationDate": 1778347978497,
+      "contentHash": "7804819b148828ba080a1907a29da3e3",
       "sourceName": "contracts/ForgeQuestManager.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -42,7 +42,8 @@
         "^0.8.20"
       ],
       "artifacts": [
-        "ForgeQuestManager"
+        "ForgeQuestManager",
+        "ITreasury"
       ]
     },
     "/home/zyxolat/Desktop/QuestForge AI/contracts/contracts/RewardNFT.sol": {
@@ -858,8 +859,8 @@
       ]
     },
     "/home/zyxolat/Desktop/QuestForge AI/contracts/contracts/Treasury.sol": {
-      "lastModificationDate": 1778210435205,
-      "contentHash": "072383e69dbc66b9a633b5dd23895077",
+      "lastModificationDate": 1778347917481,
+      "contentHash": "eb98e56cfec1acd48e1e576308da4024",
       "sourceName": "contracts/Treasury.sol",
       "solcConfig": {
         "version": "0.8.20",
@@ -887,9 +888,10 @@
         }
       },
       "imports": [
+        "@openzeppelin/contracts/access/AccessControl.sol",
         "@openzeppelin/contracts/access/Ownable.sol",
-        "@openzeppelin/contracts/security/ReentrancyGuard.sol",
         "@openzeppelin/contracts/security/Pausable.sol",
+        "@openzeppelin/contracts/security/ReentrancyGuard.sol",
         "@openzeppelin/contracts/token/ERC20/IERC20.sol",
         "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol"
       ],

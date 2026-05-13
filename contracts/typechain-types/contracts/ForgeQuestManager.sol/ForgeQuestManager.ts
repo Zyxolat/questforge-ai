@@ -21,67 +21,65 @@ import type {
   TypedLogDescription,
   TypedListener,
   TypedContractMethod,
-} from "../common";
+} from "../../common";
 
-export interface TreasuryInterface extends Interface {
+export interface ForgeQuestManagerInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "DEFAULT_ADMIN_ROLE"
-      | "GUARDIAN_ROLE"
-      | "QUEST_MANAGER_ROLE"
-      | "WITHDRAW_ROLE"
-      | "availableNativeWithdrawalBalance"
-      | "availableRewardLiquidity"
-      | "emergencyWithdrawNative"
-      | "emergencyWithdrawRewardToken"
-      | "fundNativeRewardPool"
-      | "fundRewardTokenPool"
+      | "MAX_QUEST_DURATION"
+      | "MAX_SINGLE_REWARD"
+      | "MAX_SINGLE_STAKE"
+      | "MIN_SINGLE_STAKE"
+      | "VERIFIER_ROLE"
+      | "cancelQuest"
+      | "createQuest"
       | "getRoleAdmin"
       | "grantRole"
+      | "grantVerifier"
       | "hasRole"
-      | "isSolvent"
-      | "lockStake"
-      | "obligations"
+      | "nextQuestId"
       | "owner"
       | "pause"
+      | "pauseRewardSystem"
       | "paused"
-      | "payoutCap"
-      | "questFunds"
-      | "refundQuest"
+      | "playerNonces"
+      | "playerQuestIndices"
+      | "proofHashToQuestId"
+      | "quests"
       | "renounceOwnership"
       | "renounceRole"
-      | "reserveReward"
+      | "reputation"
       | "revokeRole"
-      | "rewardReserveCap"
-      | "rewardToken"
-      | "setPayoutCaps"
-      | "settleQuestPayout"
-      | "stakeLockCap"
+      | "revokeVerifier"
+      | "rewardNFT"
+      | "rewardSystemHealthy"
+      | "setTreasury"
+      | "startQuest"
+      | "submitQuest"
       | "supportsInterface"
-      | "totalLockedStakes"
-      | "totalReservedRewards"
       | "transferOwnership"
-      | "tripCircuitBreaker"
+      | "treasury"
       | "unpause"
+      | "unpauseRewardSystem"
+      | "usedProofHashes"
+      | "verifyQuest"
   ): FunctionFragment;
 
   getEvent(
     nameOrSignatureOrTopic:
       | "CircuitBreakerTriggered"
-      | "EmergencyWithdrawal"
-      | "NativeRewardPoolFunded"
       | "OwnershipTransferred"
       | "Paused"
-      | "PayoutCapsUpdated"
-      | "RewardPaid"
-      | "RewardRefunded"
-      | "RewardReleased"
-      | "RewardReserved"
-      | "RewardTokenPoolFunded"
+      | "QuestCancelled"
+      | "QuestCreated"
+      | "QuestStarted"
+      | "QuestSubmitted"
+      | "QuestVerified"
       | "RoleAdminChanged"
       | "RoleGranted"
       | "RoleRevoked"
-      | "StakeLocked"
+      | "TreasuryUpdated"
       | "Unpaused"
   ): EventFragment;
 
@@ -90,40 +88,39 @@ export interface TreasuryInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "GUARDIAN_ROLE",
+    functionFragment: "MAX_QUEST_DURATION",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "QUEST_MANAGER_ROLE",
+    functionFragment: "MAX_SINGLE_REWARD",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "WITHDRAW_ROLE",
+    functionFragment: "MAX_SINGLE_STAKE",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "availableNativeWithdrawalBalance",
+    functionFragment: "MIN_SINGLE_STAKE",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "availableRewardLiquidity",
+    functionFragment: "VERIFIER_ROLE",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "emergencyWithdrawNative",
-    values: [AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "emergencyWithdrawRewardToken",
-    values: [AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "fundNativeRewardPool",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "fundRewardTokenPool",
+    functionFragment: "cancelQuest",
     values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "createQuest",
+    values: [
+      string,
+      string,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "getRoleAdmin",
@@ -134,29 +131,39 @@ export interface TreasuryInterface extends Interface {
     values: [BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "grantVerifier",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "hasRole",
     values: [BytesLike, AddressLike]
   ): string;
-  encodeFunctionData(functionFragment: "isSolvent", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "lockStake",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "obligations",
+    functionFragment: "nextQuestId",
     values?: undefined
   ): string;
   encodeFunctionData(functionFragment: "owner", values?: undefined): string;
   encodeFunctionData(functionFragment: "pause", values?: undefined): string;
-  encodeFunctionData(functionFragment: "paused", values?: undefined): string;
-  encodeFunctionData(functionFragment: "payoutCap", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "questFunds",
-    values: [BigNumberish]
+    functionFragment: "pauseRewardSystem",
+    values?: undefined
+  ): string;
+  encodeFunctionData(functionFragment: "paused", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "playerNonces",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "refundQuest",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
+    functionFragment: "playerQuestIndices",
+    values: [AddressLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "proofHashToQuestId",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "quests",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "renounceOwnership",
@@ -167,93 +174,87 @@ export interface TreasuryInterface extends Interface {
     values: [BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "reserveReward",
-    values: [BigNumberish, AddressLike, BigNumberish]
+    functionFragment: "reputation",
+    values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "revokeRole",
     values: [BytesLike, AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "rewardReserveCap",
+    functionFragment: "revokeVerifier",
+    values: [AddressLike]
+  ): string;
+  encodeFunctionData(functionFragment: "rewardNFT", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "rewardSystemHealthy",
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "rewardToken",
-    values?: undefined
+    functionFragment: "setTreasury",
+    values: [AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "setPayoutCaps",
-    values: [BigNumberish, BigNumberish, BigNumberish]
+    functionFragment: "startQuest",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "settleQuestPayout",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "stakeLockCap",
-    values?: undefined
+    functionFragment: "submitQuest",
+    values: [BigNumberish, string]
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "totalLockedStakes",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "totalReservedRewards",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
     functionFragment: "transferOwnership",
     values: [AddressLike]
   ): string;
-  encodeFunctionData(
-    functionFragment: "tripCircuitBreaker",
-    values: [string]
-  ): string;
+  encodeFunctionData(functionFragment: "treasury", values?: undefined): string;
   encodeFunctionData(functionFragment: "unpause", values?: undefined): string;
+  encodeFunctionData(
+    functionFragment: "unpauseRewardSystem",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "usedProofHashes",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "verifyQuest",
+    values: [BigNumberish, boolean, BytesLike]
+  ): string;
 
   decodeFunctionResult(
     functionFragment: "DEFAULT_ADMIN_ROLE",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "GUARDIAN_ROLE",
+    functionFragment: "MAX_QUEST_DURATION",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "QUEST_MANAGER_ROLE",
+    functionFragment: "MAX_SINGLE_REWARD",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "WITHDRAW_ROLE",
+    functionFragment: "MAX_SINGLE_STAKE",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "availableNativeWithdrawalBalance",
+    functionFragment: "MIN_SINGLE_STAKE",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "availableRewardLiquidity",
+    functionFragment: "VERIFIER_ROLE",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "emergencyWithdrawNative",
+    functionFragment: "cancelQuest",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "emergencyWithdrawRewardToken",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "fundNativeRewardPool",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "fundRewardTokenPool",
+    functionFragment: "createQuest",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -261,22 +262,35 @@ export interface TreasuryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "grantRole", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "hasRole", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "isSolvent", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "lockStake", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "obligations",
+    functionFragment: "grantVerifier",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "hasRole", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "nextQuestId",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "owner", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "pause", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "paused", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "payoutCap", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "questFunds", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "refundQuest",
+    functionFragment: "pauseRewardSystem",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "paused", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "playerNonces",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "playerQuestIndices",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "proofHashToQuestId",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "quests", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "renounceOwnership",
     data: BytesLike
@@ -285,29 +299,24 @@ export interface TreasuryInterface extends Interface {
     functionFragment: "renounceRole",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(
-    functionFragment: "reserveReward",
-    data: BytesLike
-  ): Result;
+  decodeFunctionResult(functionFragment: "reputation", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "revokeRole", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "rewardReserveCap",
+    functionFragment: "revokeVerifier",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(functionFragment: "rewardNFT", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "rewardSystemHealthy",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "rewardToken",
+    functionFragment: "setTreasury",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "startQuest", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "setPayoutCaps",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "settleQuestPayout",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "stakeLockCap",
+    functionFragment: "submitQuest",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -315,68 +324,30 @@ export interface TreasuryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "totalLockedStakes",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "totalReservedRewards",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "transferOwnership",
     data: BytesLike
   ): Result;
+  decodeFunctionResult(functionFragment: "treasury", data: BytesLike): Result;
+  decodeFunctionResult(functionFragment: "unpause", data: BytesLike): Result;
   decodeFunctionResult(
-    functionFragment: "tripCircuitBreaker",
+    functionFragment: "unpauseRewardSystem",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "unpause", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "usedProofHashes",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "verifyQuest",
+    data: BytesLike
+  ): Result;
 }
 
 export namespace CircuitBreakerTriggeredEvent {
-  export type InputTuple = [operator: AddressLike, reason: string];
-  export type OutputTuple = [operator: string, reason: string];
+  export type InputTuple = [reason: string];
+  export type OutputTuple = [reason: string];
   export interface OutputObject {
-    operator: string;
     reason: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace EmergencyWithdrawalEvent {
-  export type InputTuple = [
-    operator: AddressLike,
-    recipient: AddressLike,
-    asset: AddressLike,
-    amount: BigNumberish
-  ];
-  export type OutputTuple = [
-    operator: string,
-    recipient: string,
-    asset: string,
-    amount: bigint
-  ];
-  export interface OutputObject {
-    operator: string;
-    recipient: string;
-    asset: string;
-    amount: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace NativeRewardPoolFundedEvent {
-  export type InputTuple = [funder: AddressLike, amount: BigNumberish];
-  export type OutputTuple = [funder: string, amount: bigint];
-  export interface OutputObject {
-    funder: string;
-    amount: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -409,49 +380,11 @@ export namespace PausedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace PayoutCapsUpdatedEvent {
-  export type InputTuple = [
-    rewardReserveCap: BigNumberish,
-    stakeLockCap: BigNumberish,
-    payoutCap: BigNumberish
-  ];
-  export type OutputTuple = [
-    rewardReserveCap: bigint,
-    stakeLockCap: bigint,
-    payoutCap: bigint
-  ];
-  export interface OutputObject {
-    rewardReserveCap: bigint;
-    stakeLockCap: bigint;
-    payoutCap: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace RewardPaidEvent {
-  export type InputTuple = [
-    questId: BigNumberish,
-    player: AddressLike,
-    rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
-    totalPayout: BigNumberish
-  ];
-  export type OutputTuple = [
-    questId: bigint,
-    player: string,
-    rewardAmount: bigint,
-    stakeAmount: bigint,
-    totalPayout: bigint
-  ];
+export namespace QuestCancelledEvent {
+  export type InputTuple = [questId: BigNumberish];
+  export type OutputTuple = [questId: bigint];
   export interface OutputObject {
     questId: bigint;
-    player: string;
-    rewardAmount: bigint;
-    stakeAmount: bigint;
-    totalPayout: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -459,80 +392,27 @@ export namespace RewardPaidEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace RewardRefundedEvent {
-  export type InputTuple = [
-    questId: BigNumberish,
-    recipient: AddressLike,
-    rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
-    reason: BytesLike
-  ];
-  export type OutputTuple = [
-    questId: bigint,
-    recipient: string,
-    rewardAmount: bigint,
-    stakeAmount: bigint,
-    reason: string
-  ];
-  export interface OutputObject {
-    questId: bigint;
-    recipient: string;
-    rewardAmount: bigint;
-    stakeAmount: bigint;
-    reason: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace RewardReleasedEvent {
-  export type InputTuple = [
-    questId: BigNumberish,
-    player: AddressLike,
-    rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
-    totalPayout: BigNumberish
-  ];
-  export type OutputTuple = [
-    questId: bigint,
-    player: string,
-    rewardAmount: bigint,
-    stakeAmount: bigint,
-    totalPayout: bigint
-  ];
-  export interface OutputObject {
-    questId: bigint;
-    player: string;
-    rewardAmount: bigint;
-    stakeAmount: bigint;
-    totalPayout: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace RewardReservedEvent {
+export namespace QuestCreatedEvent {
   export type InputTuple = [
     questId: BigNumberish,
     creator: AddressLike,
-    amount: BigNumberish,
-    totalReservedRewards: BigNumberish
+    title: string,
+    rewardAmount: BigNumberish,
+    xpReward: BigNumberish
   ];
   export type OutputTuple = [
     questId: bigint,
     creator: string,
-    amount: bigint,
-    totalReservedRewards: bigint
+    title: string,
+    rewardAmount: bigint,
+    xpReward: bigint
   ];
   export interface OutputObject {
     questId: bigint;
     creator: string;
-    amount: bigint;
-    totalReservedRewards: bigint;
+    title: string;
+    rewardAmount: bigint;
+    xpReward: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -540,12 +420,77 @@ export namespace RewardReservedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace RewardTokenPoolFundedEvent {
-  export type InputTuple = [funder: AddressLike, amount: BigNumberish];
-  export type OutputTuple = [funder: string, amount: bigint];
+export namespace QuestStartedEvent {
+  export type InputTuple = [
+    questId: BigNumberish,
+    creator: AddressLike,
+    player: AddressLike,
+    stakeAmount: BigNumberish
+  ];
+  export type OutputTuple = [
+    questId: bigint,
+    creator: string,
+    player: string,
+    stakeAmount: bigint
+  ];
   export interface OutputObject {
-    funder: string;
-    amount: bigint;
+    questId: bigint;
+    creator: string;
+    player: string;
+    stakeAmount: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace QuestSubmittedEvent {
+  export type InputTuple = [
+    questId: BigNumberish,
+    player: AddressLike,
+    proofHash: BytesLike
+  ];
+  export type OutputTuple = [
+    questId: bigint,
+    player: string,
+    proofHash: string
+  ];
+  export interface OutputObject {
+    questId: bigint;
+    player: string;
+    proofHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace QuestVerifiedEvent {
+  export type InputTuple = [
+    questId: BigNumberish,
+    player: AddressLike,
+    success: boolean,
+    rewardAmount: BigNumberish,
+    xpReward: BigNumberish,
+    proofHash: BytesLike
+  ];
+  export type OutputTuple = [
+    questId: bigint,
+    player: string,
+    success: boolean,
+    rewardAmount: bigint,
+    xpReward: bigint,
+    proofHash: string
+  ];
+  export interface OutputObject {
+    questId: bigint;
+    player: string;
+    success: boolean;
+    rewardAmount: bigint;
+    xpReward: bigint;
+    proofHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -611,24 +556,15 @@ export namespace RoleRevokedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace StakeLockedEvent {
+export namespace TreasuryUpdatedEvent {
   export type InputTuple = [
-    questId: BigNumberish,
-    player: AddressLike,
-    amount: BigNumberish,
-    totalLockedStakes: BigNumberish
+    previousTreasury: AddressLike,
+    newTreasury: AddressLike
   ];
-  export type OutputTuple = [
-    questId: bigint,
-    player: string,
-    amount: bigint,
-    totalLockedStakes: bigint
-  ];
+  export type OutputTuple = [previousTreasury: string, newTreasury: string];
   export interface OutputObject {
-    questId: bigint;
-    player: string;
-    amount: bigint;
-    totalLockedStakes: bigint;
+    previousTreasury: string;
+    newTreasury: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -648,11 +584,11 @@ export namespace UnpausedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export interface Treasury extends BaseContract {
-  connect(runner?: ContractRunner | null): Treasury;
+export interface ForgeQuestManager extends BaseContract {
+  connect(runner?: ContractRunner | null): ForgeQuestManager;
   waitForDeployment(): Promise<this>;
 
-  interface: TreasuryInterface;
+  interface: ForgeQuestManagerInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
@@ -693,32 +629,31 @@ export interface Treasury extends BaseContract {
 
   DEFAULT_ADMIN_ROLE: TypedContractMethod<[], [string], "view">;
 
-  GUARDIAN_ROLE: TypedContractMethod<[], [string], "view">;
+  MAX_QUEST_DURATION: TypedContractMethod<[], [bigint], "view">;
 
-  QUEST_MANAGER_ROLE: TypedContractMethod<[], [string], "view">;
+  MAX_SINGLE_REWARD: TypedContractMethod<[], [bigint], "view">;
 
-  WITHDRAW_ROLE: TypedContractMethod<[], [string], "view">;
+  MAX_SINGLE_STAKE: TypedContractMethod<[], [bigint], "view">;
 
-  availableNativeWithdrawalBalance: TypedContractMethod<[], [bigint], "view">;
+  MIN_SINGLE_STAKE: TypedContractMethod<[], [bigint], "view">;
 
-  availableRewardLiquidity: TypedContractMethod<[], [bigint], "view">;
+  VERIFIER_ROLE: TypedContractMethod<[], [string], "view">;
 
-  emergencyWithdrawNative: TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
+  cancelQuest: TypedContractMethod<
+    [questId: BigNumberish],
     [void],
     "nonpayable"
   >;
 
-  emergencyWithdrawRewardToken: TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
-  fundNativeRewardPool: TypedContractMethod<[], [void], "payable">;
-
-  fundRewardTokenPool: TypedContractMethod<
-    [amount: BigNumberish],
+  createQuest: TypedContractMethod<
+    [
+      title: string,
+      metadataUri: string,
+      stakeAmount: BigNumberish,
+      rewardAmount: BigNumberish,
+      xpReward: BigNumberish,
+      durationSeconds: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
@@ -731,57 +666,78 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
 
+  grantVerifier: TypedContractMethod<
+    [verifier: AddressLike],
+    [void],
+    "nonpayable"
+  >;
+
   hasRole: TypedContractMethod<
     [role: BytesLike, account: AddressLike],
     [boolean],
     "view"
   >;
 
-  isSolvent: TypedContractMethod<[], [boolean], "view">;
-
-  lockStake: TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-
-  obligations: TypedContractMethod<[], [bigint], "view">;
+  nextQuestId: TypedContractMethod<[], [bigint], "view">;
 
   owner: TypedContractMethod<[], [string], "view">;
 
   pause: TypedContractMethod<[], [void], "nonpayable">;
 
+  pauseRewardSystem: TypedContractMethod<[], [void], "nonpayable">;
+
   paused: TypedContractMethod<[], [boolean], "view">;
 
-  payoutCap: TypedContractMethod<[], [bigint], "view">;
+  playerNonces: TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
 
-  questFunds: TypedContractMethod<
-    [arg0: BigNumberish],
-    [
-      [bigint, bigint, string, bigint] & {
-        reservedReward: bigint;
-        lockedStake: bigint;
-        player: string;
-        state: bigint;
-      }
-    ],
+  playerQuestIndices: TypedContractMethod<
+    [arg0: AddressLike, arg1: BigNumberish],
+    [bigint],
     "view"
   >;
 
-  refundQuest: TypedContractMethod<
+  proofHashToQuestId: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+
+  quests: TypedContractMethod<
+    [arg0: BigNumberish],
     [
-      questId: BigNumberish,
-      recipient: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
-      reason: BytesLike
+      [
+        bigint,
+        string,
+        string,
+        string,
+        string,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        bigint,
+        string
+      ] & {
+        questId: bigint;
+        creator: string;
+        title: string;
+        metadataUri: string;
+        proofUri: string;
+        proofHash: string;
+        stakeAmount: bigint;
+        rewardAmount: bigint;
+        xpReward: bigint;
+        createdAt: bigint;
+        startedAt: bigint;
+        expiresAt: bigint;
+        status: bigint;
+        player: string;
+        playerNonce: bigint;
+        proofVerificationHash: string;
+      }
     ],
-    [bigint],
-    "nonpayable"
+    "view"
   >;
 
   renounceOwnership: TypedContractMethod<[], [void], "nonpayable">;
@@ -792,11 +748,7 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
 
-  reserveReward: TypedContractMethod<
-    [questId: BigNumberish, creator: AddressLike, rewardAmount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
+  reputation: TypedContractMethod<[], [string], "view">;
 
   revokeRole: TypedContractMethod<
     [role: BytesLike, account: AddressLike],
@@ -804,32 +756,29 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
 
-  rewardReserveCap: TypedContractMethod<[], [bigint], "view">;
-
-  rewardToken: TypedContractMethod<[], [string], "view">;
-
-  setPayoutCaps: TypedContractMethod<
-    [
-      newRewardReserveCap: BigNumberish,
-      newStakeLockCap: BigNumberish,
-      newPayoutCap: BigNumberish
-    ],
+  revokeVerifier: TypedContractMethod<
+    [verifier: AddressLike],
     [void],
     "nonpayable"
   >;
 
-  settleQuestPayout: TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
-    ],
-    [bigint],
+  rewardNFT: TypedContractMethod<[], [string], "view">;
+
+  rewardSystemHealthy: TypedContractMethod<[], [boolean], "view">;
+
+  setTreasury: TypedContractMethod<
+    [newTreasury: AddressLike],
+    [void],
     "nonpayable"
   >;
 
-  stakeLockCap: TypedContractMethod<[], [bigint], "view">;
+  startQuest: TypedContractMethod<[questId: BigNumberish], [void], "payable">;
+
+  submitQuest: TypedContractMethod<
+    [questId: BigNumberish, proofUri: string],
+    [void],
+    "nonpayable"
+  >;
 
   supportsInterface: TypedContractMethod<
     [interfaceId: BytesLike],
@@ -837,23 +786,25 @@ export interface Treasury extends BaseContract {
     "view"
   >;
 
-  totalLockedStakes: TypedContractMethod<[], [bigint], "view">;
-
-  totalReservedRewards: TypedContractMethod<[], [bigint], "view">;
-
   transferOwnership: TypedContractMethod<
     [newOwner: AddressLike],
     [void],
     "nonpayable"
   >;
 
-  tripCircuitBreaker: TypedContractMethod<
-    [reason: string],
+  treasury: TypedContractMethod<[], [string], "view">;
+
+  unpause: TypedContractMethod<[], [void], "nonpayable">;
+
+  unpauseRewardSystem: TypedContractMethod<[], [void], "nonpayable">;
+
+  usedProofHashes: TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
+
+  verifyQuest: TypedContractMethod<
+    [questId: BigNumberish, success: boolean, proofVerificationHash: BytesLike],
     [void],
     "nonpayable"
   >;
-
-  unpause: TypedContractMethod<[], [void], "nonpayable">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
@@ -863,40 +814,37 @@ export interface Treasury extends BaseContract {
     nameOrSignature: "DEFAULT_ADMIN_ROLE"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
-    nameOrSignature: "GUARDIAN_ROLE"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "QUEST_MANAGER_ROLE"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "WITHDRAW_ROLE"
-  ): TypedContractMethod<[], [string], "view">;
-  getFunction(
-    nameOrSignature: "availableNativeWithdrawalBalance"
+    nameOrSignature: "MAX_QUEST_DURATION"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "availableRewardLiquidity"
+    nameOrSignature: "MAX_SINGLE_REWARD"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "emergencyWithdrawNative"
+    nameOrSignature: "MAX_SINGLE_STAKE"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "MIN_SINGLE_STAKE"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "VERIFIER_ROLE"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "cancelQuest"
+  ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "createQuest"
   ): TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
+    [
+      title: string,
+      metadataUri: string,
+      stakeAmount: BigNumberish,
+      rewardAmount: BigNumberish,
+      xpReward: BigNumberish,
+      durationSeconds: BigNumberish
+    ],
     [void],
     "nonpayable"
   >;
-  getFunction(
-    nameOrSignature: "emergencyWithdrawRewardToken"
-  ): TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "fundNativeRewardPool"
-  ): TypedContractMethod<[], [void], "payable">;
-  getFunction(
-    nameOrSignature: "fundRewardTokenPool"
-  ): TypedContractMethod<[amount: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "getRoleAdmin"
   ): TypedContractMethod<[role: BytesLike], [string], "view">;
@@ -908,6 +856,9 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
   getFunction(
+    nameOrSignature: "grantVerifier"
+  ): TypedContractMethod<[verifier: AddressLike], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "hasRole"
   ): TypedContractMethod<
     [role: BytesLike, account: AddressLike],
@@ -915,21 +866,7 @@ export interface Treasury extends BaseContract {
     "view"
   >;
   getFunction(
-    nameOrSignature: "isSolvent"
-  ): TypedContractMethod<[], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "lockStake"
-  ): TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-  getFunction(
-    nameOrSignature: "obligations"
+    nameOrSignature: "nextQuestId"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "owner"
@@ -938,37 +875,66 @@ export interface Treasury extends BaseContract {
     nameOrSignature: "pause"
   ): TypedContractMethod<[], [void], "nonpayable">;
   getFunction(
+    nameOrSignature: "pauseRewardSystem"
+  ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
     nameOrSignature: "paused"
   ): TypedContractMethod<[], [boolean], "view">;
   getFunction(
-    nameOrSignature: "payoutCap"
-  ): TypedContractMethod<[], [bigint], "view">;
+    nameOrSignature: "playerNonces"
+  ): TypedContractMethod<[arg0: AddressLike], [bigint], "view">;
   getFunction(
-    nameOrSignature: "questFunds"
+    nameOrSignature: "playerQuestIndices"
   ): TypedContractMethod<
-    [arg0: BigNumberish],
-    [
-      [bigint, bigint, string, bigint] & {
-        reservedReward: bigint;
-        lockedStake: bigint;
-        player: string;
-        state: bigint;
-      }
-    ],
+    [arg0: AddressLike, arg1: BigNumberish],
+    [bigint],
     "view"
   >;
   getFunction(
-    nameOrSignature: "refundQuest"
+    nameOrSignature: "proofHashToQuestId"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "quests"
   ): TypedContractMethod<
+    [arg0: BigNumberish],
     [
-      questId: BigNumberish,
-      recipient: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
-      reason: BytesLike
+      [
+        bigint,
+        string,
+        string,
+        string,
+        string,
+        string,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        bigint,
+        string,
+        bigint,
+        string
+      ] & {
+        questId: bigint;
+        creator: string;
+        title: string;
+        metadataUri: string;
+        proofUri: string;
+        proofHash: string;
+        stakeAmount: bigint;
+        rewardAmount: bigint;
+        xpReward: bigint;
+        createdAt: bigint;
+        startedAt: bigint;
+        expiresAt: bigint;
+        status: bigint;
+        player: string;
+        playerNonce: bigint;
+        proofVerificationHash: string;
+      }
     ],
-    [bigint],
-    "nonpayable"
+    "view"
   >;
   getFunction(
     nameOrSignature: "renounceOwnership"
@@ -981,12 +947,8 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "reserveReward"
-  ): TypedContractMethod<
-    [questId: BigNumberish, creator: AddressLike, rewardAmount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
+    nameOrSignature: "reputation"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "revokeRole"
   ): TypedContractMethod<
@@ -995,55 +957,52 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "rewardReserveCap"
-  ): TypedContractMethod<[], [bigint], "view">;
+    nameOrSignature: "revokeVerifier"
+  ): TypedContractMethod<[verifier: AddressLike], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "rewardToken"
+    nameOrSignature: "rewardNFT"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
-    nameOrSignature: "setPayoutCaps"
+    nameOrSignature: "rewardSystemHealthy"
+  ): TypedContractMethod<[], [boolean], "view">;
+  getFunction(
+    nameOrSignature: "setTreasury"
+  ): TypedContractMethod<[newTreasury: AddressLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "startQuest"
+  ): TypedContractMethod<[questId: BigNumberish], [void], "payable">;
+  getFunction(
+    nameOrSignature: "submitQuest"
   ): TypedContractMethod<
-    [
-      newRewardReserveCap: BigNumberish,
-      newStakeLockCap: BigNumberish,
-      newPayoutCap: BigNumberish
-    ],
+    [questId: BigNumberish, proofUri: string],
     [void],
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "settleQuestPayout"
-  ): TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
-    ],
-    [bigint],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "stakeLockCap"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "totalLockedStakes"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "totalReservedRewards"
-  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "transferOwnership"
   ): TypedContractMethod<[newOwner: AddressLike], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "tripCircuitBreaker"
-  ): TypedContractMethod<[reason: string], [void], "nonpayable">;
+    nameOrSignature: "treasury"
+  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "unpause"
   ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "unpauseRewardSystem"
+  ): TypedContractMethod<[], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "usedProofHashes"
+  ): TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
+  getFunction(
+    nameOrSignature: "verifyQuest"
+  ): TypedContractMethod<
+    [questId: BigNumberish, success: boolean, proofVerificationHash: BytesLike],
+    [void],
+    "nonpayable"
+  >;
 
   getEvent(
     key: "CircuitBreakerTriggered"
@@ -1051,20 +1010,6 @@ export interface Treasury extends BaseContract {
     CircuitBreakerTriggeredEvent.InputTuple,
     CircuitBreakerTriggeredEvent.OutputTuple,
     CircuitBreakerTriggeredEvent.OutputObject
-  >;
-  getEvent(
-    key: "EmergencyWithdrawal"
-  ): TypedContractEvent<
-    EmergencyWithdrawalEvent.InputTuple,
-    EmergencyWithdrawalEvent.OutputTuple,
-    EmergencyWithdrawalEvent.OutputObject
-  >;
-  getEvent(
-    key: "NativeRewardPoolFunded"
-  ): TypedContractEvent<
-    NativeRewardPoolFundedEvent.InputTuple,
-    NativeRewardPoolFundedEvent.OutputTuple,
-    NativeRewardPoolFundedEvent.OutputObject
   >;
   getEvent(
     key: "OwnershipTransferred"
@@ -1081,46 +1026,39 @@ export interface Treasury extends BaseContract {
     PausedEvent.OutputObject
   >;
   getEvent(
-    key: "PayoutCapsUpdated"
+    key: "QuestCancelled"
   ): TypedContractEvent<
-    PayoutCapsUpdatedEvent.InputTuple,
-    PayoutCapsUpdatedEvent.OutputTuple,
-    PayoutCapsUpdatedEvent.OutputObject
+    QuestCancelledEvent.InputTuple,
+    QuestCancelledEvent.OutputTuple,
+    QuestCancelledEvent.OutputObject
   >;
   getEvent(
-    key: "RewardPaid"
+    key: "QuestCreated"
   ): TypedContractEvent<
-    RewardPaidEvent.InputTuple,
-    RewardPaidEvent.OutputTuple,
-    RewardPaidEvent.OutputObject
+    QuestCreatedEvent.InputTuple,
+    QuestCreatedEvent.OutputTuple,
+    QuestCreatedEvent.OutputObject
   >;
   getEvent(
-    key: "RewardRefunded"
+    key: "QuestStarted"
   ): TypedContractEvent<
-    RewardRefundedEvent.InputTuple,
-    RewardRefundedEvent.OutputTuple,
-    RewardRefundedEvent.OutputObject
+    QuestStartedEvent.InputTuple,
+    QuestStartedEvent.OutputTuple,
+    QuestStartedEvent.OutputObject
   >;
   getEvent(
-    key: "RewardReleased"
+    key: "QuestSubmitted"
   ): TypedContractEvent<
-    RewardReleasedEvent.InputTuple,
-    RewardReleasedEvent.OutputTuple,
-    RewardReleasedEvent.OutputObject
+    QuestSubmittedEvent.InputTuple,
+    QuestSubmittedEvent.OutputTuple,
+    QuestSubmittedEvent.OutputObject
   >;
   getEvent(
-    key: "RewardReserved"
+    key: "QuestVerified"
   ): TypedContractEvent<
-    RewardReservedEvent.InputTuple,
-    RewardReservedEvent.OutputTuple,
-    RewardReservedEvent.OutputObject
-  >;
-  getEvent(
-    key: "RewardTokenPoolFunded"
-  ): TypedContractEvent<
-    RewardTokenPoolFundedEvent.InputTuple,
-    RewardTokenPoolFundedEvent.OutputTuple,
-    RewardTokenPoolFundedEvent.OutputObject
+    QuestVerifiedEvent.InputTuple,
+    QuestVerifiedEvent.OutputTuple,
+    QuestVerifiedEvent.OutputObject
   >;
   getEvent(
     key: "RoleAdminChanged"
@@ -1144,11 +1082,11 @@ export interface Treasury extends BaseContract {
     RoleRevokedEvent.OutputObject
   >;
   getEvent(
-    key: "StakeLocked"
+    key: "TreasuryUpdated"
   ): TypedContractEvent<
-    StakeLockedEvent.InputTuple,
-    StakeLockedEvent.OutputTuple,
-    StakeLockedEvent.OutputObject
+    TreasuryUpdatedEvent.InputTuple,
+    TreasuryUpdatedEvent.OutputTuple,
+    TreasuryUpdatedEvent.OutputObject
   >;
   getEvent(
     key: "Unpaused"
@@ -1159,7 +1097,7 @@ export interface Treasury extends BaseContract {
   >;
 
   filters: {
-    "CircuitBreakerTriggered(address,string)": TypedContractEvent<
+    "CircuitBreakerTriggered(string)": TypedContractEvent<
       CircuitBreakerTriggeredEvent.InputTuple,
       CircuitBreakerTriggeredEvent.OutputTuple,
       CircuitBreakerTriggeredEvent.OutputObject
@@ -1168,28 +1106,6 @@ export interface Treasury extends BaseContract {
       CircuitBreakerTriggeredEvent.InputTuple,
       CircuitBreakerTriggeredEvent.OutputTuple,
       CircuitBreakerTriggeredEvent.OutputObject
-    >;
-
-    "EmergencyWithdrawal(address,address,address,uint256)": TypedContractEvent<
-      EmergencyWithdrawalEvent.InputTuple,
-      EmergencyWithdrawalEvent.OutputTuple,
-      EmergencyWithdrawalEvent.OutputObject
-    >;
-    EmergencyWithdrawal: TypedContractEvent<
-      EmergencyWithdrawalEvent.InputTuple,
-      EmergencyWithdrawalEvent.OutputTuple,
-      EmergencyWithdrawalEvent.OutputObject
-    >;
-
-    "NativeRewardPoolFunded(address,uint256)": TypedContractEvent<
-      NativeRewardPoolFundedEvent.InputTuple,
-      NativeRewardPoolFundedEvent.OutputTuple,
-      NativeRewardPoolFundedEvent.OutputObject
-    >;
-    NativeRewardPoolFunded: TypedContractEvent<
-      NativeRewardPoolFundedEvent.InputTuple,
-      NativeRewardPoolFundedEvent.OutputTuple,
-      NativeRewardPoolFundedEvent.OutputObject
     >;
 
     "OwnershipTransferred(address,address)": TypedContractEvent<
@@ -1214,70 +1130,59 @@ export interface Treasury extends BaseContract {
       PausedEvent.OutputObject
     >;
 
-    "PayoutCapsUpdated(uint256,uint256,uint256)": TypedContractEvent<
-      PayoutCapsUpdatedEvent.InputTuple,
-      PayoutCapsUpdatedEvent.OutputTuple,
-      PayoutCapsUpdatedEvent.OutputObject
+    "QuestCancelled(uint256)": TypedContractEvent<
+      QuestCancelledEvent.InputTuple,
+      QuestCancelledEvent.OutputTuple,
+      QuestCancelledEvent.OutputObject
     >;
-    PayoutCapsUpdated: TypedContractEvent<
-      PayoutCapsUpdatedEvent.InputTuple,
-      PayoutCapsUpdatedEvent.OutputTuple,
-      PayoutCapsUpdatedEvent.OutputObject
-    >;
-
-    "RewardPaid(uint256,address,uint256,uint256,uint256)": TypedContractEvent<
-      RewardPaidEvent.InputTuple,
-      RewardPaidEvent.OutputTuple,
-      RewardPaidEvent.OutputObject
-    >;
-    RewardPaid: TypedContractEvent<
-      RewardPaidEvent.InputTuple,
-      RewardPaidEvent.OutputTuple,
-      RewardPaidEvent.OutputObject
+    QuestCancelled: TypedContractEvent<
+      QuestCancelledEvent.InputTuple,
+      QuestCancelledEvent.OutputTuple,
+      QuestCancelledEvent.OutputObject
     >;
 
-    "RewardRefunded(uint256,address,uint256,uint256,bytes32)": TypedContractEvent<
-      RewardRefundedEvent.InputTuple,
-      RewardRefundedEvent.OutputTuple,
-      RewardRefundedEvent.OutputObject
+    "QuestCreated(uint256,address,string,uint256,uint256)": TypedContractEvent<
+      QuestCreatedEvent.InputTuple,
+      QuestCreatedEvent.OutputTuple,
+      QuestCreatedEvent.OutputObject
     >;
-    RewardRefunded: TypedContractEvent<
-      RewardRefundedEvent.InputTuple,
-      RewardRefundedEvent.OutputTuple,
-      RewardRefundedEvent.OutputObject
-    >;
-
-    "RewardReleased(uint256,address,uint256,uint256,uint256)": TypedContractEvent<
-      RewardReleasedEvent.InputTuple,
-      RewardReleasedEvent.OutputTuple,
-      RewardReleasedEvent.OutputObject
-    >;
-    RewardReleased: TypedContractEvent<
-      RewardReleasedEvent.InputTuple,
-      RewardReleasedEvent.OutputTuple,
-      RewardReleasedEvent.OutputObject
+    QuestCreated: TypedContractEvent<
+      QuestCreatedEvent.InputTuple,
+      QuestCreatedEvent.OutputTuple,
+      QuestCreatedEvent.OutputObject
     >;
 
-    "RewardReserved(uint256,address,uint256,uint256)": TypedContractEvent<
-      RewardReservedEvent.InputTuple,
-      RewardReservedEvent.OutputTuple,
-      RewardReservedEvent.OutputObject
+    "QuestStarted(uint256,address,address,uint256)": TypedContractEvent<
+      QuestStartedEvent.InputTuple,
+      QuestStartedEvent.OutputTuple,
+      QuestStartedEvent.OutputObject
     >;
-    RewardReserved: TypedContractEvent<
-      RewardReservedEvent.InputTuple,
-      RewardReservedEvent.OutputTuple,
-      RewardReservedEvent.OutputObject
+    QuestStarted: TypedContractEvent<
+      QuestStartedEvent.InputTuple,
+      QuestStartedEvent.OutputTuple,
+      QuestStartedEvent.OutputObject
     >;
 
-    "RewardTokenPoolFunded(address,uint256)": TypedContractEvent<
-      RewardTokenPoolFundedEvent.InputTuple,
-      RewardTokenPoolFundedEvent.OutputTuple,
-      RewardTokenPoolFundedEvent.OutputObject
+    "QuestSubmitted(uint256,address,bytes32)": TypedContractEvent<
+      QuestSubmittedEvent.InputTuple,
+      QuestSubmittedEvent.OutputTuple,
+      QuestSubmittedEvent.OutputObject
     >;
-    RewardTokenPoolFunded: TypedContractEvent<
-      RewardTokenPoolFundedEvent.InputTuple,
-      RewardTokenPoolFundedEvent.OutputTuple,
-      RewardTokenPoolFundedEvent.OutputObject
+    QuestSubmitted: TypedContractEvent<
+      QuestSubmittedEvent.InputTuple,
+      QuestSubmittedEvent.OutputTuple,
+      QuestSubmittedEvent.OutputObject
+    >;
+
+    "QuestVerified(uint256,address,bool,uint256,uint256,bytes32)": TypedContractEvent<
+      QuestVerifiedEvent.InputTuple,
+      QuestVerifiedEvent.OutputTuple,
+      QuestVerifiedEvent.OutputObject
+    >;
+    QuestVerified: TypedContractEvent<
+      QuestVerifiedEvent.InputTuple,
+      QuestVerifiedEvent.OutputTuple,
+      QuestVerifiedEvent.OutputObject
     >;
 
     "RoleAdminChanged(bytes32,bytes32,bytes32)": TypedContractEvent<
@@ -1313,15 +1218,15 @@ export interface Treasury extends BaseContract {
       RoleRevokedEvent.OutputObject
     >;
 
-    "StakeLocked(uint256,address,uint256,uint256)": TypedContractEvent<
-      StakeLockedEvent.InputTuple,
-      StakeLockedEvent.OutputTuple,
-      StakeLockedEvent.OutputObject
+    "TreasuryUpdated(address,address)": TypedContractEvent<
+      TreasuryUpdatedEvent.InputTuple,
+      TreasuryUpdatedEvent.OutputTuple,
+      TreasuryUpdatedEvent.OutputObject
     >;
-    StakeLocked: TypedContractEvent<
-      StakeLockedEvent.InputTuple,
-      StakeLockedEvent.OutputTuple,
-      StakeLockedEvent.OutputObject
+    TreasuryUpdated: TypedContractEvent<
+      TreasuryUpdatedEvent.InputTuple,
+      TreasuryUpdatedEvent.OutputTuple,
+      TreasuryUpdatedEvent.OutputObject
     >;
 
     "Unpaused(address)": TypedContractEvent<

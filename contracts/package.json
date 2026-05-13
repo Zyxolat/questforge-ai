@@ -3,12 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build": "tsc --noEmit",
     "compile": "hardhat compile",
     "test": "hardhat test",
     "clean": "hardhat clean",
-    "deploy": "hardhat run scripts/deploy.ts --network alfajores",
-    "deploy:alfajores": "hardhat run scripts/deploy.ts --network alfajores",
-    "deploy:mainnet": "hardhat run scripts/deploy.ts --network celo"
+    "deploy": "hardhat run scripts/deploy.ts --network celo",
+    "deploy:mainnet": "hardhat run scripts/deploy.ts --network celo",
+    "validate:mainnet": "hardhat run scripts/validateDeployment.ts --network celo",
+    "security:test": "hardhat test --grep security",
+    "coverage": "hardhat coverage"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",

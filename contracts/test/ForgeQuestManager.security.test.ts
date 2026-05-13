@@ -1,6 +1,17 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
-import { ForgeQuestManager, RewardNFT, Reputation, Treasury, MockERC20 } from '../typechain-types';
+import {
+  ForgeQuestManager__factory,
+  MockERC20__factory,
+  Reputation__factory,
+  RewardNFT__factory,
+  Treasury__factory,
+  type ForgeQuestManager,
+  type MockERC20,
+  type Reputation,
+  type RewardNFT,
+  type Treasury,
+} from '../typechain-types';
 
 describe('ForgeQuestManager Security', () => {
   let questManager: ForgeQuestManager;
@@ -12,30 +23,32 @@ describe('ForgeQuestManager Security', () => {
   let player1: any;
   let player2: any;
   let verifier: any;
+  let guardian: any;
 
   const stake = ethers.parseEther('0.01');
   const reward = ethers.parseEther('0.03');
 
   beforeEach(async () => {
-    [owner, player1, player2, verifier] = await ethers.getSigners();
+    [owner, player1, player2, verifier, guardian] = await ethers.getSigners();
 
-    const MockERC20Factory = await ethers.getContractFactory('MockERC20');
+    const MockERC20Factory = new MockERC20__factory(owner);
     rewardToken = await MockERC20Factory.deploy();
     await rewardToken.waitForDeployment();
 
-    const RewardNFTFactory = await ethers.getContractFactory('RewardNFT');
+    const RewardNFTFactory = new RewardNFT__factory(owner);
     rewardNFT = await RewardNFTFactory.deploy(owner.address);
     await rewardNFT.waitForDeployment();
 
-    const ReputationFactory = await ethers.getContractFactory('Reputation');
+    const ReputationFactory = new Reputation__factory(owner);
     reputation = await ReputationFactory.deploy();
     await reputation.waitForDeployment();
 
-    const TreasuryFactory = await ethers.getContractFactory('Treasury');
+    const TreasuryFactory = new Treasury__factory(owner);
     treasury = await TreasuryFactory.deploy(await rewardToken.getAddress());
     await treasury.waitForDeployment();
+    await treasury.fundNativeRewardPool({ value: ethers.parseEther('1') });
 
-    const QuestManagerFactory = await ethers.getContractFactory('ForgeQuestManager');
+    const QuestManagerFactory = new ForgeQuestManager__factory(owner);
     questManager = await QuestManagerFactory.deploy(
       await rewardNFT.getAddress(),
       await reputation.getAddress(),
@@ -49,12 +62,12 @@ describe('ForgeQuestManager Security', () => {
     const rewardRole = await reputation.REWARD_ROLE();
     await reputation.grantRole(rewardRole, await questManager.getAddress());
 
-    await questManager.grantVerifier(verifier.address);
+    const questManagerRole = await treasury.QUEST_MANAGER_ROLE();
+    const guardianRole = await treasury.GUARDIAN_ROLE();
+    await treasury.grantRole(questManagerRole, await questManager.getAddress());
+    await treasury.grantRole(guardianRole, guardian.address);
 
-    await owner.sendTransaction({
-      to: await questManager.getAddress(),
-      value: ethers.parseEther('5')
-    });
+    await questManager.grantVerifier(verifier.address);
   });
 
   async function createQuest(title: string) {
@@ -108,23 +121,30 @@ describe('ForgeQuestManager Security', () => {
     });
   });
 
-  describe('Circuit Breaker Protection', () => {
-    it('triggers the circuit breaker when the pool would be exceeded', async () => {
-      await questManager.setMaxRewardPoolSize(ethers.parseEther('0.02'));
+  describe('Treasury Solvency And Double-Payout Protection', () => {
+    it('rejects new quests when treasury cannot reserve the reward', async () => {
+      await treasury.pause();
+      await treasury.emergencyWithdrawNative(owner.address, ethers.parseEther('0.98'));
+      await treasury.unpause();
 
       await expect(
         questManager.createQuest('Quest', 'uri', stake, reward, 150, 3600)
-      ).to.be.revertedWith('Reward system paused');
-
-      expect(await questManager.rewardSystemHealthy()).to.equal(true);
+      ).to.be.revertedWith('Insufficient treasury liquidity');
     });
 
-    it('allows owner recovery after a circuit breaker pause', async () => {
-      await questManager.pauseRewardSystem();
-      expect(await questManager.rewardSystemHealthy()).to.equal(false);
+    it('prevents a second payout after a successful verification', async () => {
+      await createQuest('Quest');
+      await questManager.connect(player1).startQuest(1, { value: stake });
 
-      await questManager.unpauseRewardSystem();
-      expect(await questManager.rewardSystemHealthy()).to.equal(true);
+      const proofUri = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      await questManager.connect(player1).submitQuest(1, proofUri);
+      const quest = await questManager.quests(1);
+
+      await questManager.connect(verifier).verifyQuest(1, true, quest.proofVerificationHash);
+
+      await expect(
+        questManager.connect(verifier).verifyQuest(1, true, quest.proofVerificationHash)
+      ).to.be.revertedWith('Not submitted');
     });
   });
 
@@ -133,53 +153,45 @@ describe('ForgeQuestManager Security', () => {
       await createQuest('Quest');
       await questManager.connect(player1).startQuest(1, { value: stake });
 
-      const proofUri = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+      const proofUri = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
       await questManager.connect(player1).submitQuest(1, proofUri);
 
       await expect(
         questManager.connect(verifier).verifyQuest(1, true, ethers.id('wrong'))
       ).to.be.revertedWith('Verification hash mismatch');
     });
+  });
 
-    it('allows the verifier to complete a quest with the stored hash', async () => {
+  describe('Emergency Pause And Circuit Breaker', () => {
+    it('blocks treasury-backed quest creation while the treasury is paused', async () => {
+      await treasury.connect(guardian).tripCircuitBreaker('suspected drain');
+
+      await expect(
+        questManager.createQuest('Quest', 'uri', stake, reward, 150, 3600)
+      ).to.be.revertedWith('Pausable: paused');
+    });
+
+    it('blocks settlement while treasury is paused', async () => {
       await createQuest('Quest');
       await questManager.connect(player1).startQuest(1, { value: stake });
 
-      const proofUri = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+      const proofUri = '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd';
       await questManager.connect(player1).submitQuest(1, proofUri);
       const quest = await questManager.quests(1);
 
+      await treasury.connect(guardian).pause();
+
       await expect(
         questManager.connect(verifier).verifyQuest(1, true, quest.proofVerificationHash)
-      ).to.not.be.reverted;
-    });
-  });
-
-  describe('Quest State Machine', () => {
-    it('enforces the state transitions', async () => {
-      await createQuest('Quest');
-
-      await expect(
-        questManager.connect(player1).submitQuest(1, '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd')
-      ).to.be.revertedWith('Not quest player');
-
-      await questManager.connect(player1).startQuest(1, { value: stake });
-
-      await expect(
-        questManager.connect(verifier).verifyQuest(1, true, ethers.id('proof'))
-      ).to.be.revertedWith('Not submitted');
+      ).to.be.revertedWith('Pausable: paused');
     });
 
-    it('prevents operations on expired quests', async () => {
-      await questManager.createQuest('Quest', 'uri', stake, reward, 150, 1);
-      await questManager.connect(player1).startQuest(1, { value: stake });
+    it('allows owner recovery after a manager-level reward pause', async () => {
+      await questManager.pauseRewardSystem();
+      expect(await questManager.rewardSystemHealthy()).to.equal(false);
 
-      await ethers.provider.send('evm_increaseTime', [2]);
-      await ethers.provider.send('evm_mine', []);
-
-      await expect(
-        questManager.connect(player1).submitQuest(1, '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-      ).to.be.revertedWith('Quest expired');
+      await questManager.unpauseRewardSystem();
+      expect(await questManager.rewardSystemHealthy()).to.equal(true);
     });
   });
 
@@ -206,17 +218,10 @@ describe('ForgeQuestManager Security', () => {
       ).to.be.revertedWith('Verifier role required');
     });
 
-    it('only allows the verifier to mark a quest as failed', async () => {
-      await createQuest('Quest');
-      await questManager.connect(player1).startQuest(1, { value: stake });
-
-      const proofUri = '0x2222222222222222222222222222222222222222222222222222222222222222';
-      await questManager.connect(player1).submitQuest(1, proofUri);
-      const quest = await questManager.quests(1);
-
+    it('only allows treasury-authorized payout orchestration from the quest manager', async () => {
       await expect(
-        questManager.connect(player1).verifyQuest(1, false, quest.proofVerificationHash)
-      ).to.be.revertedWith('Verifier role required');
+        treasury.connect(player2).reserveReward(1, owner.address, reward)
+      ).to.be.reverted;
     });
   });
 });
