@@ -16,6 +16,24 @@ import {
   verifyWalletChallenge
 } from '../services/auth';
 
+function normalizeRequestedChainId(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) && value > 0 ? value : undefined;
+  }
+
+  if (typeof value === 'string') {
+    const normalized = value.trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    const parsed = /^0x[0-9a-f]+$/i.test(normalized) ? Number.parseInt(normalized, 16) : Number(normalized);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  return undefined;
+}
+
 function setNoStore(res: Response) {
   res.set('Cache-Control', 'no-store');
 }
@@ -79,14 +97,21 @@ function deriveAuthContext() {
 
 export async function createAuthNonce(req: Request, res: Response) {
   const wallet = req.body.wallet?.toString();
-  const chainId = Number(req.body.chainId);
+  const chainId = normalizeRequestedChainId(req.body.chainId);
 
   if (!wallet) {
     return sendAuthError(res, new AuthError('AUTH_REQUEST_INVALID', 'Wallet is required', 400, 'sign'));
   }
 
-  if (!Number.isInteger(chainId) || chainId <= 0) {
+  if (typeof chainId !== 'number') {
     return sendAuthError(res, new AuthError('AUTH_CHAIN_ID_INVALID', 'A valid chainId is required', 400, 'sign'));
+  }
+
+  if (chainId !== env.CELO_CHAIN_ID) {
+    return sendAuthError(
+      res,
+      new AuthError('AUTH_CHAIN_MISMATCH', `QuestForge AI supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
+    );
   }
 
   try {
@@ -107,20 +132,21 @@ export async function verifyAuthSignature(req: Request, res: Response) {
   const wallet = req.body.wallet?.toString();
   const nonce = req.body.nonce?.toString();
   const signature = req.body.signature?.toString();
-  const rawChainId = req.body.chainId;
-  const chainId =
-    typeof rawChainId === 'number'
-      ? rawChainId
-      : typeof rawChainId === 'string' && rawChainId.trim()
-        ? Number(rawChainId)
-        : undefined;
+  const chainId = normalizeRequestedChainId(req.body.chainId);
 
   if (!wallet || !nonce || !signature) {
     return sendAuthError(res, new AuthError('AUTH_REQUEST_INVALID', 'Wallet, nonce, and signature are required', 400, 'sign'));
   }
 
-  if (typeof chainId === 'number' && (!Number.isInteger(chainId) || chainId <= 0)) {
+  if (typeof req.body.chainId !== 'undefined' && typeof chainId !== 'number') {
     return sendAuthError(res, new AuthError('AUTH_CHAIN_ID_INVALID', 'chainId must be a positive integer', 400, 'sign'));
+  }
+
+  if (typeof chainId === 'number' && chainId !== env.CELO_CHAIN_ID) {
+    return sendAuthError(
+      res,
+      new AuthError('AUTH_CHAIN_MISMATCH', `QuestForge AI supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
+    );
   }
 
   try {
