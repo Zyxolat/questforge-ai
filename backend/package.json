@@ -12,7 +12,9 @@
   },
   "dependencies": {
     "@prisma/client": "^5.11.0",
+    "@socket.io/redis-adapter": "^8.3.0",
     "ajv": "^8.12.0",
+    "bullmq": "^5.76.8",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
     "ethers": "^6.9.3",
@@ -20,10 +22,13 @@
     "express-rate-limit": "^6.9.3",
     "express-validator": "^7.0.1",
     "helmet": "^7.0.1",
+    "ioredis": "^5.10.1",
     "openai": "^4.0.0",
     "pg": "^8.12.0",
+    "rate-limit-redis": "^3.0.1",
     "redis": "^4.6.10",
-    "rate-limit-redis": "^3.0.1"
+    "socket.io": "^4.8.3",
+    "winston": "^3.11.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.14",

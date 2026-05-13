@@ -33,8 +33,16 @@ const ReputationABI = [
 ];
 
 const TreasuryABI = [
+  'function questFunds(uint256) view returns (uint256 reservedReward,uint256 lockedStake,address player,uint8 state)',
+  'function availableRewardLiquidity() view returns (uint256)',
+  'function isSolvent() view returns (bool)',
   'function pause() external',
-  'function unpause() external'
+  'function unpause() external',
+  'event RewardReserved(uint256 indexed questId,address indexed creator,uint256 amount,uint256 totalReservedRewards)',
+  'event StakeLocked(uint256 indexed questId,address indexed player,uint256 amount,uint256 totalLockedStakes)',
+  'event RewardReleased(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 stakeAmount,uint256 totalPayout)',
+  'event RewardPaid(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 stakeAmount,uint256 totalPayout)',
+  'event RewardRefunded(uint256 indexed questId,address indexed recipient,uint256 rewardAmount,uint256 stakeAmount,bytes32 reason)'
 ];
 
 const forgeQuestManager = new ethers.Contract(forgeQuestManagerAddress, ForgeQuestManagerABI, provider) as ethers.Contract;

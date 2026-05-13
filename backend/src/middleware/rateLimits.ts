@@ -165,8 +165,17 @@ export function createCompositeRateLimiter(...limiters: Array<(req: Request, res
 /**
  * Custom rate limit error handler
  */
-export function handleRateLimitError(err: any, req: Request, res: Response, next: NextFunction) {
-  if (err.status === 429) {
+type RateLimitError = {
+  status?: number;
+  retryAfter?: number;
+};
+
+function isRateLimitError(err: unknown): err is RateLimitError {
+  return typeof err === 'object' && err !== null;
+}
+
+export function handleRateLimitError(err: unknown, req: Request, res: Response, next: NextFunction) {
+  if (isRateLimitError(err) && err.status === 429) {
     return res.status(429).json({
       error: 'Too many requests',
       retryAfter: err.retryAfter || 60

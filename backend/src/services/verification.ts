@@ -543,7 +543,7 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       expiresAt: quest.expiresAt
     });
 
-    await settleVerificationSuccess(quest, proof.id, 'Deterministic onchain verification passed');
+    await settleVerificationSuccess(quest, proof.id, 'Deterministic onchain verification passed and treasury settlement executed');
     logger.info('Proof verification approved', {
       questId: quest.id,
       chainQuestId: quest.chainQuestId.toString(),

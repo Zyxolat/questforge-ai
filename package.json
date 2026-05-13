@@ -1,0 +1,64 @@
+{
+  "name": "questforge-ai",
+  "version": "1.0.0",
+  "description": "QuestForge AI - Production-Grade Quest Gaming Platform on Celo",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "prepare": "husky",
+    "lint": "npm run lint:backend && npm run lint:frontend && npm run lint:contracts",
+    "lint:backend": "eslint --max-warnings=0 \"backend/src/**/*.{ts,js}\"",
+    "lint:frontend": "eslint --max-warnings=0 \"frontend/src/**/*.{ts,tsx,js,jsx}\"",
+    "lint:contracts": "eslint --max-warnings=0 \"contracts/{scripts,test}/**/*.{ts,js}\" contracts/hardhat.config.ts",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install && cd ../contracts && npm install",
+    "build": "npm run build:backend && npm run build:frontend && npm run build:contracts",
+    "build:contracts": "npm --prefix contracts run build",
+    "test:contracts": "cd contracts && npm run test",
+    "build:backend": "npm --prefix backend run build",
+    "build:frontend": "npm --prefix frontend run build",
+    "build:all": "npm run build",
+    "prisma:generate": "npm --prefix backend run prisma:generate --",
+    "prisma:migrate": "npm --prefix backend run prisma:migrate --",
+    "prisma:migrate:deploy": "npm --prefix backend run prisma:migrate:deploy --",
+    "validate:production-env": "ts-node scripts/validate-production-env.ts",
+    "validate:treasury": "ts-node scripts/validate-treasury.ts",
+    "validate:gameplay": "ts-node scripts/validate-gameplay.ts",
+    "validate:security": "ts-node scripts/validate-security.ts",
+    "validate:minipay": "ts-node scripts/validate-minipay.ts",
+    "validate:backend-runtime": "ts-node scripts/validate-backend-runtime.ts",
+    "validate:all": "npm run validate:production-env && npm run build:contracts && npm run test:contracts && npm run validate:treasury && npm run validate:gameplay && npm run validate:security && npm run validate:backend-runtime",
+    "deploy:production": "ts-node scripts/deploy-production.ts",
+    "generate:report": "ts-node scripts/generate-deployment-report.ts",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev",
+    "start:backend": "cd backend && npm start",
+    "start:frontend": "cd frontend && npm start"
+  },
+  "lint-staged": {
+    "**/*.{ts,tsx,js,jsx}": "eslint --fix --no-warn-ignored",
+    "**/*.{json,md}": "prettier --write"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.15.21",
+    "@typescript-eslint/eslint-plugin": "^8.59.3",
+    "@typescript-eslint/parser": "^8.59.3",
+    "dotenv": "^16.5.0",
+    "eslint": "^10.3.0",
+    "globals": "^17.6.0",
+    "husky": "^9.1.7",
+    "jiti": "^2.7.0",
+    "lint-staged": "^15.5.2",
+    "prettier": "^3.5.3",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.59.3"
+  },
+  "dependencies": {
+    "axios": "^1.7.2",
+    "ethers": "^6.16.0"
+  }
+}
