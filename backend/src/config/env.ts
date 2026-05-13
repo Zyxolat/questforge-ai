@@ -181,5 +181,14 @@ export const env = {
   AUTH_COOKIE_SAME_SITE: parseSameSite('AUTH_COOKIE_SAME_SITE', optionalEnv('AUTH_COOKIE_SAME_SITE'), 'lax'),
   JWT_SECRET: jwtSecret,
   JWT_EXPIRES_IN: jwtExpiresIn,
-  JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(jwtExpiresIn)
+  JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(jwtExpiresIn),
+  // Event Streaming Configuration
+  ENABLE_EVENT_STREAM: parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), true),
+  EVENT_CHUNK_SIZE: parsePositiveInt('EVENT_CHUNK_SIZE', optionalEnv('EVENT_CHUNK_SIZE') || '5000'),
+  EVENT_POLL_INTERVAL_MS: parsePositiveInt('EVENT_POLL_INTERVAL_MS', optionalEnv('EVENT_POLL_INTERVAL_MS') || '5000'),
+  INDEXER_RETRY_LIMIT: parsePositiveInt('INDEXER_RETRY_LIMIT', optionalEnv('INDEXER_RETRY_LIMIT') || '10'),
+  INDEXER_BACKOFF_MS: parsePositiveInt('INDEXER_BACKOFF_MS', optionalEnv('INDEXER_BACKOFF_MS') || '2000'),
+  WEBSOCKET_ENABLED: parseBoolean('WEBSOCKET_ENABLED', optionalEnv('WEBSOCKET_ENABLED'), true),
+  RPC_TIMEOUT_MS: parsePositiveInt('RPC_TIMEOUT_MS', optionalEnv('RPC_TIMEOUT_MS') || '30000'),
+  EVENT_WORKER_CONCURRENCY: parsePositiveInt('EVENT_WORKER_CONCURRENCY', optionalEnv('EVENT_WORKER_CONCURRENCY') || '5')
 } as const;

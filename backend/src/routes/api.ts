@@ -4,6 +4,7 @@ import {
   getDailyMissions,
   getNPCDialogue,
   getActiveQuests,
+  getQuestOrchestrationDiagnostics,
   submitProof
 } from '../controllers/questController';
 import { getPlayerStats, getProgression } from '../controllers/userController';
@@ -15,6 +16,7 @@ import {
   refreshAuthenticatedSession,
   verifyAuthSignature
 } from '../controllers/authController';
+import { getRealtimeBootstrap, getRealtimeSync } from '../controllers/realtimeController';
 import { requireAuth } from '../middleware/auth';
 import {
   authNonceLimiter,
@@ -37,6 +39,9 @@ apiRouter.post('/quests/generate', requireAuth, questGenerationLimiter, generate
 apiRouter.post('/quests/submit-proof', requireAuth, proofSubmissionLimiter, submitProof);
 apiRouter.get('/quests/daily', getDailyMissions);
 apiRouter.get('/quests/active', requireAuth, getActiveQuestsLimiter, getActiveQuests);
+apiRouter.get('/quests/orchestration/diagnostics', getQuestOrchestrationDiagnostics);
+apiRouter.get('/realtime/bootstrap', requireAuth, getRealtimeBootstrap);
+apiRouter.get('/realtime/sync', requireAuth, getRealtimeSync);
 apiRouter.get('/npc/dialogue', getNPCDialogue);
 apiRouter.get('/player/stats', getPlayerStats);
 apiRouter.get('/player/progression', getProgression);

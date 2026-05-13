@@ -31,6 +31,7 @@ type ParsedIndexedLog = {
 };
 
 type QuestMetadata = {
+  orchestrationId?: string;
   title?: string;
   description?: string;
   difficulty?: number;
@@ -40,6 +41,9 @@ type QuestMetadata = {
   validationRules?: string[];
   chain?: string;
   version?: string;
+  worldStateVersion?: number;
+  transactionCount?: number;
+  requiredTxTypes?: string[];
 };
 
 type QuestSnapshot = {
@@ -264,10 +268,49 @@ async function applyQuestSnapshot(
     playerId?: string;
   }
 ) {
-  const existing = await tx.quest.findFirst({
-    where: { chainQuestId: input.snapshot.chainQuestId }
-  });
   const metadata = input.snapshot.metadata;
+  const [existing] = metadata.orchestrationId
+    ? await tx.$queryRaw<
+        Array<{
+          id: string;
+          startedAt: Date | null;
+          transactionCount: number;
+          requiredTxTypes: Prisma.JsonValue | null;
+        }>
+      >(
+        Prisma.sql`
+          SELECT
+            id,
+            "startedAt",
+            "transactionCount",
+            "requiredTxTypes"
+          FROM "Quest"
+          WHERE "chainQuestId" = ${input.snapshot.chainQuestId}
+             OR metadata->>'orchestrationId' = ${metadata.orchestrationId}
+          ORDER BY "createdAt" DESC
+          LIMIT 1
+        `
+      )
+    : await tx.$queryRaw<
+        Array<{
+          id: string;
+          startedAt: Date | null;
+          transactionCount: number;
+          requiredTxTypes: Prisma.JsonValue | null;
+        }>
+      >(
+        Prisma.sql`
+          SELECT
+            id,
+            "startedAt",
+            "transactionCount",
+            "requiredTxTypes"
+          FROM "Quest"
+          WHERE "chainQuestId" = ${input.snapshot.chainQuestId}
+          ORDER BY "createdAt" DESC
+          LIMIT 1
+        `
+      );
   const data = {
     title: metadata.title || input.snapshot.title,
     description: metadata.description || 'Quest indexed from onchain state.',
@@ -282,9 +325,21 @@ async function applyQuestSnapshot(
     questType: metadata.questType || 'AI Quest',
     objective: metadata.objective || 'Submit proof onchain.',
     lore: metadata.lore || 'Recovered from onchain quest metadata.',
+    worldStateVersion:
+      typeof metadata.worldStateVersion === 'number' && Number.isFinite(metadata.worldStateVersion)
+        ? metadata.worldStateVersion
+        : 1,
     stakeAmount: input.snapshot.stakeAmount,
     rewardAmount: input.snapshot.rewardAmount,
     xpReward: input.snapshot.xpReward,
+    transactionCount:
+      typeof metadata.transactionCount === 'number' && Number.isFinite(metadata.transactionCount)
+        ? metadata.transactionCount
+        : existing?.transactionCount ?? 0,
+    requiredTxTypes:
+      Array.isArray(metadata.requiredTxTypes) && metadata.requiredTxTypes.every((value) => typeof value === 'string')
+        ? metadata.requiredTxTypes
+        : existing?.requiredTxTypes ?? Prisma.JsonNull,
     chainQuestId: input.snapshot.chainQuestId,
     status: input.forcedStatus || input.snapshot.status,
     creator: input.snapshot.creator,

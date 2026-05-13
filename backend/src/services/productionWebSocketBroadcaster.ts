@@ -103,6 +103,42 @@ class ProductionWebSocketBroadcaster {
           logger.debug('[WS] User unsubscribed', { socketId: socket.id, roomId });
         });
 
+        socket.on('subscribe:clan', (clanId: string) => {
+          if (!clanId || typeof clanId !== 'string') {
+            socket.emit('error', 'Invalid clan');
+            return;
+          }
+
+          const roomId = `clan:${clanId.toLowerCase()}`;
+          socket.join(roomId);
+          logger.debug('[WS] Clan subscribed', { socketId: socket.id, roomId });
+        });
+
+        socket.on('unsubscribe:clan', (clanId: string) => {
+          if (!clanId || typeof clanId !== 'string') return;
+          const roomId = `clan:${clanId.toLowerCase()}`;
+          socket.leave(roomId);
+          logger.debug('[WS] Clan unsubscribed', { socketId: socket.id, roomId });
+        });
+
+        socket.on('subscribe:faction', (factionId: string) => {
+          if (!factionId || typeof factionId !== 'string') {
+            socket.emit('error', 'Invalid faction');
+            return;
+          }
+
+          const roomId = `faction:${factionId.toLowerCase()}`;
+          socket.join(roomId);
+          logger.debug('[WS] Faction subscribed', { socketId: socket.id, roomId });
+        });
+
+        socket.on('unsubscribe:faction', (factionId: string) => {
+          if (!factionId || typeof factionId !== 'string') return;
+          const roomId = `faction:${factionId.toLowerCase()}`;
+          socket.leave(roomId);
+          logger.debug('[WS] Faction unsubscribed', { socketId: socket.id, roomId });
+        });
+
         socket.on('ping', () => {
           socket.emit('pong');
         });

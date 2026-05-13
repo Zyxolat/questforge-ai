@@ -1,10 +1,11 @@
 import { Prisma, type ChainEvent, type TreasuryPayoutStatus } from '@prisma/client';
 import { Worker, Job } from 'bullmq';
 import { env } from '../config/env';
+import { gameStateProjector } from './gameStateProjector';
 import { logger } from './logger';
 import { prisma } from './chain';
 import { ChainEventJob } from './productionEventQueue';
-import { productionWebSocketBroadcaster } from './productionWebSocketBroadcaster';
+import { worldStateCoordinator } from './worldStateCoordinator';
 
 const TREASURY_STATUS_BY_EVENT: Record<string, TreasuryPayoutStatus> = {
   reward_reserved: 'RESERVED',
@@ -131,24 +132,7 @@ class ProductionEventWorker {
           .catch(() => null);
       }
 
-      // Broadcast to WebSocket
-      const broadcastEvent = {
-        eventType: chainEvent.eventType,
-        eventName: chainEvent.eventName,
-        blockNumber: chainEvent.blockNumber,
-        transactionHash: chainEvent.transactionHash,
-        timestamp: chainEvent.blockTimestamp,
-        data: chainEvent.decodedData || chainEvent.data,
-        chainQuestId: chainEvent.chainQuestId || undefined,
-        playerWallet: chainEvent.playerWallet || undefined,
-        creatorWallet: chainEvent.creatorWallet || undefined
-      };
-
-      try {
-        productionWebSocketBroadcaster.broadcastQuestEvent(broadcastEvent);
-      } catch (error) {
-        logger.error('[WORKER] Failed to broadcast', { error: (error as Error).message });
-      }
+      await gameStateProjector.projectChainEvent(chainEvent);
 
       const processingTime = Date.now() - startTime;
       logger.debug('[WORKER] Processed', { jobId: job.id, processingTimeMs: processingTime });
@@ -184,18 +168,38 @@ class ProductionEventWorker {
       switch (eventType) {
         case 'quest_created':
           await this.handleQuestCreated(chainEvent);
+          await worldStateCoordinator.handleGameplaySignal({
+            trigger: 'event:quest_created',
+            chainQuestId: chainEvent.chainQuestId?.toString(),
+            playerWallet: chainEvent.playerWallet || undefined
+          });
           break;
         case 'quest_started':
           await this.handleQuestStarted(chainEvent);
+          await worldStateCoordinator.handleGameplaySignal({
+            trigger: 'event:quest_started',
+            chainQuestId: chainEvent.chainQuestId?.toString(),
+            playerWallet: chainEvent.playerWallet || undefined
+          });
           break;
         case 'proof_submitted':
           await this.handleProofSubmitted(chainEvent);
           break;
         case 'reward_claimed':
           await this.handleRewardClaimed(chainEvent);
+          await worldStateCoordinator.handleGameplaySignal({
+            trigger: 'event:reward_claimed',
+            chainQuestId: chainEvent.chainQuestId?.toString(),
+            playerWallet: chainEvent.playerWallet || undefined
+          });
           break;
         case 'nft_minted':
           await this.handleNFTMinted(chainEvent);
+          await worldStateCoordinator.handleGameplaySignal({
+            trigger: 'event:nft_minted',
+            chainQuestId: chainEvent.chainQuestId?.toString(),
+            playerWallet: chainEvent.playerWallet || undefined
+          });
           break;
         case 'reward_reserved':
         case 'stake_locked':
@@ -203,6 +207,11 @@ class ProductionEventWorker {
         case 'reward_paid':
         case 'reward_refunded':
           await this.handleTreasuryEvent(chainEvent);
+          await worldStateCoordinator.handleGameplaySignal({
+            trigger: `event:${eventType}`,
+            chainQuestId: chainEvent.chainQuestId?.toString(),
+            playerWallet: chainEvent.playerWallet || undefined
+          });
           break;
         default:
           logger.debug('[WORKER] Unknown event type', { eventType });
