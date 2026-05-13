@@ -229,14 +229,10 @@ api.interceptors.response.use(
 
     config._authRetried = true;
 
-    try {
-      const refreshedSession = await restoreAuthSession({ notifyFailure: true });
-      config.headers = config.headers ?? {};
-      config.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
-      return api.request(config);
-    } catch (refreshError) {
-      throw refreshError;
-    }
+    const refreshedSession = await restoreAuthSession({ notifyFailure: true });
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${refreshedSession.accessToken}`;
+    return api.request(config);
   }
 );
 
@@ -272,8 +268,16 @@ export function fetchActiveQuests() {
   return api.get('/quests/active');
 }
 
-export function fetchNPCDialogue(type: string, player: string) {
-  return api.get('/npc/dialogue', { params: { type, player } });
+export function fetchNPCDialogue(type: string, player: string, wallet?: string | null) {
+  return api.get('/npc/dialogue', { params: { type, player, wallet: wallet || undefined } });
+}
+
+export function fetchRealtimeBootstrap() {
+  return api.get('/realtime/bootstrap');
+}
+
+export function fetchRealtimeSync(afterId: number) {
+  return api.get('/realtime/sync', { params: { afterId } });
 }
 
 export function generateQuest() {

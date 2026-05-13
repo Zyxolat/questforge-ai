@@ -12,6 +12,9 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
     address,
     balance,
     network,
+    chainId,
+    isCorrectNetwork,
+    isMiniPay,
     status,
     authStatus,
     authMessage,
@@ -38,7 +41,13 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5 text-sm text-slate-200">
             <p className="text-xs uppercase tracking-[0.35em] text-glowyellow">Status</p>
             <p className="mt-2 text-lg font-semibold text-white">{status === 'connected' ? 'Connected' : status === 'unsupported' ? 'Unsupported Wallet' : 'Disconnected'}</p>
-            <p className="mt-2 text-sm text-slate-400">Network: {network ?? 'Unknown'}</p>
+            <p className="mt-2 text-sm text-slate-400">Detected network: {network ?? 'No network detected'}</p>
+            <p className="mt-2 text-sm text-slate-400">Detected chainId: {chainId ?? '---'}</p>
+            <p className="mt-2 text-sm text-slate-400">Expected chainId: 42220</p>
+            <p className={`mt-2 text-sm ${isCorrectNetwork ? 'text-emerald-200' : 'text-amber-200'}`}>
+              {isCorrectNetwork ? 'Connected to Celo Mainnet.' : 'Unsupported network. Switch to Celo Mainnet to continue.'}
+            </p>
+            {isMiniPay ? <p className="mt-2 text-sm text-softyellow">MiniPay wallet detected.</p> : null}
             <p className="mt-2 text-sm text-slate-400">Balance: {balance} CELO</p>
             <p className="mt-2 text-sm text-slate-400">Address: {address ?? '---'}</p>
             <p className="mt-2 text-sm text-slate-400">
@@ -60,7 +69,12 @@ export default function WalletModal({ open, onClose }: WalletModalProps) {
 
           <div className="grid gap-3 sm:grid-cols-2">
             <GlowButton label={address ? 'Disconnect' : 'Connect Wallet'} onClick={address ? () => void disconnectWallet() : connectWallet} />
-            <GlowButton label="Switch to Celo" onClick={switchCeloNetwork} className="bg-white/10 text-white hover:bg-white/20" />
+            <GlowButton
+              label={isCorrectNetwork ? 'Celo Mainnet Ready' : 'Switch to Celo Mainnet'}
+              onClick={switchCeloNetwork}
+              className="bg-white/10 text-white hover:bg-white/20"
+              disabled={isCorrectNetwork}
+            />
           </div>
           {address && authStatus !== 'authenticated' ? (
             <GlowButton

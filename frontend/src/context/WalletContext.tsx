@@ -10,6 +10,7 @@ import {
   subscribeToAuthEvents,
   verifyWalletSignature
 } from '../lib/api';
+import { formatDetectedChain, formatSupportedNetworkMessage, isSupportedCeloChain, normalizeChainId } from '../lib/celo';
 import { env } from '../lib/env';
 
 type WalletStatus = 'disconnected' | 'connected' | 'unsupported';
@@ -23,6 +24,8 @@ interface WalletContextValue {
   balance: string;
   network: string | null;
   chainId: number | null;
+  isCorrectNetwork: boolean;
+  isMiniPay: boolean;
   status: WalletStatus;
   authStatus: AuthStatus;
   authMessage: string | null;
@@ -38,7 +41,55 @@ interface WalletContextValue {
 const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
 const targetChainId = env.CELO_CHAIN_ID;
-const targetChainHex = `0x${targetChainId.toString(16)}`;
+const targetChainHex = env.CELO_CHAIN_HEX;
+
+type WalletProviderShape = ethers.Eip1193Provider & {
+  chainId?: string | number;
+  isMiniPay?: boolean;
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+};
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function withRpcRetry<T>(label: string, operation: () => Promise<T>, attempts = 3) {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (attempt < attempts) {
+        await wait(attempt * 200);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+function getChainDiagnostics(rawChainId: unknown, fallbackChainId?: unknown, fallbackName?: string | null) {
+  const normalizedChainId = normalizeChainId(rawChainId) ?? normalizeChainId(fallbackChainId);
+  return {
+    rawChainId,
+    normalizedChainId,
+    expectedChainId: targetChainId,
+    detectedNetwork: formatDetectedChain(normalizedChainId, fallbackName)
+  };
+}
+
+function isAddChainRequired(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const code = 'code' in error ? Number((error as { code?: unknown }).code) : NaN;
+  const message = 'message' in error ? String((error as { message?: unknown }).message).toLowerCase() : '';
+  return code === 4902 || message.includes('unrecognized chain') || message.includes('unknown chain');
+}
 
 function normalizeAddress(address: string | null | undefined) {
   return address?.trim().toLowerCase() || null;
@@ -83,6 +134,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [authStatus, setAuthStatus] = useState<AuthStatus>('idle');
   const [authMessage, setAuthMessage] = useState<string | null>(null);
   const [walletReady, setWalletReady] = useState(false);
+  const [isMiniPay, setIsMiniPay] = useState(false);
 
   const restorePromiseRef = useRef<Promise<RestoreOutcome> | null>(null);
   const authenticatePromiseRef = useRef<Promise<void> | null>(null);
@@ -155,7 +207,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   async function syncWalletState(browserProvider: BrowserProvider, reason: 'init' | 'connect' | 'change' = 'init') {
     try {
-      const accounts = (await browserProvider.send('eth_accounts', [])) as string[];
+      const ethereum = (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+      const accounts = (await withRpcRetry('eth_accounts', () => browserProvider.send('eth_accounts', []))) as string[];
 
       if (!accounts.length) {
         if (activeAddressRef.current) {
@@ -167,22 +220,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const signerInstance = await browserProvider.getSigner();
+      const signerInstance = await withRpcRetry('getSigner', () => browserProvider.getSigner());
       const nextAddress = await signerInstance.getAddress();
-      const networkData = await browserProvider.getNetwork();
-      const nextChainId = Number(networkData.chainId);
-      const nextBalance = await browserProvider.getBalance(nextAddress);
+      const rawChainId = ethereum?.chainId ?? (await withRpcRetry('eth_chainId', () => browserProvider.send('eth_chainId', [])));
+      const networkData = await withRpcRetry('getNetwork', () => browserProvider.getNetwork());
+      const diagnostics = getChainDiagnostics(rawChainId, networkData.chainId, networkData.name);
+      const nextBalance = await withRpcRetry('getBalance', () => browserProvider.getBalance(nextAddress));
       const previousAddress = activeAddressRef.current;
       const changedWallet = Boolean(previousAddress && normalizeAddress(previousAddress) !== normalizeAddress(nextAddress));
+
+      console.info('[WalletContext] chain diagnostics', {
+        reason,
+        rawChainId: diagnostics.rawChainId,
+        normalizedChainId: diagnostics.normalizedChainId,
+        expectedChainId: diagnostics.expectedChainId
+      });
 
       activeAddressRef.current = nextAddress;
       setProvider(browserProvider);
       setSigner(signerInstance);
       setAddress(nextAddress);
-      setChainId(nextChainId);
-      setNetwork(networkData.name);
+      setChainId(diagnostics.normalizedChainId);
+      setNetwork(diagnostics.detectedNetwork);
       setBalance(formatBalance(nextBalance));
       setStatus('connected');
+      setIsMiniPay(Boolean(ethereum?.isMiniPay));
 
       if (changedWallet) {
         await logoutAuthSession().catch(() => undefined);
@@ -191,8 +253,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
 
       const restoreOutcome = await restoreSessionForWallet(nextAddress);
-      if (reason === 'connect' && !restoreOutcome.restored && restoreOutcome.failure.code === 'AUTH_REFRESH_TOKEN_MISSING') {
-        await authenticateWallet(signerInstance, nextAddress, nextChainId);
+      if (
+        reason === 'connect' &&
+        !restoreOutcome.restored &&
+        restoreOutcome.failure.code === 'AUTH_REFRESH_TOKEN_MISSING' &&
+        isSupportedCeloChain(diagnostics.normalizedChainId)
+      ) {
+        await authenticateWallet(signerInstance, nextAddress, diagnostics.normalizedChainId);
+      }
+
+      if (!isSupportedCeloChain(diagnostics.normalizedChainId)) {
+        setAuthMessage(formatSupportedNetworkMessage(diagnostics.normalizedChainId, networkData.name));
       }
     } catch (error) {
       console.error(error);
@@ -218,6 +289,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     if (!activeSigner || !activeAddress || !activeChainId) {
       clearAuthState('unauthenticated', 'Connect your wallet before signing in.');
+      return;
+    }
+
+    if (!isSupportedCeloChain(activeChainId)) {
+      clearAuthState('unauthenticated', formatSupportedNetworkMessage(activeChainId, network));
       return;
     }
 
@@ -318,21 +394,30 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const browserProvider = new BrowserProvider(ethereum as ethers.Eip1193Provider);
+    const browserProvider = new BrowserProvider(ethereum as WalletProviderShape);
     setProvider(browserProvider);
 
-    const handleWalletUpdate = () => {
+    const handleAccountsChanged = () => {
+      void syncWalletState(browserProvider, 'change');
+    };
+    const handleChainChanged = (nextChainId?: unknown) => {
+      const diagnostics = getChainDiagnostics(nextChainId);
+      console.info('[WalletContext] chainChanged event', {
+        rawChainId: nextChainId,
+        normalizedChainId: diagnostics.normalizedChainId,
+        expectedChainId: diagnostics.expectedChainId
+      });
       void syncWalletState(browserProvider, 'change');
     };
 
     void syncWalletState(browserProvider, 'init');
 
-    (ethereum as { on: (event: string, listener: () => void) => void }).on('accountsChanged', handleWalletUpdate);
-    (ethereum as { on: (event: string, listener: () => void) => void }).on('chainChanged', handleWalletUpdate);
+    (ethereum as WalletProviderShape).on?.('accountsChanged', handleAccountsChanged);
+    (ethereum as WalletProviderShape).on?.('chainChanged', handleChainChanged);
 
     return () => {
-      (ethereum as { removeListener: (event: string, listener: () => void) => void }).removeListener('accountsChanged', handleWalletUpdate);
-      (ethereum as { removeListener: (event: string, listener: () => void) => void }).removeListener('chainChanged', handleWalletUpdate);
+      (ethereum as WalletProviderShape).removeListener?.('accountsChanged', handleAccountsChanged);
+      (ethereum as WalletProviderShape).removeListener?.('chainChanged', handleChainChanged);
     };
   }, [hasProvider]);
 
@@ -343,7 +428,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const ethereum = (window as Window & { ethereum?: ethers.Eip1193Provider }).ethereum;
+      const ethereum = (window as Window & { ethereum?: WalletProviderShape }).ethereum;
       if (!ethereum) {
         clearAuthState('error', 'No compatible wallet provider was found.');
         return;
@@ -352,6 +437,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       const browserProvider = new BrowserProvider(ethereum);
       await browserProvider.send('eth_requestAccounts', []);
       await syncWalletState(browserProvider, 'connect');
+      const rawChainId = ethereum.chainId ?? (await browserProvider.send('eth_chainId', []));
+      const normalizedChainId = normalizeChainId(rawChainId);
+
+      if (!isSupportedCeloChain(normalizedChainId)) {
+        await switchCeloNetwork(browserProvider, ethereum);
+      }
     } catch (error) {
       console.error(error);
       if (isSignatureRejection(error)) {
@@ -368,21 +459,62 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     clearWalletState('disconnected');
     clearAuthState('unauthenticated');
     setWalletReady(true);
+    setIsMiniPay(false);
   }
 
-  async function switchCeloNetwork() {
+  async function switchCeloNetwork(browserProviderOverride?: BrowserProvider | null, ethereumOverride?: WalletProviderShape | null) {
     if (!hasProvider) return;
     try {
-      const ethereum = (window as Window & { ethereum?: ethers.Eip1193Provider }).ethereum;
+      const ethereum = ethereumOverride ?? (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+      const browserProvider =
+        browserProviderOverride ?? (ethereum ? new BrowserProvider(ethereum as WalletProviderShape) : null);
+
       await ethereum?.request?.({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: targetChainHex }]
       });
+      if (browserProvider) {
+        await syncWalletState(browserProvider, 'change');
+      }
     } catch (error) {
+      if (isAddChainRequired(error)) {
+        try {
+          const ethereum = ethereumOverride ?? (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+          const browserProvider =
+            browserProviderOverride ?? (ethereum ? new BrowserProvider(ethereum as WalletProviderShape) : null);
+
+          await ethereum?.request?.({
+            method: 'wallet_addEthereumChain',
+            params: [
+              {
+                chainId: targetChainHex,
+                chainName: env.CELO_CHAIN_NAME,
+                nativeCurrency: {
+                  name: 'Celo',
+                  symbol: 'CELO',
+                  decimals: 18
+                },
+                rpcUrls: [env.CELO_RPC_URL],
+                blockExplorerUrls: [env.CELO_EXPLORER_BASE_URL]
+              }
+            ]
+          });
+
+          if (browserProvider) {
+            await syncWalletState(browserProvider, 'change');
+          }
+          return;
+        } catch (addError) {
+          console.error('Add network failed', addError);
+        }
+      }
+
       console.error('Switch network failed', error);
-      setAuthMessage(`Switch to chain ${targetChainId} to continue on Celo.`);
+      setAuthMessage(`Switch to ${env.CELO_CHAIN_NAME} (${targetChainId}) to continue.`);
     }
   }
+
+  const isCorrectNetwork = isSupportedCeloChain(chainId);
 
   const value = useMemo(
     () => ({
@@ -390,6 +522,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       balance,
       chainId,
       network,
+      isCorrectNetwork,
+      isMiniPay,
       status,
       authStatus,
       authMessage,
@@ -401,7 +535,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       disconnectWallet,
       switchCeloNetwork
     }),
-    [address, balance, chainId, network, status, authStatus, authMessage, walletReady, signer, provider]
+    [address, balance, chainId, network, isCorrectNetwork, isMiniPay, status, authStatus, authMessage, walletReady, signer, provider]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

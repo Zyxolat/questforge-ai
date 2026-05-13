@@ -1,24 +1,10 @@
 import { motion } from 'framer-motion';
-import { useEffect, useState } from 'react';
+import { useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
-import { getPlayerStats } from '../lib/api';
 
 export default function Leaderboards() {
-  const { address, connectWallet, status } = useWallet();
-  const [leaders, setLeaders] = useState<any[]>([]);
-
-  useEffect(() => {
-    async function load() {
-      if (!address) return;
-      try {
-        const response = await getPlayerStats(address);
-        setLeaders(response.data.leaderboard);
-      } catch (error) {
-        console.error(error);
-      }
-    }
-    load();
-  }, [address]);
+  const { connectWallet, status } = useWallet();
+  const { connectionStatus, hydrationStatus, leaderboard } = useRealtimeState();
 
   if (status !== 'connected') {
     return (
@@ -39,18 +25,28 @@ export default function Leaderboards() {
           <p className="text-sm uppercase tracking-[0.35em] text-glowyellow">Leaderboards</p>
           <h1 className="mt-3 text-4xl font-black text-white">Top Forge Champions</h1>
           <p className="mt-3 text-slate-300">Explore the most active wallets, highest XP earners, and the guardians of the realm.</p>
+          <p className="mt-4 text-sm text-softyellow">
+            Feed hydration: {hydrationStatus} • socket: {connectionStatus}
+          </p>
         </div>
         <div className="grid gap-4">
-          {leaders.map((player, index) => (
+          {leaderboard.map((player, index) => (
             <div key={player.id} className="group flex items-center justify-between gap-4 rounded-3xl border border-white/10 bg-navy/80 p-5 transition hover:border-glowyellow/30">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-softyellow">#{index + 1}</p>
                 <p className="mt-2 text-lg font-semibold text-white">{player.wallet}</p>
                 <p className="text-sm text-slate-400">XP {player.xp} • Level {player.level} • Quests {player.questCount}</p>
               </div>
-              <div className="px-4 py-2 rounded-2xl bg-glowyellow/10 text-sm font-semibold text-softyellow">Active</div>
+              <div className="rounded-2xl bg-glowyellow/10 px-4 py-2 text-sm font-semibold text-softyellow">
+                {index === 0 ? 'Leading' : 'Live'}
+              </div>
             </div>
           ))}
+          {leaderboard.length === 0 ? (
+            <div className="rounded-3xl border border-dashed border-white/10 bg-navy/50 p-6 text-slate-300">
+              Waiting for realtime hydration to populate the current standings.
+            </div>
+          ) : null}
         </div>
       </div>
     </motion.main>

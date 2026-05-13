@@ -1,13 +1,16 @@
-import { AnimatePresence, motion } from 'framer-motion';
-import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
+import { Suspense, lazy, useState } from 'react';
 import { Route, Routes, Link, useLocation } from 'react-router-dom';
-import HomePage from './pages/HomePage';
-import CommandCenter from './pages/CommandCenter';
-import Leaderboards from './pages/Leaderboards';
-import InventoryPage from './pages/InventoryPage';
-import TavernPage from './pages/TavernPage';
 import WalletModal from './components/WalletModal';
+import LoadingScreen from './components/LoadingScreen';
+import { useRealtimeState } from './context/RealtimeContext';
 import { useWallet } from './context/WalletContext';
+
+const HomePage = lazy(() => import('./pages/HomePage'));
+const CommandCenter = lazy(() => import('./pages/CommandCenter'));
+const Leaderboards = lazy(() => import('./pages/Leaderboards'));
+const InventoryPage = lazy(() => import('./pages/InventoryPage'));
+const TavernPage = lazy(() => import('./pages/TavernPage'));
 
 const links = [
   { to: '/', label: 'Home' },
@@ -21,6 +24,7 @@ function App() {
   const location = useLocation();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
   const { address, status } = useWallet();
+  const { connectionStatus, hydrationStatus, notifications } = useRealtimeState();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-deepnavy via-navy to-[#030610] text-white">
@@ -29,6 +33,13 @@ function App() {
           <div>
             <div className="text-sm uppercase tracking-[0.35em] text-softyellow">QuestForge AI</div>
             <div className="text-2xl font-extrabold tracking-tight text-white">Forge Your Destiny Onchain</div>
+            {status === 'connected' ? (
+              <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-300">
+                <span>Feed {hydrationStatus}</span>
+                <span>Socket {connectionStatus}</span>
+                <span>{notifications.length} notices</span>
+              </div>
+            ) : null}
           </div>
           <nav className="hidden items-center gap-4 md:flex">
             {links.map((item) => (
@@ -47,15 +58,17 @@ function App() {
       </header>
       <WalletModal open={walletModalOpen} onClose={() => setWalletModalOpen(false)} />
 
-      <AnimatePresence mode="wait">
-        <Routes location={location} key={location.pathname}>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/command-center" element={<CommandCenter />} />
-          <Route path="/leaderboard" element={<Leaderboards />} />
-          <Route path="/inventory" element={<InventoryPage />} />
-          <Route path="/tavern" element={<TavernPage />} />
-        </Routes>
-      </AnimatePresence>
+      <Suspense fallback={<LoadingScreen />}>
+        <AnimatePresence mode="wait">
+          <Routes location={location} key={location.pathname}>
+            <Route path="/" element={<HomePage />} />
+            <Route path="/command-center" element={<CommandCenter />} />
+            <Route path="/leaderboard" element={<Leaderboards />} />
+            <Route path="/inventory" element={<InventoryPage />} />
+            <Route path="/tavern" element={<TavernPage />} />
+          </Routes>
+        </AnimatePresence>
+      </Suspense>
     </div>
   );
 }

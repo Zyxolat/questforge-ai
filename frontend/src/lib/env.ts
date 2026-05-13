@@ -14,14 +14,6 @@ function optionalEnv(value: string | undefined) {
   return normalized || undefined;
 }
 
-function parsePositiveInt(name: string, value: string) {
-  const numeric = Number(value);
-  if (!Number.isInteger(numeric) || numeric <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return numeric;
-}
-
 function parseAbsoluteUrl(name: string, value: string) {
   try {
     return new URL(value).toString().replace(/\/$/, '');

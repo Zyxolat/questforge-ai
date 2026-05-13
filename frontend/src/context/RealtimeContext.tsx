@@ -1,0 +1,683 @@
+import { createContext, ReactNode, useContext, useEffect, useRef, useState } from 'react';
+import { io, Socket } from 'socket.io-client';
+import { useWallet } from './WalletContext';
+import { env } from '../lib/env';
+import { fetchRealtimeBootstrap, fetchRealtimeSync } from '../lib/api';
+
+type JsonObject = Record<string, unknown>;
+
+type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected' | 'error';
+type HydrationStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+type Scope = {
+  type: 'global' | 'user' | 'clan' | 'faction';
+  key: string;
+};
+
+type QuestMatcher = {
+  id?: string;
+  chainQuestId?: string;
+  orchestrationId?: string;
+};
+
+export type RealtimeEventEnvelope = {
+  id?: number;
+  eventName: string;
+  scopeType?: string;
+  scopeKey?: string;
+  sourceType?: string;
+  sourceId?: string | null;
+  payload: JsonObject;
+  createdAt?: string;
+};
+
+export type PlayerState = {
+  id?: string;
+  wallet: string;
+  username?: string | null;
+  xp?: number;
+  level?: number;
+  questCount?: number;
+  streak?: number;
+  onchainActions?: number;
+  [key: string]: unknown;
+};
+
+export type GuildState = {
+  id?: string;
+  name?: string;
+  description?: string;
+  level?: number;
+  reputation?: number;
+  treasuryBalance?: number;
+  [key: string]: unknown;
+} | null;
+
+export type LeaderboardEntry = {
+  id: string;
+  wallet: string;
+  xp: number;
+  level: number;
+  questCount: number;
+  streak?: number;
+  [key: string]: unknown;
+};
+
+export type TreasuryPayoutState = {
+  status?: string;
+  [key: string]: unknown;
+};
+
+export type QuestState = {
+  id?: string;
+  chainQuestId?: string;
+  orchestrationId?: string;
+  title?: string;
+  description?: string;
+  difficulty?: number | string;
+  rewardAmount?: number | string;
+  stakeAmount?: number | string;
+  xpReward?: number | string;
+  durationSeconds?: number | string;
+  metadataUri?: string;
+  status?: string;
+  treasuryPayout?: TreasuryPayoutState | null;
+  proofTx?: string | null;
+  proofTxHash?: string | null;
+  verificationTx?: string | null;
+  [key: string]: unknown;
+};
+
+export type InventoryItem = {
+  id?: string;
+  tokenId?: string;
+  metadataUri?: string;
+  rarity?: string;
+  xpEarned?: number;
+  questHistory?: string;
+  mintedAt?: string | Date;
+  [key: string]: unknown;
+};
+
+export type WorldState = {
+  version?: number | string;
+  season?: number | string;
+  activeEvents?: unknown;
+  [key: string]: unknown;
+} | null;
+
+export type NarrativeState = JsonObject | null;
+
+export type FactionStanding = {
+  factionId?: string;
+  factionName?: string;
+  standingScore?: number;
+  allianceStatus?: string;
+  influenceRank?: number;
+  liveStatus?: string;
+  liveInfluence?: number;
+  [key: string]: unknown;
+};
+
+export type NpcRelationship = {
+  npcId?: string;
+  npcName?: string;
+  npcType?: string;
+  trust?: number;
+  opinion?: string;
+  unlocks: string[];
+  references?: string[];
+  recentMemories?: string[];
+  interactionCount?: number;
+  [key: string]: unknown;
+};
+
+type BootstrapPayload = {
+  connection: {
+    scopes: Scope[];
+    lastEventId?: number;
+  };
+  player: PlayerState | null;
+  guild: GuildState;
+  leaderboard?: LeaderboardEntry[];
+  quests?: QuestState[];
+  inventory?: InventoryItem[];
+  worldState: WorldState;
+  narrativeState: NarrativeState;
+  factionStandings?: FactionStanding[];
+  npcRelationships?: NpcRelationship[];
+  notifications?: RealtimeEventEnvelope[];
+};
+
+type SyncPayload = {
+  lastEventId?: number;
+  events: RealtimeEventEnvelope[];
+};
+
+type RealtimeStateContextValue = {
+  connectionStatus: ConnectionStatus;
+  hydrationStatus: HydrationStatus;
+  isRealtimeReady: boolean;
+  lastEventId: number;
+  player: PlayerState | null;
+  guild: GuildState;
+  leaderboard: LeaderboardEntry[];
+  quests: QuestState[];
+  activeQuest: QuestState | null;
+  inventory: InventoryItem[];
+  worldState: WorldState;
+  narrativeState: NarrativeState;
+  factionStandings: FactionStanding[];
+  npcRelationships: NpcRelationship[];
+  notifications: RealtimeEventEnvelope[];
+  npcDialogues: Record<string, string>;
+  syncNow: () => Promise<void>;
+  upsertQuest: (quest: QuestState) => void;
+  patchQuest: (matcher: QuestMatcher, patch: Partial<QuestState>) => void;
+  setNpcDialogue: (npcName: string, dialogue: string) => void;
+};
+
+const RealtimeContext = createContext<RealtimeStateContextValue | undefined>(undefined);
+
+function socketBaseUrl() {
+  if (env.API_BASE_URL.startsWith('/')) {
+    return window.location.origin;
+  }
+
+  try {
+    return new URL(env.API_BASE_URL).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
+function asString(value: unknown) {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function asObject(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : undefined;
+}
+
+function asObjectArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [] as JsonObject[];
+  }
+
+  return value
+    .map((item) => asObject(item))
+    .filter((item): item is JsonObject => Boolean(item));
+}
+
+function sortNotifications(events: RealtimeEventEnvelope[]) {
+  return [...events].sort((left, right) => (right.id ?? 0) - (left.id ?? 0)).slice(0, 120);
+}
+
+function pickActiveQuest(quests: QuestState[]) {
+  const statusPriority = ['ACTIVE', 'SUBMITTED', 'AVAILABLE'];
+  for (const status of statusPriority) {
+    const match = quests.find((quest) => quest.status === status);
+    if (match) {
+      return match;
+    }
+  }
+
+  return quests[0] ?? null;
+}
+
+function uniqueById<T extends { id?: string | number }>(items: T[]) {
+  const seen = new Set<string>();
+  const output: T[] = [];
+
+  items.forEach((item) => {
+    const key = String(item.id ?? JSON.stringify(item));
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    output.push(item);
+  });
+
+  return output;
+}
+
+function matchesQuest(quest: QuestState, matcher: QuestMatcher) {
+  return (
+    (matcher.id && quest.id === matcher.id) ||
+    (matcher.chainQuestId && quest.chainQuestId === matcher.chainQuestId) ||
+    (matcher.orchestrationId && quest.orchestrationId === matcher.orchestrationId)
+  );
+}
+
+function uniqueInventory(items: InventoryItem[]) {
+  const seen = new Set<string>();
+  const output: InventoryItem[] = [];
+
+  items.forEach((item) => {
+    const key = String(item.tokenId ?? item.id ?? item.metadataUri ?? JSON.stringify(item));
+    if (seen.has(key)) {
+      return;
+    }
+
+    seen.add(key);
+    output.push(item);
+  });
+
+  return output;
+}
+
+function questStatusForEvent(eventName: string, payload: JsonObject) {
+  const nestedData = asObject(payload.data);
+
+  if (eventName === 'quest:started') return 'ACTIVE';
+  if (eventName === 'proof:submitted') return 'SUBMITTED';
+  if (eventName === 'reward:claimed') {
+    return nestedData?.success === true ? 'VERIFIED' : 'FAILED';
+  }
+  if (eventName === 'reward:refunded') return 'FAILED';
+  return undefined;
+}
+
+function treasuryStatusForEvent(eventName: string) {
+  if (eventName === 'reward:reserved') return 'RESERVED';
+  if (eventName === 'stake:locked') return 'LOCKED';
+  if (eventName === 'reward:released') return 'RELEASED';
+  if (eventName === 'reward:paid') return 'PAID';
+  if (eventName === 'reward:refunded') return 'REFUNDED';
+  return undefined;
+}
+
+export function RealtimeProvider({ children }: { children: ReactNode }) {
+  const { address, authStatus, isAuthReady, status } = useWallet();
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
+  const [hydrationStatus, setHydrationStatus] = useState<HydrationStatus>('idle');
+  const [lastEventId, setLastEventId] = useState(0);
+  const [player, setPlayer] = useState<PlayerState | null>(null);
+  const [guild, setGuild] = useState<GuildState>(null);
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+  const [quests, setQuests] = useState<QuestState[]>([]);
+  const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [worldState, setWorldState] = useState<WorldState>(null);
+  const [narrativeState, setNarrativeState] = useState<NarrativeState>(null);
+  const [factionStandings, setFactionStandings] = useState<FactionStanding[]>([]);
+  const [npcRelationships, setNpcRelationships] = useState<NpcRelationship[]>([]);
+  const [notifications, setNotifications] = useState<RealtimeEventEnvelope[]>([]);
+  const [npcDialogues, setNpcDialogues] = useState<Record<string, string>>({});
+  const socketRef = useRef<Socket | null>(null);
+  const scopesRef = useRef<Scope[]>([]);
+  const lastEventIdRef = useRef(0);
+
+  function clearState() {
+    setHydrationStatus('idle');
+    setConnectionStatus('idle');
+    setLastEventId(0);
+    lastEventIdRef.current = 0;
+    setPlayer(null);
+    setGuild(null);
+    setLeaderboard([]);
+    setQuests([]);
+    setInventory([]);
+    setWorldState(null);
+    setNarrativeState(null);
+    setFactionStandings([]);
+    setNpcRelationships([]);
+    setNotifications([]);
+    setNpcDialogues({});
+    scopesRef.current = [];
+  }
+
+  function disconnectSocket() {
+    if (socketRef.current) {
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+  }
+
+  function upsertQuest(quest: QuestState) {
+    setQuests((current) => {
+      const next = [...current];
+      const index = next.findIndex((item) => matchesQuest(item, quest));
+
+      if (index >= 0) {
+        next[index] = {
+          ...next[index],
+          ...quest
+        };
+      } else {
+        next.unshift(quest);
+      }
+
+      return next;
+    });
+  }
+
+  function patchQuest(matcher: QuestMatcher, patch: Partial<QuestState>) {
+    setQuests((current) => current.map((quest) => (matchesQuest(quest, matcher) ? { ...quest, ...patch } : quest)));
+  }
+
+  function setNpcDialogue(npcName: string, dialogue: string) {
+    setNpcDialogues((current) => ({
+      ...current,
+      [npcName]: dialogue
+    }));
+  }
+
+  function applyRealtimeEvent(event: RealtimeEventEnvelope) {
+    const payload = event.payload;
+    const questId = asString(payload.questId);
+    const chainQuestId = asString(payload.chainQuestId);
+    const orchestrationId = asString(payload.orchestrationId);
+
+    setNotifications((current) => sortNotifications(uniqueById([{ ...event, id: event.id ?? Date.now() }, ...current])));
+    if (event.id && event.id > lastEventIdRef.current) {
+      lastEventIdRef.current = event.id;
+      setLastEventId(event.id);
+    }
+
+    switch (event.eventName) {
+      case 'quest:generated':
+      case 'quest:escalated':
+        if (questId) {
+          upsertQuest({
+            id: questId,
+            orchestrationId,
+            difficulty: payload.difficulty as QuestState['difficulty'],
+            riskLevel: payload.riskLevel,
+            worldStateVersion: payload.worldStateVersion,
+            status: asString(payload.status) ?? 'AVAILABLE'
+          });
+        }
+        break;
+      case 'quest:created':
+      case 'quest:started':
+      case 'proof:submitted':
+      case 'reward:claimed':
+      case 'reward:reserved':
+      case 'stake:locked':
+      case 'reward:released':
+      case 'reward:paid':
+      case 'reward:refunded':
+      case 'nft:minted':
+        if (questId || chainQuestId) {
+          const treasuryStatus = treasuryStatusForEvent(event.eventName);
+          patchQuest(
+            { id: questId, chainQuestId },
+            {
+              chainQuestId,
+              status: questStatusForEvent(event.eventName, payload),
+              treasuryPayout:
+                event.eventName.startsWith('reward:') || event.eventName === 'stake:locked'
+                  ? {
+                      ...(asObject(payload.treasuryPayout) ?? {}),
+                      status: treasuryStatus
+                    }
+                  : undefined
+            }
+          );
+        }
+
+        if (event.eventName === 'nft:minted') {
+          const nestedData = asObject(payload.data);
+          const tokenId = nestedData?.tokenId !== undefined ? String(nestedData.tokenId) : undefined;
+
+          if (tokenId) {
+            setInventory((current) =>
+              uniqueInventory([
+                {
+                  id: `token-${tokenId}`,
+                  tokenId,
+                  mintedAt: event.createdAt,
+                  metadataUri: '',
+                  rarity: 'Unrevealed'
+                },
+                ...current
+              ])
+            );
+          }
+        }
+        break;
+      case 'world:event-changed':
+        setWorldState((current) => ({
+          ...(current ?? {}),
+          version: payload.version as number | string | undefined,
+          season: payload.season as number | string | undefined,
+          activeEvents: payload.activeEvents
+        }));
+        break;
+      case 'faction:status-changed': {
+        const factionUpdates = asObjectArray(payload.factions);
+        if (factionUpdates.length > 0) {
+          setFactionStandings((current) =>
+            current.map((standing) => {
+              const update = factionUpdates.find((faction) => asString(faction.id) === standing.factionId);
+              return update
+                ? {
+                    ...standing,
+                    liveStatus: asString(update.status),
+                    liveInfluence: typeof update.influence === 'number' ? update.influence : standing.liveInfluence
+                  }
+                : standing;
+            })
+          );
+        }
+        break;
+      }
+      case 'npc:interaction-updated': {
+        const npcName = asString(payload.npcName);
+        const dialogue = asString(payload.dialogue);
+        const npcId = asString(payload.npcId);
+        const relationshipScore = typeof payload.relationshipScore === 'number' ? payload.relationshipScore : undefined;
+
+        if (npcName && dialogue) {
+          setNpcDialogue(npcName, dialogue);
+        }
+
+        if (npcId) {
+          setNpcRelationships((current) =>
+            current.map((relationship) =>
+              relationship.npcId === npcId
+                ? {
+                    ...relationship,
+                    trust: relationshipScore ?? relationship.trust
+                  }
+                : relationship
+            )
+          );
+        }
+        break;
+      }
+      case 'guild:event':
+        break;
+      default:
+        break;
+    }
+  }
+
+  async function syncNow() {
+    if (!address || authStatus !== 'authenticated') {
+      return;
+    }
+
+    const response = await fetchRealtimeSync(lastEventIdRef.current);
+    const data = response.data as SyncPayload;
+    data.events.forEach((event) => applyRealtimeEvent(event));
+    if (data.lastEventId) {
+      lastEventIdRef.current = data.lastEventId;
+      setLastEventId(data.lastEventId);
+    }
+  }
+
+  async function hydrate() {
+    if (!address || authStatus !== 'authenticated') {
+      return;
+    }
+
+    setHydrationStatus('loading');
+    try {
+      const response = await fetchRealtimeBootstrap();
+      const data = response.data as BootstrapPayload;
+
+      scopesRef.current = data.connection.scopes;
+      lastEventIdRef.current = data.connection.lastEventId ?? 0;
+      setLastEventId(data.connection.lastEventId ?? 0);
+      setPlayer(data.player);
+      setGuild(data.guild);
+      setLeaderboard(data.leaderboard ?? []);
+      setQuests(data.quests ?? []);
+      setInventory(uniqueInventory(data.inventory ?? []));
+      setWorldState(data.worldState);
+      setNarrativeState(data.narrativeState);
+      setFactionStandings(data.factionStandings ?? []);
+      setNpcRelationships(data.npcRelationships ?? []);
+      setNotifications(sortNotifications(data.notifications ?? []));
+      setHydrationStatus('ready');
+    } catch (error) {
+      console.error(error);
+      setHydrationStatus('error');
+    }
+  }
+
+  useEffect(() => {
+    if (!isAuthReady || status !== 'connected' || authStatus !== 'authenticated' || !address) {
+      disconnectSocket();
+      clearState();
+      return;
+    }
+
+    void hydrate();
+  }, [address, authStatus, isAuthReady, status]);
+
+  useEffect(() => {
+    if (!address || hydrationStatus !== 'ready' || authStatus !== 'authenticated') {
+      return;
+    }
+
+    const socket = io(socketBaseUrl(), {
+      reconnection: true,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      transports: ['websocket', 'polling']
+    });
+    socketRef.current = socket;
+    setConnectionStatus('connecting');
+
+    const subscribeScopes = () => {
+      socket.emit('subscribe:user', address.toLowerCase());
+      scopesRef.current.forEach((scope) => {
+        if (scope.type === 'clan') {
+          socket.emit('subscribe:clan', scope.key);
+        }
+        if (scope.type === 'faction') {
+          socket.emit('subscribe:faction', scope.key);
+        }
+      });
+    };
+
+    const handleEnvelope = (eventName: string) => (payload: RealtimeEventEnvelope) => {
+      applyRealtimeEvent({
+        ...payload,
+        eventName
+      });
+    };
+
+    const handlers: Array<[string, (payload: RealtimeEventEnvelope) => void]> = [
+      ['quest:generated', handleEnvelope('quest:generated')],
+      ['quest:escalated', handleEnvelope('quest:escalated')],
+      ['quest:created', handleEnvelope('quest:created')],
+      ['quest:started', handleEnvelope('quest:started')],
+      ['proof:submitted', handleEnvelope('proof:submitted')],
+      ['reward:claimed', handleEnvelope('reward:claimed')],
+      ['reward:reserved', handleEnvelope('reward:reserved')],
+      ['stake:locked', handleEnvelope('stake:locked')],
+      ['reward:released', handleEnvelope('reward:released')],
+      ['reward:paid', handleEnvelope('reward:paid')],
+      ['reward:refunded', handleEnvelope('reward:refunded')],
+      ['nft:minted', handleEnvelope('nft:minted')],
+      ['world:event-changed', handleEnvelope('world:event-changed')],
+      ['faction:status-changed', handleEnvelope('faction:status-changed')],
+      ['npc:interaction-updated', handleEnvelope('npc:interaction-updated')],
+      ['guild:event', handleEnvelope('guild:event')]
+    ];
+
+    socket.on('connect', () => {
+      setConnectionStatus('connected');
+      subscribeScopes();
+      void syncNow();
+    });
+
+    socket.io.on('reconnect_attempt', () => {
+      setConnectionStatus('reconnecting');
+    });
+
+    socket.on('disconnect', () => {
+      setConnectionStatus('disconnected');
+    });
+
+    socket.on('connect_error', () => {
+      setConnectionStatus('error');
+    });
+
+    handlers.forEach(([eventName, handler]) => {
+      socket.on(eventName, handler);
+    });
+
+    return () => {
+      handlers.forEach(([eventName, handler]) => {
+        socket.off(eventName, handler);
+      });
+      socket.disconnect();
+      socketRef.current = null;
+    };
+  }, [address, authStatus, hydrationStatus]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated') {
+      return;
+    }
+
+    if (connectionStatus === 'connected') {
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void syncNow();
+    }, 15000);
+
+    return () => window.clearInterval(timer);
+  }, [authStatus, connectionStatus]);
+
+  const value: RealtimeStateContextValue = {
+    connectionStatus,
+    hydrationStatus,
+    isRealtimeReady: hydrationStatus === 'ready',
+    lastEventId,
+    player,
+    guild,
+    leaderboard,
+    quests,
+    activeQuest: pickActiveQuest(quests),
+    inventory,
+    worldState,
+    narrativeState,
+    factionStandings,
+    npcRelationships,
+    notifications,
+    npcDialogues,
+    syncNow,
+    upsertQuest,
+    patchQuest,
+    setNpcDialogue
+  };
+
+  return <RealtimeContext.Provider value={value}>{children}</RealtimeContext.Provider>;
+}
+
+export function useRealtimeState() {
+  const context = useContext(RealtimeContext);
+  if (!context) {
+    throw new Error('useRealtimeState must be used within RealtimeProvider');
+  }
+
+  return context;
+}

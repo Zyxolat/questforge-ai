@@ -1,13 +1,38 @@
 import { motion } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import { ethers } from 'ethers';
-import { useWallet } from '../context/WalletContext';
-import GlowButton from '../components/GlowButton';
 import QuestCard from '../components/QuestCard';
+import GlowButton from '../components/GlowButton';
 import LoadingScreen from '../components/LoadingScreen';
-import { extractAuthFailure, generateQuest, getPlayerStats, fetchActiveQuests, fetchDailyMissions, submitProofForVerification } from '../lib/api';
+import { QuestState, useRealtimeState } from '../context/RealtimeContext';
+import { useWallet } from '../context/WalletContext';
+import { extractAuthFailure, fetchDailyMissions, generateQuest, submitProofForVerification } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
+
+type DailyMission = {
+  id: string;
+  title: string;
+  description: string;
+  reward: string;
+};
+
+type GeneratedQuestTemplate = QuestState & {
+  title: string;
+  metadataUri: string;
+  stakeAmount: string | number;
+  rewardAmount: string | number;
+  xpReward: string | number;
+  durationSeconds: string | number;
+};
+
+function questMatcher(quest: QuestState | null) {
+  return {
+    id: quest?.id ?? undefined,
+    chainQuestId: quest?.chainQuestId ?? undefined,
+    orchestrationId: quest?.orchestrationId ?? undefined
+  };
+}
 
 export default function CommandCenter() {
   const {
@@ -15,6 +40,8 @@ export default function CommandCenter() {
     signer,
     network,
     chainId,
+    isCorrectNetwork,
+    isMiniPay,
     status,
     authStatus,
     authMessage,
@@ -23,13 +50,18 @@ export default function CommandCenter() {
     authenticateWallet,
     switchCeloNetwork
   } = useWallet();
-  const [activeQuest, setActiveQuest] = useState<any>(null);
-  const [playerStats, setPlayerStats] = useState<any>(null);
-  const [dailyMissions, setDailyMissions] = useState<any[]>([]);
+  const {
+    activeQuest,
+    connectionStatus,
+    player,
+    syncNow,
+    upsertQuest,
+    patchQuest
+  } = useRealtimeState();
+  const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
   const [proofUri, setProofUri] = useState('');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const isCorrectNetwork = chainId === env.CELO_CHAIN_ID;
 
   const forgeQuestManager = useMemo(() => {
     if (!signer) return null;
@@ -37,83 +69,27 @@ export default function CommandCenter() {
   }, [signer]);
 
   useEffect(() => {
-    async function load() {
-      if (!address || !isAuthReady || authStatus !== 'authenticated') return;
-      setLoading(true);
-      await Promise.all([refreshIndexedState(address), loadDailyMissions()]);
-      setLoading(false);
-    }
-
-    if (!address) {
-      setActiveQuest(null);
-      return;
-    }
-
-    load();
-  }, [address, authStatus, isAuthReady]);
-
-  async function loadDailyMissions() {
-    try {
-      const daily = await fetchDailyMissions();
-      setDailyMissions(daily.data.missions);
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  async function refreshIndexedState(wallet: string) {
-    try {
-      const [stats, active] = await Promise.all([getPlayerStats(wallet), fetchActiveQuests()]);
-      setPlayerStats(stats.data.user);
-      setActiveQuest(active.data.quests?.[0] ?? null);
-    } catch (error) {
-      console.error(error);
-      const failure = extractAuthFailure(error);
-      if (failure.code !== 'AUTH_UNKNOWN') {
-        setMessage(failure.message);
-      }
-    }
-  }
-
-  async function waitForIndexedQuest(chainQuestId: string, mode: 'active' | 'resolved') {
-    if (!address) return;
-
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      if (attempt > 0) {
-        await new Promise((resolve) => window.setTimeout(resolve, 2500));
-      }
-
+    async function loadDailyMissionsOnce() {
       try {
-        const [stats, active] = await Promise.all([getPlayerStats(address), fetchActiveQuests()]);
-        setPlayerStats(stats.data.user);
-        const indexedQuest = (active.data.quests ?? []).find((quest: any) => quest.chainQuestId === chainQuestId) ?? null;
-
-        if (mode === 'active' && indexedQuest?.status === 'ACTIVE') {
-          setActiveQuest(indexedQuest);
-          return;
-        }
-
-        if (mode === 'resolved') {
-          if (!indexedQuest) {
-            setActiveQuest(null);
-            return;
-          }
-
-          setActiveQuest(indexedQuest);
-          if (indexedQuest.status === 'SUBMITTED' || indexedQuest.status === 'ACTIVE') {
-            continue;
-          }
-
-          return;
-        }
+        const daily = await fetchDailyMissions();
+        setDailyMissions(daily.data.missions as DailyMission[]);
       } catch (error) {
         console.error(error);
-        const failure = extractAuthFailure(error);
-        if (failure.code !== 'AUTH_UNKNOWN') {
-          setMessage(failure.message);
-        }
       }
     }
+
+    void loadDailyMissionsOnce();
+  }, []);
+
+  function payoutStatusForQuest(quest: QuestState | null) {
+    if (quest?.treasuryPayout?.status) {
+      return quest.treasuryPayout.status;
+    }
+
+    if (quest?.status === 'VERIFIED') return 'PAID';
+    if (quest?.status === 'FAILED' || quest?.status === 'CANCELLED') return 'REFUNDED';
+    if (quest?.status === 'ACTIVE' || quest?.status === 'SUBMITTED') return 'LOCKED';
+    return 'RESERVED';
   }
 
   function requireReadyAuth(actionLabel: string) {
@@ -123,7 +99,7 @@ export default function CommandCenter() {
     }
 
     if (!isCorrectNetwork) {
-      setMessage(`Switch to Celo chain ${env.CELO_CHAIN_ID} before ${actionLabel.toLowerCase()}.`);
+      setMessage(`Switch to ${env.CELO_CHAIN_NAME} before ${actionLabel.toLowerCase()}. Detected ${network ?? 'an unsupported network'}.`);
       return false;
     }
 
@@ -135,18 +111,18 @@ export default function CommandCenter() {
     return true;
   }
 
-  function parseQuestCreatedId(receipt: any) {
+  function parseQuestCreatedId(receipt: ethers.TransactionReceipt | null) {
     if (!forgeQuestManager) return null;
 
     const parsedLog = receipt?.logs
-      ?.map((log: any) => {
+      ?.map((log) => {
         try {
           return forgeQuestManager.interface.parseLog(log);
         } catch {
           return null;
         }
       })
-      .find((item: any) => item?.name === 'QuestCreated');
+      .find((item) => item?.name === 'QuestCreated');
 
     if (!parsedLog?.args?.questId) {
       return null;
@@ -168,7 +144,7 @@ export default function CommandCenter() {
     setMessage('Summoning the Forge Master...');
     try {
       const response = await generateQuest();
-      const template = response.data.quest;
+      const template = response.data.quest as GeneratedQuestTemplate;
       const tx = await forgeQuestManager.createQuest(
         template.title,
         template.metadataUri,
@@ -183,13 +159,17 @@ export default function CommandCenter() {
         throw new Error('Quest creation receipt did not include a quest id');
       }
 
-      setActiveQuest({
+      upsertQuest({
         ...template,
         chainQuestId,
         creator: address,
-        status: 'AVAILABLE'
+        status: 'AVAILABLE',
+        treasuryPayout: {
+          status: 'RESERVED'
+        }
       });
-      setMessage('Quest forged onchain. Start it when you are ready.');
+      setMessage('Quest forged onchain. Realtime state is tracking it now.');
+      await syncNow();
     } catch (error) {
       console.error(error);
       const failure = extractAuthFailure(error);
@@ -204,16 +184,24 @@ export default function CommandCenter() {
     if (!requireReadyAuth('starting quests')) {
       return;
     }
+
     setLoading(true);
     setMessage('Submitting your stake to the Forge...');
 
     try {
-      const stakeValue = ethers.parseEther(activeQuest.stakeAmount.toString());
-      const tx = await forgeQuestManager.startQuest(BigInt(activeQuest.chainQuestId), { value: stakeValue });
+      const stakeValue = ethers.parseEther(String(activeQuest.stakeAmount));
+      const tx = await forgeQuestManager.startQuest(BigInt(String(activeQuest.chainQuestId)), { value: stakeValue });
       await tx.wait();
-      setActiveQuest((current: any) => (current ? { ...current, status: 'ACTIVE' } : current));
-      setMessage('Quest started onchain. Waiting for indexed state...');
-      await waitForIndexedQuest(activeQuest.chainQuestId, 'active');
+
+      patchQuest(questMatcher(activeQuest), {
+        status: 'ACTIVE',
+        treasuryPayout: {
+          ...(activeQuest.treasuryPayout || {}),
+          status: 'LOCKED'
+        }
+      });
+      setMessage('Quest started onchain. Waiting for realtime reconciliation.');
+      await syncNow();
     } catch (error) {
       console.error(error);
       const failure = extractAuthFailure(error);
@@ -235,16 +223,22 @@ export default function CommandCenter() {
     if (!requireReadyAuth('submitting proof')) {
       return;
     }
+
     setLoading(true);
     setMessage('Submitting proof to the Forge Master...');
+
     try {
-      const submitTx = await forgeQuestManager.submitQuest(BigInt(activeQuest.chainQuestId), proofUri);
+      const submitTx = await forgeQuestManager.submitQuest(BigInt(String(activeQuest.chainQuestId)), proofUri);
       await submitTx.wait();
-      setActiveQuest((current: any) => (current ? { ...current, status: 'SUBMITTED' } : current));
+
+      patchQuest(questMatcher(activeQuest), { status: 'SUBMITTED' });
+      if (!activeQuest.id) {
+        throw new Error('Quest is missing a persistent id');
+      }
 
       await submitProofForVerification(activeQuest.id, proofUri, submitTx.hash);
-      setMessage('Proof submitted onchain and queued for deterministic verification. Waiting for indexed resolution...');
-      await waitForIndexedQuest(activeQuest.chainQuestId, 'resolved');
+      setMessage('Proof submitted onchain and queued for deterministic verification. Realtime settlement updates will stream here.');
+      await syncNow();
       setProofUri('');
     } catch (error) {
       console.error(error);
@@ -294,10 +288,19 @@ export default function CommandCenter() {
               </div>
               <div className="rounded-3xl border border-glowyellow/20 bg-navy/80 p-4 text-sm text-slate-200 shadow-glow">
                 <p className="uppercase tracking-[0.25em] text-softyellow">Network</p>
-                <p className="mt-2 text-lg font-semibold text-white">{network ?? 'Celo'}</p>
+                <p className="mt-2 text-lg font-semibold text-white">{network ?? 'No network detected'}</p>
+                <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">
+                  Expected: {env.CELO_CHAIN_NAME} ({env.CELO_CHAIN_ID})
+                </p>
+                <p className={`mt-2 text-sm ${isCorrectNetwork ? 'text-emerald-200' : 'text-amber-200'}`}>
+                  {isCorrectNetwork
+                    ? 'Connected to the supported Celo Mainnet network.'
+                    : `Unsupported network detected${chainId ? ` (chain ${chainId})` : ''}.`}
+                </p>
+                {isMiniPay ? <p className="mt-2 text-xs uppercase tracking-[0.18em] text-softyellow">MiniPay detected</p> : null}
                 {!isCorrectNetwork ? (
                   <button onClick={switchCeloNetwork} className="mt-3 text-xs font-semibold uppercase tracking-[0.2em] text-glowyellow transition hover:text-softyellow">
-                    Switch To Celo
+                    Switch To Celo Mainnet
                   </button>
                 ) : null}
               </div>
@@ -329,16 +332,22 @@ export default function CommandCenter() {
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <div className="rounded-3xl border border-white/10 bg-navy/70 p-5 text-white">
                 <p className="text-sm uppercase tracking-[0.25em] text-softyellow">XP</p>
-                <p className="mt-2 text-3xl font-semibold">{playerStats?.xp ?? '---'}</p>
+                <p className="mt-2 text-3xl font-semibold">{player?.xp ?? '---'}</p>
               </div>
               <div className="rounded-3xl border border-white/10 bg-navy/70 p-5 text-white">
                 <p className="text-sm uppercase tracking-[0.25em] text-softyellow">Level</p>
-                <p className="mt-2 text-3xl font-semibold">{playerStats?.level ?? '---'}</p>
+                <p className="mt-2 text-3xl font-semibold">{player?.level ?? '---'}</p>
               </div>
               <div className="rounded-3xl border border-white/10 bg-navy/70 p-5 text-white">
                 <p className="text-sm uppercase tracking-[0.25em] text-softyellow">Quests</p>
-                <p className="mt-2 text-3xl font-semibold">{playerStats?.questCount ?? '---'}</p>
+                <p className="mt-2 text-3xl font-semibold">{player?.questCount ?? '---'}</p>
               </div>
+            </div>
+            <div className="mt-4 rounded-3xl border border-white/10 bg-navy/60 p-4 text-sm text-slate-200">
+              <p className="uppercase tracking-[0.22em] text-softyellow">Realtime Link</p>
+              <p className="mt-2">
+                Hydration is replay-backed and websocket-first. Connection status: <span className="font-semibold text-white">{connectionStatus}</span>
+              </p>
             </div>
           </div>
 
@@ -354,12 +363,41 @@ export default function CommandCenter() {
               <LoadingScreen />
             ) : activeQuest ? (
               <div className="mt-8 space-y-4">
-                <QuestCard title={activeQuest.title} description={activeQuest.description} difficulty={`Tier ${activeQuest.difficulty}`} reward={`${activeQuest.rewardAmount} CELO`} status={activeQuest.status || 'AVAILABLE'} />
+                <QuestCard
+                  title={activeQuest.title ?? 'Unnamed Quest'}
+                  description={activeQuest.description ?? 'Description pending realtime hydration.'}
+                  difficulty={`Tier ${activeQuest.difficulty ?? '?'}`}
+                  reward={`${activeQuest.rewardAmount ?? '?'} CELO`}
+                  status={activeQuest.status || 'AVAILABLE'}
+                  payoutStatus={payoutStatusForQuest(activeQuest)}
+                  treasuryPayout={activeQuest.treasuryPayout}
+                  verificationTx={typeof activeQuest.verificationTx === 'string' ? activeQuest.verificationTx : null}
+                  proofTxHash={
+                    typeof activeQuest.proofTx === 'string'
+                      ? activeQuest.proofTx
+                      : typeof activeQuest.proofTxHash === 'string'
+                        ? activeQuest.proofTxHash
+                        : null
+                  }
+                  explorerBaseUrl={env.CELO_EXPLORER_BASE_URL}
+                />
+                <div className="rounded-3xl border border-white/10 bg-navy/70 p-4 text-sm text-slate-200">
+                  <p className="uppercase tracking-[0.22em] text-softyellow">Treasury Settlement</p>
+                  <p className="mt-2">
+                    {activeQuest.status === 'SUBMITTED'
+                      ? 'Reward reserved and stake locked. Waiting for verifier settlement through Treasury.'
+                      : payoutStatusForQuest(activeQuest) === 'PAID'
+                        ? 'Treasury payout completed and recorded onchain.'
+                        : payoutStatusForQuest(activeQuest) === 'REFUNDED'
+                          ? 'Treasury released the reservation and refunded the locked stake.'
+                          : 'Treasury has reserved the reward for this quest.'}
+                  </p>
+                </div>
                 <div className="grid gap-4 sm:grid-cols-3">
                   {activeQuest.status === 'AVAILABLE' ? <GlowButton label="Start Quest" onClick={handleStartQuest} disabled={loading || authStatus === 'restoring'} /> : null}
                   {activeQuest.status === 'ACTIVE' ? <GlowButton label="Submit Proof" onClick={handleSubmitProof} className="bg-white/10 text-white hover:bg-white/20" disabled={loading || authStatus === 'restoring'} /> : null}
                 </div>
-                <textarea value={proofUri} onChange={(e) => setProofUri(e.target.value)} placeholder="Enter quest proof URL or final task hash" className="w-full rounded-3xl border border-white/10 bg-navy/80 p-4 text-slate-100 outline-none" rows={3} />
+                <textarea value={proofUri} onChange={(event) => setProofUri(event.target.value)} placeholder="Enter quest proof URL or final task hash" className="w-full rounded-3xl border border-white/10 bg-navy/80 p-4 text-slate-100 outline-none" rows={3} />
               </div>
             ) : (
               <p className="mt-6 text-slate-300">
