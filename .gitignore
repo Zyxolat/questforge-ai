@@ -18,3 +18,4 @@ yarn-error.log*
 **/coverage
 *.save
 .env
+.env.production
