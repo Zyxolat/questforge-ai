@@ -1,28 +1,9 @@
-import { Prisma, type ChainEvent, type TreasuryPayoutStatus } from '@prisma/client';
 import { Worker, Job } from 'bullmq';
 import { env } from '../config/env';
-import { gameStateProjector } from './gameStateProjector';
+import { authoritativeEventProjector } from './authoritativeEventProjector';
 import { logger } from './logger';
 import { prisma } from './chain';
 import { ChainEventJob } from './productionEventQueue';
-import { worldStateCoordinator } from './worldStateCoordinator';
-
-const TREASURY_STATUS_BY_EVENT: Record<string, TreasuryPayoutStatus> = {
-  reward_reserved: 'RESERVED',
-  stake_locked: 'LOCKED',
-  reward_released: 'RELEASED',
-  reward_paid: 'PAID',
-  reward_refunded: 'REFUNDED'
-};
-
-function isJsonObject(value: Prisma.JsonValue | null): value is Prisma.JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function getEventPayload(event: ChainEvent): Prisma.JsonObject {
-  const payload = event.decodedData ?? event.data;
-  return isJsonObject(payload) ? payload : {};
-}
 
 class ProductionEventWorker {
   private worker: Worker<ChainEventJob> | null = null;
@@ -83,6 +64,18 @@ class ProductionEventWorker {
 
       logger.debug('[WORKER] Processing', { jobId: job.id, chainEventId });
 
+      if (job.id) {
+        await prisma.eventQueue
+          .updateMany({
+            where: { jobId: job.id },
+            data: {
+              status: 'processing',
+              attempts: { increment: 1 }
+            }
+          })
+          .catch(() => null);
+      }
+
       // Retrieve event from DB
       const chainEvent = await prisma.chainEvent.findUnique({ where: { id: chainEventId } }).catch(() => null);
 
@@ -107,8 +100,7 @@ class ProductionEventWorker {
         return;
       }
 
-      // Process based on event type
-      await this.handleEventByType(chainEvent);
+      await authoritativeEventProjector.projectChainEvent(chainEvent);
 
       // Mark as processed
       await prisma.chainEvent
@@ -131,8 +123,6 @@ class ProductionEventWorker {
           })
           .catch(() => null);
       }
-
-      await gameStateProjector.projectChainEvent(chainEvent);
 
       const processingTime = Date.now() - startTime;
       logger.debug('[WORKER] Processed', { jobId: job.id, processingTimeMs: processingTime });
@@ -158,146 +148,6 @@ class ProductionEventWorker {
     }
   }
 
-  /**
-   * Route event handling by type
-   */
-  private async handleEventByType(chainEvent: ChainEvent): Promise<void> {
-    try {
-      const eventType = chainEvent.eventType;
-
-      switch (eventType) {
-        case 'quest_created':
-          await this.handleQuestCreated(chainEvent);
-          await worldStateCoordinator.handleGameplaySignal({
-            trigger: 'event:quest_created',
-            chainQuestId: chainEvent.chainQuestId?.toString(),
-            playerWallet: chainEvent.playerWallet || undefined
-          });
-          break;
-        case 'quest_started':
-          await this.handleQuestStarted(chainEvent);
-          await worldStateCoordinator.handleGameplaySignal({
-            trigger: 'event:quest_started',
-            chainQuestId: chainEvent.chainQuestId?.toString(),
-            playerWallet: chainEvent.playerWallet || undefined
-          });
-          break;
-        case 'proof_submitted':
-          await this.handleProofSubmitted(chainEvent);
-          break;
-        case 'reward_claimed':
-          await this.handleRewardClaimed(chainEvent);
-          await worldStateCoordinator.handleGameplaySignal({
-            trigger: 'event:reward_claimed',
-            chainQuestId: chainEvent.chainQuestId?.toString(),
-            playerWallet: chainEvent.playerWallet || undefined
-          });
-          break;
-        case 'nft_minted':
-          await this.handleNFTMinted(chainEvent);
-          await worldStateCoordinator.handleGameplaySignal({
-            trigger: 'event:nft_minted',
-            chainQuestId: chainEvent.chainQuestId?.toString(),
-            playerWallet: chainEvent.playerWallet || undefined
-          });
-          break;
-        case 'reward_reserved':
-        case 'stake_locked':
-        case 'reward_released':
-        case 'reward_paid':
-        case 'reward_refunded':
-          await this.handleTreasuryEvent(chainEvent);
-          await worldStateCoordinator.handleGameplaySignal({
-            trigger: `event:${eventType}`,
-            chainQuestId: chainEvent.chainQuestId?.toString(),
-            playerWallet: chainEvent.playerWallet || undefined
-          });
-          break;
-        default:
-          logger.debug('[WORKER] Unknown event type', { eventType });
-      }
-    } catch (error) {
-      logger.error('[WORKER] Event handler error', { error: (error as Error).message });
-      throw error;
-    }
-  }
-
-  private async handleQuestCreated(event: ChainEvent): Promise<void> {
-    try {
-      logger.debug('[WORKER] Quest created', {
-        questId: event.chainQuestId,
-        creator: event.creatorWallet
-      });
-    } catch (error) {
-      logger.error('[WORKER] Quest created handler error', { error: (error as Error).message });
-    }
-  }
-
-  private async handleQuestStarted(event: ChainEvent): Promise<void> {
-    try {
-      logger.debug('[WORKER] Quest started', {
-        questId: event.chainQuestId,
-        player: event.playerWallet
-      });
-    } catch (error) {
-      logger.error('[WORKER] Quest started handler error', { error: (error as Error).message });
-    }
-  }
-
-  private async handleProofSubmitted(event: ChainEvent): Promise<void> {
-    try {
-      logger.debug('[WORKER] Proof submitted', {
-        questId: event.chainQuestId,
-        player: event.playerWallet
-      });
-    } catch (error) {
-      logger.error('[WORKER] Proof submitted handler error', { error: (error as Error).message });
-    }
-  }
-
-  private async handleRewardClaimed(event: ChainEvent): Promise<void> {
-    try {
-      logger.debug('[WORKER] Reward claimed', {
-        questId: event.chainQuestId,
-        player: event.playerWallet
-      });
-    } catch (error) {
-      logger.error('[WORKER] Reward claimed handler error', { error: (error as Error).message });
-    }
-  }
-
-  private async handleNFTMinted(event: ChainEvent): Promise<void> {
-    try {
-      logger.debug('[WORKER] NFT minted', {
-        questId: event.chainQuestId,
-        player: event.playerWallet
-      });
-    } catch (error) {
-      logger.error('[WORKER] NFT minted handler error', { error: (error as Error).message });
-    }
-  }
-
-  private async handleTreasuryEvent(event: ChainEvent): Promise<void> {
-    try {
-      const data = getEventPayload(event);
-      if (event.chainQuestId) {
-        const status = TREASURY_STATUS_BY_EVENT[event.eventType];
-        if (status) {
-          await prisma.treasuryPayout
-            .update({
-              where: { chainQuestId: event.chainQuestId },
-              data: { status }
-            })
-            .catch(() => null);
-        }
-      }
-
-      logger.debug('[WORKER] Treasury event', { eventType: event.eventType, questId: data.questId });
-    } catch (error) {
-      logger.error('[WORKER] Treasury event handler error', { error: (error as Error).message });
-    }
-  }
-
   async stopWorker(): Promise<void> {
     if (!this.worker) return;
 
@@ -313,7 +163,8 @@ class ProductionEventWorker {
   getStatus() {
     return {
       running: this.isRunning,
-      concurrency: env.EVENT_WORKER_CONCURRENCY
+      concurrency: env.EVENT_WORKER_CONCURRENCY,
+      projector: authoritativeEventProjector.getDiagnostics()
     };
   }
 }

@@ -21,7 +21,19 @@ model User {
   lastFailedAt           DateTime?
   totalQuestsCompleted   Int                   @default(0)
   totalQuestsFailed      Int                   @default(0)
+
+  // AI Agent & Clan relationships
+  agent                  AgentIdentity?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId                String?
+  clan                   Clan?                 @relation("ClanMembers", fields: [clanId], references: [id], onDelete: SetNull)
+  clanId                 String?
+  clansCreated           Clan[]                @relation("ClanFounder")
+  clanTreasuryTxs        ClanTreasuryTx[]
+  joinedClanAt           DateTime?
+
   createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+
   quests                 QuestHistory[]
   rewards                Reward[]
   nfts                   NFT[]
@@ -34,10 +46,15 @@ model User {
   cooldowns              QuestCooldown[]
   dailyActivity          DailyActivity[]
   proofHistory           ProofSubmission[]
+  treasuryPayouts        TreasuryPayout[]
+  narrativeState         PlayerNarrativeState?
+  factionStandings       FactionStanding[]
+  memoryLedger           MemoryLedgerEntry[]
 }
 
 model Quest {
   id              String             @id @default(cuid())
+  orchestrationId String?            @unique
   title           String
   description     String
   metadata        Json
@@ -45,6 +62,7 @@ model Quest {
   questType       String?
   objective       String?
   lore            String?
+  worldStateVersion Int?             @default(1)
   stakeAmount     Float
   rewardAmount    Float
   xpReward        Int               @default(150)
@@ -56,6 +74,17 @@ model Quest {
   creator         String
   player          User?              @relation(fields: [playerId], references: [id])
   playerId        String?
+
+  // NPC & Clan Support
+  npcGiver        NPC?               @relation("npcQuests", fields: [npcGiverId], references: [id], onDelete: SetNull)
+  npcGiverId      String?
+  clanQuests      ClanQuest[]
+
+  // Multi-TX Quest Support
+  transactionCount Int               @default(0)
+  requiredTxTypes Json?              // array of required tx types for this quest
+  isEventQuest    Boolean            @default(false) // tied to world event
+
   startedAt       DateTime?
   expiresAt       DateTime
   completedAt     DateTime?
@@ -67,14 +96,28 @@ model Quest {
   verificationTx  String?
   nftMintTx       String?
   createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
   submissions     QuestHistory[]
   proofSubmissions ProofSubmission[]
+  treasuryPayout  TreasuryPayout?
+  memoryLedger    MemoryLedgerEntry[]
 
   @@index([creator])
   @@index([playerId])
   @@index([status])
   @@index([expiresAt])
   @@index([chainQuestId])
+  @@index([worldStateVersion])
+  @@index([npcGiverId])
+}
+
+enum TreasuryPayoutStatus {
+  RESERVED
+  LOCKED
+  RELEASED
+  PAID
+  REFUNDED
 }
 
 enum QuestStatus {
@@ -146,11 +189,15 @@ model Achievement {
 
 model NPCConversation {
   id        String   @id @default(cuid())
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   userId    String
-  npcType   String
-  messages  Json
+  npc       NPC      @relation("npcConversations", fields: [npcId], references: [id], onDelete: Cascade)
+  npcId     String
+  messages  Json     // array of messages in conversation
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, npcId])
 }
 
 model AuthChallenge {
@@ -234,4 +281,488 @@ model ProofSubmission {
   @@index([proofHash])
   @@index([userId, submittedAt])
   @@index([verificationResult])
+}
+
+model TreasuryPayout {
+  id                String               @id @default(cuid())
+  quest             Quest                 @relation(fields: [questId], references: [id], onDelete: Cascade)
+  questId           String               @unique
+  user              User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId            String?
+  chainQuestId      BigInt               @unique @db.BigInt
+  playerWallet      String?
+  rewardAmount      Float                @default(0)
+  stakeAmount       Float                @default(0)
+  totalAmount       Float                @default(0)
+  status            TreasuryPayoutStatus @default(RESERVED)
+  reservationTx     String?
+  releaseTx         String?
+  payoutTx          String?
+  refundTx          String?
+  rewardReservedAt  DateTime?
+  rewardReleasedAt  DateTime?
+  rewardPaidAt      DateTime?
+  rewardRefundedAt  DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([userId, status])
+  @@index([playerWallet, status])
+  @@index([chainQuestId])
+}
+
+// ============================================================================
+// REAL-TIME BLOCKCHAIN STREAMING MODELS
+// ============================================================================
+
+model IndexerState {
+  id                String   @id @default(cuid())
+  key               String   @unique
+  value             String
+  lastBlockProcessed BigInt  @default(0) @db.BigInt
+  lastBlockTimestamp DateTime?
+  isHealthy         Boolean  @default(true)
+  lastErrorMessage  String?
+  errorCount        Int      @default(0)
+  updatedAt         DateTime @updatedAt
+  createdAt         DateTime @default(now())
+
+  @@index([key])
+  @@index([lastBlockProcessed])
+}
+
+model ChainEvent {
+  id                String    @id @default(cuid())
+  eventKey          String    @unique // "{txHash}:{logIndex}" - primary dedup key
+  eventName         String    // QuestCreated, ProofSubmitted, RewardClaimed, etc.
+  eventType         String    // quest_created, proof_submitted, reward_claimed
+  blockNumber       BigInt    @db.BigInt
+  blockHash         String    // For reorg detection
+  blockTimestamp    DateTime
+  transactionHash   String
+  logIndex          Int
+  fromAddress       String
+  toAddress         String?
+  contractAddress   String
+  value             String    @default("0") // For transfer events
+  data              Json      // Raw event data
+  decodedData       Json?     // Decoded/processed event data
+  chainQuestId      BigInt?   @db.BigInt
+  playerWallet      String?
+  creatorWallet     String?
+  processed         Boolean   @default(false)
+  processedAt       DateTime?
+  processingError   String?
+  broadcastedAt     DateTime?
+  invalidatedAt     DateTime? // Set if block was reorged out
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([transactionHash, logIndex]) // Additional idempotency key
+  @@index([eventName])
+  @@index([blockNumber])
+  @@index([blockHash])
+  @@index([transactionHash])
+  @@index([playerWallet])
+  @@index([creatorWallet])
+  @@index([processed])
+  @@index([processedAt])
+  @@index([blockTimestamp])
+  @@index([invalidatedAt])
+}
+
+model EventQueue {
+  id            String   @id @default(cuid())
+  jobId         String   @unique
+  chainEventId  String
+  status        String   @default("pending") // pending, processing, completed, failed
+  retries       Int      @default(0)
+  lastError     String?
+  attempts      Int      @default(0)
+  processedAt   DateTime?
+  failedAt      DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([chainEventId])
+  @@index([createdAt])
+}
+
+model BlockHeader {
+  id            String   @id @default(cuid())
+  blockNumber   BigInt   @db.BigInt @unique
+  blockHash     String   @unique
+  parentHash    String
+  timestamp     BigInt
+  isFinalized   Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  @@index([blockNumber])
+  @@index([blockHash])
+}
+
+model RpcEndpoint {
+  id                String   @id @default(cuid())
+  url               String   @unique
+  priority          Int      @default(0)
+  healthy           Boolean  @default(true)
+  healthScore       Int      @default(100)
+  lastCheckedAt     DateTime?
+  lastErrorAt       DateTime?
+  consecutiveErrors Int      @default(0)
+  totalRequests     BigInt   @default(0)
+  failedRequests    BigInt   @default(0)
+  avgLatencyMs      Float    @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([healthy])
+  @@index([healthScore])
+  @@index([priority])
+}
+
+model QueueMetrics {
+  id                   String   @id @default(cuid())
+  timestamp            DateTime @default(now())
+  queueDepth           Int
+  processingRate       Float
+  errorRate            Float
+  avgLatencyMs         Float
+  activeWorkers        Int
+  rpcLatencyMs         Float
+  websocketConnections Int
+
+  @@index([timestamp])
+}
+
+// ============================================================================
+// AI NPC SYSTEM
+// ============================================================================
+
+model NPC {
+  id                String              @id @default(cuid())
+  type              String              // "merchant", "villain", "guildmaster", "faction_leader", "quest_giver"
+  name              String
+  personality       Json                // personality traits and behavioral rules
+  currentLocation   String              @default("tavern") // world location
+  reputation        Float               @default(0.0)
+  lastInteractionAt DateTime?
+
+  conversations     NPCConversation[]   @relation("npcConversations")
+  questsGiven       Quest[]             @relation("npcQuests")
+  memories          NPCMemory[]
+  memoryLedger      MemoryLedgerEntry[]
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([type])
+  @@index([reputation])
+}
+
+model NPCMemory {
+  id                String              @id @default(cuid())
+  npc               NPC                 @relation(fields: [npcId], references: [id], onDelete: Cascade)
+  npcId             String
+  wallet            String              // player wallet
+  memory            String              // structured memory about this player
+  embedding         Float[]             // vector embedding for semantic search
+  importanceScore   Float               @default(1.0)
+  interactionCount  Int                 @default(1)
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([npcId, wallet])
+  @@index([importanceScore])
+}
+
+// ============================================================================
+// AI AGENT IDENTITY SYSTEM (ERC-8004 Compatible)
+// ============================================================================
+
+model AgentIdentity {
+  id                String              @id @default(cuid())
+  wallet            String              @unique
+  agentName         String
+  agentDescriptor   String              // brief AI agent description
+  personalityVector Float[]             // learned player behavioral profile
+  memoryGraph       Json                // long-term narrative state
+  reputationScore   Float               @default(0.0)
+  worldStateVersion Int                 @default(1)
+
+  users             User[]
+  memories          AgentMemory[]
+  memoryLedger      MemoryLedgerEntry[]
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+}
+
+model AgentMemory {
+  id            String                @id @default(cuid())
+  agent         AgentIdentity         @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  agentId       String
+  questId       String                // reference to quest history
+  memoryType    String                // "quest_completion", "npc_interaction", "faction_choice", "world_event"
+  memoryData    Json
+  embedding     Float[]               // vector embedding
+
+  timestamp     DateTime              @default(now())
+
+  @@index([agentId, memoryType])
+  @@index([questId])
+}
+
+// ============================================================================
+// CLAN / GUILD SYSTEM
+// ============================================================================
+
+model Clan {
+  id              String              @id @default(cuid())
+  name            String              @unique
+  description     String?
+  founder         User                @relation("ClanFounder", fields: [founderId], references: [id], onDelete: Cascade)
+  founderId       String
+  members         User[]              @relation("ClanMembers")
+
+  questsCompleted Int                 @default(0)
+  totalRewards    Float               @default(0)
+  treasuryBalance Float               @default(0)
+  reputation      Float               @default(0)
+  level           Int                 @default(1)
+
+  clanQuests      ClanQuest[]
+  treasury        ClanTreasury?
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([founderId])
+  @@index([reputation])
+}
+
+model ClanQuest {
+  id                String              @id @default(cuid())
+  clan              Clan                @relation(fields: [clanId], references: [id], onDelete: Cascade)
+  clanId            String
+  quest             Quest               @relation(fields: [questId], references: [id], onDelete: Cascade)
+  questId           String
+
+  status            String              @default("active") // "active", "completed", "failed"
+  rewardDistribution Json               // how rewards split among participants
+  participantCount  Int                 @default(1)
+  completedAt       DateTime?
+
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
+
+  @@index([clanId, status])
+  @@index([questId])
+}
+
+model ClanTreasury {
+  id              String              @id @default(cuid())
+  clan            Clan                @relation(fields: [clanId], references: [id], onDelete: Cascade)
+  clanId          String              @unique
+  balance         Float               @default(0)
+
+  transactions    ClanTreasuryTx[]
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+}
+
+model ClanTreasuryTx {
+  id              String              @id @default(cuid())
+  treasury        ClanTreasury        @relation(fields: [treasuryId], references: [id], onDelete: Cascade)
+  treasuryId      String
+
+  type            String              // "deposit", "withdrawal", "quest_reward", "raid_loot"
+  amount          Float
+  initiatedBy     User?               @relation(fields: [userId], references: [id])
+  userId          String?
+
+  txHash          String?             // on-chain tx hash if applicable
+  description     String?
+
+  createdAt       DateTime            @default(now())
+
+  @@index([treasuryId, type])
+  @@index([userId])
+}
+
+// ============================================================================
+// WORLD STATE & DYNAMIC EVENTS
+// ============================================================================
+
+model WorldEvent {
+  id              String              @id @default(cuid())
+  name            String
+  description     String
+  type            String              // "boss_event", "faction_war", "seasonal_modifier", "natural_disaster"
+
+  startTime       DateTime
+  endTime         DateTime
+  isActive        Boolean             @default(true)
+
+  reward          Float               // bonus reward for participants
+  multiplier      Float               @default(1.0) // reward multiplier during event
+  difficulty      Int                 @default(3)
+
+  affectsAllQuests Boolean            @default(false) // whether this changes all quests
+  eventData       Json                // event-specific data
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([isActive])
+  @@index([startTime, endTime])
+}
+
+model WorldStateSnapshot {
+  id             String   @id @default(cuid())
+  version        Int      @unique
+  snapshotType   String   @default("global")
+  trigger        String   @default("startup")
+  seasonKey      String
+  stateHash      String
+  sourceEventIds String[]
+  changedKeys    String[]
+  isActive       Boolean  @default(true)
+  state          Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([isActive, version])
+  @@index([seasonKey])
+  @@index([stateHash])
+}
+
+model MemoryLedgerEntry {
+  id              String         @id @default(cuid())
+  replayKey       String         @unique
+  memoryType      String
+  summary         String
+  importanceScore Float          @default(1.0)
+  embedding       Float[]
+  metadata        Json
+  seasonKey       String?
+  eventTimestamp  DateTime
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  user            User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId          String?
+  npc             NPC?           @relation(fields: [npcId], references: [id], onDelete: SetNull)
+  npcId           String?
+  agent           AgentIdentity? @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  agentId         String?
+  quest           Quest?         @relation(fields: [questId], references: [id], onDelete: SetNull)
+  questId         String?
+
+  @@index([userId, eventTimestamp])
+  @@index([npcId, eventTimestamp])
+  @@index([agentId, eventTimestamp])
+  @@index([questId])
+  @@index([memoryType, importanceScore])
+}
+
+model PlayerNarrativeState {
+  id                    String   @id @default(cuid())
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId                String   @unique
+  currentArc            String
+  narrativeVersion      Int      @default(1)
+  reputationTier        String   @default("initiate")
+  lastMemoryAt          DateTime?
+  factionStandingSummary Json
+  npcTrustSummary       Json
+  stateData             Json
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([reputationTier])
+  @@index([narrativeVersion])
+}
+
+model FactionStanding {
+  id             String   @id @default(cuid())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId         String
+  factionId      String
+  factionName    String
+  standingScore  Float    @default(0.0)
+  influenceRank  String   @default("unknown")
+  allianceStatus String   @default("neutral")
+  narrativeFlags String[]
+  metadata       Json
+  lastChangedAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, factionId])
+  @@index([factionId, standingScore])
+  @@index([userId, standingScore])
+}
+
+model ProjectionCursor {
+  id                 String   @id @default(cuid())
+  projectorKey       String   @unique
+  projectionVersion  Int      @default(1)
+  lastEventKey       String?
+  lastProcessedBlock BigInt?  @db.BigInt
+  lastProcessedAt    DateTime?
+  stateHash          String?
+  metrics            Json
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model ProjectionDeadLetter {
+  id              String   @id @default(cuid())
+  projectorKey    String
+  chainEventId    String?
+  eventKey        String
+  payload         Json
+  errorMessage    String
+  retryCount      Int      @default(0)
+  resolvedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectorKey, eventKey])
+  @@index([projectorKey, resolvedAt])
+}
+
+model RealtimeFeedEvent {
+  id            Int      @id @default(autoincrement())
+  replayKey     String   @unique
+  eventName     String
+  scopeType     String
+  scopeKey      String
+  sourceType    String
+  sourceId      String?
+  payload       Json
+  createdAt     DateTime @default(now())
+
+  @@index([scopeType, scopeKey, id])
+  @@index([eventName, id])
+}
+
+model DailyQuest {
+  id              String              @id @default(cuid())
+  date            String              @unique // YYYY-MM-DD format
+
+  questTemplate   String              // JSON quest template
+  difficulty      Int                 @default(3)
+  specialEvent    String?             // reference to world event if any
+
+  completionCount Int                 @default(0)
+
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([date])
 }

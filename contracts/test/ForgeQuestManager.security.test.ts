@@ -1,5 +1,6 @@
 import { expect } from 'chai';
 import { ethers } from 'hardhat';
+import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
   ForgeQuestManager__factory,
   MockERC20__factory,
@@ -19,11 +20,11 @@ describe('ForgeQuestManager Security', () => {
   let reputation: Reputation;
   let treasury: Treasury;
   let rewardToken: MockERC20;
-  let owner: any;
-  let player1: any;
-  let player2: any;
-  let verifier: any;
-  let guardian: any;
+  let owner: SignerWithAddress;
+  let player1: SignerWithAddress;
+  let player2: SignerWithAddress;
+  let verifier: SignerWithAddress;
+  let guardian: SignerWithAddress;
 
   const stake = ethers.parseEther('0.01');
   const reward = ethers.parseEther('0.03');

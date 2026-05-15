@@ -5,6 +5,18 @@ import { RewardNFT__factory, type RewardNFT } from '../typechain-types';
 
 const { ethers } = hre;
 
+async function expectRevert(txPromise: Promise<unknown>, message?: string) {
+  try {
+    await txPromise;
+    expect.fail('Expected transaction to revert');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (message) {
+      expect(errorMessage).to.include(message);
+    }
+  }
+}
+
 describe('RewardNFT', function () {
   let rewardNFT: RewardNFT;
   let owner: SignerWithAddress;
@@ -31,12 +43,12 @@ describe('RewardNFT', function () {
 
     it('should grant admin role to deployer', async function () {
       const adminRole = await rewardNFT.DEFAULT_ADMIN_ROLE();
-      expect(await rewardNFT.hasRole(adminRole, owner.address)).to.be.true;
+      expect(await rewardNFT.hasRole(adminRole, owner.address)).to.equal(true);
     });
 
     it('should grant minter role to deployer', async function () {
       const minterRole = await rewardNFT.MINTER_ROLE();
-      expect(await rewardNFT.hasRole(minterRole, owner.address)).to.be.true;
+      expect(await rewardNFT.hasRole(minterRole, owner.address)).to.equal(true);
     });
   });
 
@@ -101,13 +113,10 @@ describe('RewardNFT', function () {
     });
 
     it('should revert without MINTER_ROLE', async function () {
-      await expect(
-        rewardNFT.connect(player).mintQuestReward(
-          player.address,
-          1,
-          'ipfs://metadata/1'
-        )
-      ).to.be.reverted;
+      await expectRevert(
+        rewardNFT.connect(player).mintQuestReward(player.address, 1, 'ipfs://metadata/1'),
+        'AccessControl:'
+      );
     });
   });
 
@@ -116,23 +125,23 @@ describe('RewardNFT', function () {
       const minterRole = await rewardNFT.MINTER_ROLE();
       await rewardNFT.grantRole(minterRole, other.address);
 
-      expect(await rewardNFT.hasRole(minterRole, other.address)).to.be.true;
+      expect(await rewardNFT.hasRole(minterRole, other.address)).to.equal(true);
     });
 
     it('should allow admin to revoke MINTER_ROLE', async function () {
       const minterRole = await rewardNFT.MINTER_ROLE();
       await rewardNFT.revokeRole(minterRole, minter.address);
 
-      expect(await rewardNFT.hasRole(minterRole, minter.address)).to.be.false;
+      expect(await rewardNFT.hasRole(minterRole, minter.address)).to.equal(false);
     });
 
     it('should support interface queries', async function () {
       // ERC721 interface ID
-      expect(await rewardNFT.supportsInterface('0x80ac58cd')).to.be.true;
+      expect(await rewardNFT.supportsInterface('0x80ac58cd')).to.equal(true);
       // ERC165 interface ID
-      expect(await rewardNFT.supportsInterface('0x01ffc9a7')).to.be.true;
+      expect(await rewardNFT.supportsInterface('0x01ffc9a7')).to.equal(true);
       // AccessControl interface ID
-      expect(await rewardNFT.supportsInterface('0x7965db0b')).to.be.true;
+      expect(await rewardNFT.supportsInterface('0x7965db0b')).to.equal(true);
     });
   });
 

@@ -14,6 +14,7 @@ import { productionWebSocketBroadcaster } from './services/productionWebSocketBr
 import { rpcFailoverManager } from './services/rpcFailoverManager';
 import { prisma } from './services/chain';
 import { aiQuestGenerationEngine } from './services/aiQuestGenerationEngine';
+import { authoritativeEventProjector } from './services/authoritativeEventProjector';
 import { worldStateCoordinator } from './services/worldStateCoordinator';
 
 const app = express();
@@ -75,7 +76,8 @@ app.get('/health/events', async (_req, res) => {
       },
       orchestration: {
         questGeneration: questDiagnostics,
-        worldState: worldDiagnostics
+        worldState: worldDiagnostics,
+        authoritativeProjector: authoritativeEventProjector.getDiagnostics()
       },
       healthy:
         ingestorStatus.running &&

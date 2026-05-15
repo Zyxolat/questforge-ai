@@ -6,6 +6,18 @@ import { Reputation__factory, type Reputation } from '../typechain-types';
 
 const { ethers } = hre;
 
+async function expectRevert(txPromise: Promise<unknown>, message?: string) {
+  try {
+    await txPromise;
+    expect.fail('Expected transaction to revert');
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (message) {
+      expect(errorMessage).to.include(message);
+    }
+  }
+}
+
 describe('Reputation', function () {
   let reputation: Reputation;
   let owner: SignerWithAddress;
@@ -27,12 +39,12 @@ describe('Reputation', function () {
   describe('Deployment', function () {
     it('should grant admin role to deployer', async function () {
       const adminRole = await reputation.DEFAULT_ADMIN_ROLE();
-      expect(await reputation.hasRole(adminRole, owner.address)).to.be.true;
+      expect(await reputation.hasRole(adminRole, owner.address)).to.equal(true);
     });
 
     it('should grant reward role to deployer', async function () {
       const rewardRole = await reputation.REWARD_ROLE();
-      expect(await reputation.hasRole(rewardRole, owner.address)).to.be.true;
+      expect(await reputation.hasRole(rewardRole, owner.address)).to.equal(true);
     });
   });
 
@@ -55,7 +67,7 @@ describe('Reputation', function () {
 
     it('should not reinitialize existing player', async function () {
       await reputation.initializePlayer(player.address);
-      
+
       // Get initial lastQuestAt
       let profile = await reputation.profileFor(player.address);
       const initialTime = profile.lastQuestAt;
@@ -137,9 +149,7 @@ describe('Reputation', function () {
     });
 
     it('should revert without REWARD_ROLE', async function () {
-      await expect(
-        reputation.connect(player).rewardXP(player.address, 500, 1)
-      ).to.be.reverted;
+      await expectRevert(reputation.connect(player).rewardXP(player.address, 500, 1), 'AccessControl:');
     });
 
     it('should revert if player not initialized', async function () {
@@ -166,20 +176,21 @@ describe('Reputation', function () {
       const rewardRole = await reputation.REWARD_ROLE();
       await reputation.grantRewardRole(other.address);
 
-      expect(await reputation.hasRole(rewardRole, other.address)).to.be.true;
+      expect(await reputation.hasRole(rewardRole, other.address)).to.equal(true);
     });
 
     it('should allow owner to revoke REWARD_ROLE', async function () {
       const rewardRole = await reputation.REWARD_ROLE();
       await reputation.revokeRewardRole(rewarder.address);
 
-      expect(await reputation.hasRole(rewardRole, rewarder.address)).to.be.false;
+      expect(await reputation.hasRole(rewardRole, rewarder.address)).to.equal(false);
     });
 
     it('should not allow non-owner to grant roles', async function () {
-      await expect(
-        reputation.connect(player).grantRewardRole(other.address)
-      ).to.be.reverted;
+      await expectRevert(
+        reputation.connect(player).grantRewardRole(other.address),
+        'Ownable: caller is not the owner'
+      );
     });
 
     it('should revert granting role to zero address', async function () {
@@ -193,21 +204,16 @@ describe('Reputation', function () {
     it('should pause initialization', async function () {
       await reputation.pause();
 
-      await expect(
-        reputation.initializePlayer(player.address)
-      ).to.be.reverted;
+      await expectRevert(reputation.initializePlayer(player.address), 'Pausable: paused');
     });
 
     it('should pause XP rewards', async function () {
       await reputation.initializePlayer(player.address);
       await reputation.pause();
 
-      const rewardRole = await reputation.REWARD_ROLE();
       const rewarderWithRole = reputation.connect(rewarder);
 
-      await expect(
-        rewarderWithRole.rewardXP(player.address, 500, 1)
-      ).to.be.reverted;
+      await expectRevert(rewarderWithRole.rewardXP(player.address, 500, 1), 'Pausable: paused');
     });
 
     it('should allow owner to unpause', async function () {
@@ -221,9 +227,7 @@ describe('Reputation', function () {
     });
 
     it('should not allow non-owner to pause', async function () {
-      await expect(
-        reputation.connect(player).pause()
-      ).to.be.reverted;
+      await expectRevert(reputation.connect(player).pause(), 'Ownable: caller is not the owner');
     });
   });
 
@@ -236,9 +240,9 @@ describe('Reputation', function () {
 
     it('should support interface queries', async function () {
       // AccessControl interface ID
-      expect(await reputation.supportsInterface('0x7965db0b')).to.be.true;
+      expect(await reputation.supportsInterface('0x7965db0b')).to.equal(true);
       // ERC165 interface ID
-      expect(await reputation.supportsInterface('0x01ffc9a7')).to.be.true;
+      expect(await reputation.supportsInterface('0x01ffc9a7')).to.equal(true);
     });
   });
 });

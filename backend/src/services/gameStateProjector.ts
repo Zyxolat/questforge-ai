@@ -54,6 +54,22 @@ function memoryEffectForEvent(eventType: string) {
   }
 }
 
+function memoryTypeForEvent(eventType: string) {
+  switch (eventType) {
+    case 'reward_claimed':
+    case 'reward_refunded':
+      return 'quest_outcome';
+    case 'quest_started':
+      return 'quest_commitment';
+    case 'proof_submitted':
+      return 'proof_submission';
+    case 'nft_minted':
+      return 'reward_artifact';
+    default:
+      return 'world_event';
+  }
+}
+
 function buildEventSummary(event: ChainEvent, quest: ProjectableQuest | null, factionName?: string | null) {
   const base = quest?.title ?? `quest ${event.chainQuestId?.toString() ?? 'unknown'}`;
 
@@ -109,7 +125,8 @@ class GameStateProjector {
             select: {
               id: true,
               wallet: true,
-              clanId: true
+              clanId: true,
+              agentId: true
             }
           })
         : [];
@@ -127,7 +144,7 @@ class GameStateProjector {
       if (playerUser) {
         await aiMemoryGraph.recordMemory({
           replayKey: `event:${chainEvent.eventKey}:player`,
-          memoryType: 'world_event',
+          memoryType: memoryTypeForEvent(chainEvent.eventType),
           summary,
           metadata: {
             eventType: chainEvent.eventType,
@@ -138,6 +155,7 @@ class GameStateProjector {
             factionName
           },
           userId: playerUser.id,
+          agentId: playerUser.agentId,
           questId: quest?.id ?? null,
           npcId: quest?.npcGiverId ?? null,
           eventTimestamp: chainEvent.blockTimestamp,
