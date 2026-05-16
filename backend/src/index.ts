@@ -1,3 +1,18 @@
+/**
+ * QuestForge AI — Backend Entry Point
+ *
+ * Environment variables are validated eagerly when `./config/env` is imported
+ * below. If any required variable is missing the process will exit before
+ * binding to a port, causing all Railway healthchecks to fail.
+ *
+ * Required variables that MUST be set in the Railway dashboard before deploy:
+ *   DATABASE_URL, FRONTEND_URL, CORS_ORIGIN, JWT_SECRET, JWT_EXPIRES_IN,
+ *   CELO_RPC_URL, CELO_CHAIN_ID, FORGE_QUEST_MANAGER_ADDRESS,
+ *   REWARD_NFT_ADDRESS, REPUTATION_ADDRESS, TREASURY_ADDRESS
+ *
+ * See backend/.env.example for the full list and backend/README.md for setup
+ * instructions.
+ */
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
