@@ -172,7 +172,7 @@ async function bootstrap() {
       lastReadyAt: nowIso()
     };
 
-    logger.info('[STARTUP] Service skipped', {
+    logger.info(`[STARTUP] Service skipped: ${service}`, {
       service,
       reason
     });
@@ -201,7 +201,7 @@ async function bootstrap() {
       lastError: null
     };
 
-    logger.info('[STARTUP] Service initializing', {
+    logger.info(`[STARTUP] Service initializing: ${service}`, {
       service,
       attempt,
       timeoutMs,
@@ -217,7 +217,7 @@ async function bootstrap() {
         lastError: null
       };
 
-      logger.info('[STARTUP] Service ready', {
+      logger.info(`[STARTUP] Service ready: ${service}`, {
         service,
         attempt
       });
@@ -231,7 +231,7 @@ async function bootstrap() {
         lastError: rootCause
       };
 
-      logger.error('[STARTUP] Service initialization failed', error, {
+      logger.error(`[STARTUP] Service initialization failed: ${service}`, error, {
         service,
         attempt,
         optional
@@ -321,7 +321,7 @@ async function bootstrap() {
         lastError: null
       };
 
-      logger.info('[STARTUP] Service ready', {
+      logger.info('[STARTUP] Service ready: openai', {
         service: 'openai',
         attempt,
         mode: 'configured'
@@ -386,10 +386,14 @@ async function bootstrap() {
       startupState.servicesReady = false;
       startupState.lastError = getLatestFailedService() ?? formatRootCause(error);
 
-      logger.error('[STARTUP] Background service initialization failed', error, {
+      logger.error(
+        `[STARTUP] Background service initialization failed: ${startupState.lastError ?? formatRootCause(error)}`,
+        error,
+        {
         attempt,
         lastError: startupState.lastError
-      });
+        }
+      );
 
       scheduleServiceRetry();
     } finally {

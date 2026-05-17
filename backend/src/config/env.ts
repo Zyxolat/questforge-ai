@@ -297,6 +297,7 @@ export function validateEnvironment(): EnvValidationResult {
   const warnings: EnvIssue[] = [];
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
+  const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), true);
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
@@ -350,6 +351,15 @@ export function validateEnvironment(): EnvValidationResult {
     warnings,
     (raw) => parseOptionalPrivateKey('VERIFIER_PRIVATE_KEY', raw)
   );
+
+  if (enableEventStream && !redisUrl) {
+    addIssue(
+      errors,
+      'Event Streaming',
+      'REDIS_URL',
+      'is required when ENABLE_EVENT_STREAM=true because the production event queue and worker depend on Redis'
+    );
+  }
 
   const authUriRaw = optionalEnv('AUTH_URI') || frontendUrl?.toString();
   let authUri: URL | undefined;
@@ -422,7 +432,7 @@ export function validateEnvironment(): EnvValidationResult {
         JWT_SECRET: jwtSecret!,
         JWT_EXPIRES_IN: resolvedJwtExpiresIn,
         JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(resolvedJwtExpiresIn),
-        ENABLE_EVENT_STREAM: parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), true),
+        ENABLE_EVENT_STREAM: enableEventStream,
         EVENT_CHUNK_SIZE: parsePositiveInt('EVENT_CHUNK_SIZE', optionalEnv('EVENT_CHUNK_SIZE') || '5000'),
         EVENT_POLL_INTERVAL_MS: parsePositiveInt(
           'EVENT_POLL_INTERVAL_MS',
