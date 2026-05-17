@@ -47,7 +47,7 @@ Frontend (React - live UI updates)
   - Error tracking and recovery
   - Polling-based with configurable interval
 - **Config**:
-  - `ENABLE_EVENT_STREAM`: Master switch (default: true)
+  - `ENABLE_EVENT_STREAM`: Master switch (default: false)
   - `EVENT_CHUNK_SIZE`: Blocks per chunk (default: 5000)
   - `EVENT_POLL_INTERVAL_MS`: Poll frequency (default: 5s)
   - `INDEXER_FROM_BLOCK`: Start block (default: 0)
@@ -62,7 +62,7 @@ Frontend (React - live UI updates)
   - Failed job tracking
   - Job completion tracking
 - **Config**:
-  - `REDIS_URL`: Redis connection string
+  - `REDIS_URL`: Redis connection string (required when `ENABLE_EVENT_STREAM=true`)
   - `EVENT_WORKER_CONCURRENCY`: Parallel workers (default: 5)
 
 ### 4. **Event Decoder** (`eventDecoder.ts`)
@@ -344,11 +344,11 @@ Response:
 
 - [ ] All contract addresses set in `.env`
 - [ ] PostgreSQL configured and running
-- [ ] Redis configured and running
+- [ ] Redis configured and running if `ENABLE_EVENT_STREAM=true`
 - [ ] CELO_RPC_URL set to stable provider
 - [ ] Frontend origin in CORS_ORIGINS
 - [ ] WEBSOCKET_ENABLED=true
-- [ ] ENABLE_EVENT_STREAM=true
+- [ ] ENABLE_EVENT_STREAM=true only after Redis is configured
 - [ ] RPC_TIMEOUT_MS appropriate for provider
 - [ ] EVENT_WORKER_CONCURRENCY scaled for load
 - [ ] Monitoring configured for health endpoints

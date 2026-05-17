@@ -297,7 +297,7 @@ export function validateEnvironment(): EnvValidationResult {
   const warnings: EnvIssue[] = [];
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
-  const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), true);
+  const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
