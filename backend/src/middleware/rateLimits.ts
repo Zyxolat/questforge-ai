@@ -10,7 +10,6 @@
 
 import { Request, Response, NextFunction } from 'express';
 import rateLimit, { type Options } from 'express-rate-limit';
-import RedisStore from 'rate-limit-redis';
 import { createClient } from 'redis';
 import { env } from '../config/env';
 import { logger } from '../services/logger';
@@ -37,27 +36,26 @@ export const RATE_LIMITS = {
 };
 
 /**
- * Create rate limiter with Redis store if available, otherwise memory store
- * Memory store is suitable for development; Redis for production
+ * Create rate limiter with safe in-memory defaults.
+ * We probe Redis for visibility, but we do not attach request handling to it at startup.
+ * That keeps Railway health checks and API traffic available even when Redis is degraded.
  */
 const redisClient = env.REDIS_URL ? createClient({ url: env.REDIS_URL }) : null;
 
 if (redisClient) {
   redisClient.on('error', (error) => {
-    logger.error('Redis rate limit store error', error);
+    logger.error('[RATE_LIMIT] Redis probe error', error, {
+      service: 'rateLimitRedisProbe'
+    });
   });
   void redisClient.connect().catch((error) => {
-    logger.warn('Redis store unavailable, using in-memory rate limits', {
+    logger.warn('[RATE_LIMIT] Redis store unavailable, using in-memory rate limits', {
       error: error instanceof Error ? error.message : 'unknown'
     });
   });
+} else {
+  logger.info('[RATE_LIMIT] Redis not configured, using in-memory rate limits');
 }
-
-const redisStore = redisClient
-  ? new RedisStore({
-      sendCommand: (...args: string[]) => redisClient.sendCommand(args)
-    })
-  : undefined;
 
 function createRateLimiter(
   options: { windowMs: number; max: number },
@@ -79,10 +77,6 @@ function createRateLimiter(
       return req.path === '/health';
     }
   };
-
-  if (redisStore) {
-    config.store = redisStore;
-  }
 
   return rateLimit(config as Options);
 }

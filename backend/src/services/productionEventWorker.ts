@@ -11,8 +11,7 @@ class ProductionEventWorker {
 
   async startWorker(): Promise<void> {
     if (!env.REDIS_URL) {
-      logger.warn('[WORKER] Redis not configured');
-      return;
+      throw new Error('REDIS_URL is required for the production event worker when ENABLE_EVENT_STREAM=true');
     }
 
     if (this.isRunning) {
@@ -37,18 +36,35 @@ class ProductionEventWorker {
         }
       );
 
+      await this.worker.waitUntilReady();
+
       this.worker.on('completed', (job) => {
         logger.debug('[WORKER] Job completed', { jobId: job.id });
       });
 
       this.worker.on('failed', (job, error) => {
-        logger.error('[WORKER] Job failed', { jobId: job?.id, error: error.message });
+        logger.error('[WORKER] Job failed', error, { jobId: job?.id });
+      });
+
+      this.worker.on('error', (error) => {
+        logger.error('[WORKER] Worker runtime error', error, {
+          service: 'eventWorker'
+        });
       });
 
       this.isRunning = true;
       logger.info('[WORKER] Started', { concurrency: env.EVENT_WORKER_CONCURRENCY });
     } catch (error) {
-      logger.error('[WORKER] Failed to start', { error: (error as Error).message });
+      if (this.worker) {
+        await this.worker.close().catch((closeError) => {
+          logger.error('[WORKER] Failed to close worker after startup error', closeError);
+        });
+        this.worker = null;
+      }
+      this.isRunning = false;
+      logger.error('[WORKER] Failed to start', error, {
+        service: 'eventWorker'
+      });
       throw error;
     }
   }
@@ -73,11 +89,23 @@ class ProductionEventWorker {
               attempts: { increment: 1 }
             }
           })
-          .catch(() => null);
+          .catch((error) => {
+            logger.error('[WORKER] Failed to mark queue job as processing', error, {
+              jobId: job.id,
+              chainEventId
+            });
+            return null;
+          });
       }
 
       // Retrieve event from DB
-      const chainEvent = await prisma.chainEvent.findUnique({ where: { id: chainEventId } }).catch(() => null);
+      const chainEvent = await prisma.chainEvent.findUnique({ where: { id: chainEventId } }).catch((error) => {
+        logger.error('[WORKER] Failed to fetch chain event', error, {
+          jobId: job.id,
+          chainEventId
+        });
+        return null;
+      });
 
       if (!chainEvent) {
         logger.warn('[WORKER] Event not found', { chainEventId });
@@ -112,7 +140,12 @@ class ProductionEventWorker {
             broadcastedAt: new Date()
           }
         })
-        .catch((e) => logger.error('[WORKER] Failed to mark processed', { error: e.message }));
+        .catch((error) =>
+          logger.error('[WORKER] Failed to mark processed', error, {
+            jobId: job.id,
+            chainEventId
+          })
+        );
 
       // Update queue tracking
       if (job.id) {
@@ -121,16 +154,21 @@ class ProductionEventWorker {
             where: { jobId: job.id },
             data: { status: 'completed', processedAt: new Date() }
           })
-          .catch(() => null);
+          .catch((error) => {
+            logger.error('[WORKER] Failed to mark queue job completed', error, {
+              jobId: job.id,
+              chainEventId
+            });
+            return null;
+          });
       }
 
       const processingTime = Date.now() - startTime;
       logger.debug('[WORKER] Processed', { jobId: job.id, processingTimeMs: processingTime });
     } catch (error) {
-      logger.error('[WORKER] Processing error', {
+      logger.error('[WORKER] Processing error', error, {
         jobId: job.id,
-        chainEventId: job.data.chainEventId,
-        error: (error as Error).message
+        chainEventId: job.data.chainEventId
       });
 
       // Record error in DB
@@ -141,7 +179,13 @@ class ProductionEventWorker {
             processingError: (error as Error).message
           }
         })
-        .catch(() => null);
+        .catch((updateError) => {
+          logger.error('[WORKER] Failed to persist processing error', updateError, {
+            jobId: job.id,
+            chainEventId: job.data.chainEventId
+          });
+          return null;
+        });
 
       // Re-throw to trigger BullMQ retry
       throw error;
@@ -153,10 +197,13 @@ class ProductionEventWorker {
 
     try {
       await this.worker.close();
+      this.worker = null;
       this.isRunning = false;
       logger.info('[WORKER] Stopped');
     } catch (error) {
-      logger.error('[WORKER] Stop error', { error: (error as Error).message });
+      logger.error('[WORKER] Stop error', error, {
+        service: 'eventWorker'
+      });
     }
   }
 

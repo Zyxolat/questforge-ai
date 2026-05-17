@@ -33,12 +33,18 @@ interface GameplayTest {
   status: 'pass' | 'fail' | 'pending';
   duration: number;
   message: string;
-  details?: any;
+  details?: unknown;
 }
 
 const tests: GameplayTest[] = [];
 
-function recordTest(name: string, status: 'pass' | 'fail' | 'pending', message: string, duration = 0, details?: any) {
+function recordTest(
+  name: string,
+  status: 'pass' | 'fail' | 'pending',
+  message: string,
+  duration = 0,
+  details?: unknown
+) {
   tests.push({ name, status, message, duration, details });
   const icon = status === 'pass' ? '✓' : status === 'fail' ? '❌' : '⏳';
   const color = status === 'pass' ? '\x1b[32m' : status === 'fail' ? '\x1b[31m' : '\x1b[36m';
@@ -47,7 +53,6 @@ function recordTest(name: string, status: 'pass' | 'fail' | 'pending', message: 
 
 async function validateGameplay() {
   const apiUrl = process.env.API_URL || 'http://localhost:4000';
-  const rpcUrl = process.env.CELO_RPC_URL || 'https://forno.celo.org';
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
   console.log('║    QuestForge AI - End-to-End Gameplay Validation           ║');
@@ -193,14 +198,14 @@ async function validateGameplay() {
                   break;
                 }
                 await new Promise(resolve => setTimeout(resolve, 1000));
-              } catch (e) {
+              } catch {
                 break;
               }
             }
             
-            const duration = Date.now() - startTime;
+            const verificationDuration = Date.now() - startTime;
             if (verificationStatus === 'verified' || verificationStatus === 'completed') {
-              recordTest('On-Chain Verification', 'pass', `Proof verified: ${verificationStatus}`, duration);
+              recordTest('On-Chain Verification', 'pass', `Proof verified: ${verificationStatus}`, verificationDuration);
 
               // Test 7: Reward Payout
               console.log('\n💰 Step 7: Reward Payout & NFT Minting\n');
@@ -237,7 +242,11 @@ async function validateGameplay() {
                   
                   const duration = Date.now() - startTime;
                   const leaderboard = leaderboardResponse.data;
-                  const playerRank = leaderboard.entries.findIndex((e: any) => e.address === testWallet.address);
+                  const playerRank = Array.isArray(leaderboard.entries)
+                    ? leaderboard.entries.findIndex(
+                        (entry: { address?: string }) => entry.address === testWallet.address
+                      )
+                    : -1;
                   
                   if (playerRank >= 0) {
                     recordTest('Leaderboard Update', 'pass', `Player ranked #${playerRank + 1}`, duration);
@@ -251,7 +260,12 @@ async function validateGameplay() {
                 recordTest('Reward Payout', 'fail', `Failed to fetch player data: ${e instanceof Error ? e.message : String(e)}`);
               }
             } else {
-              recordTest('On-Chain Verification', 'fail', `Verification failed or timed out: ${verificationStatus}`, duration);
+              recordTest(
+                'On-Chain Verification',
+                'fail',
+                `Verification failed or timed out: ${verificationStatus}`,
+                verificationDuration
+              );
             }
           } catch (e) {
             recordTest('Proof Submission', 'fail', `Failed: ${e instanceof Error ? e.message : String(e)}`);

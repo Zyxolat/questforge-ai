@@ -14,7 +14,7 @@ interface QuestEvent {
   blockNumber: string;
   transactionHash: string;
   timestamp: string;
-  data: Record<string, any>;
+  data: Record<string, unknown>;
   chainQuestId?: string;
   playerWallet?: string;
   creatorWallet?: string;

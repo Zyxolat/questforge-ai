@@ -33,6 +33,11 @@ class ProductionWebSocketBroadcaster {
       return null;
     }
 
+    if (this.io) {
+      logger.warn('[WS] Already initialized');
+      return this.io;
+    }
+
     try {
       this.io = new SocketIOServer(httpServer, {
         cors: {
@@ -64,7 +69,9 @@ class ProductionWebSocketBroadcaster {
 
           logger.info('[WS] Redis adapter initialized for multi-instance sync');
         } catch (error) {
-          logger.error('[WS] Failed to initialize Redis adapter', { error: (error as Error).message });
+          logger.error('[WS] Failed to initialize Redis adapter', error, {
+            service: 'websocketRedisAdapter'
+          });
           // Continue without adapter for single-instance fallback
         }
       }
@@ -147,8 +154,10 @@ class ProductionWebSocketBroadcaster {
       logger.info('[WS] Server initialized');
       return this.io;
     } catch (error) {
-      logger.error('[WS] Failed to initialize', { error: (error as Error).message });
-      return null;
+      logger.error('[WS] Failed to initialize', error, {
+        service: 'websocket'
+      });
+      throw error;
     }
   }
 
@@ -271,7 +280,9 @@ class ProductionWebSocketBroadcaster {
       }
       logger.info('[WS] Cleaned up');
     } catch (error) {
-      logger.error('[WS] Cleanup error', { error: (error as Error).message });
+      logger.error('[WS] Cleanup error', error, {
+        service: 'websocket'
+      });
     }
   }
 }

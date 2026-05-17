@@ -59,14 +59,13 @@ function optionalEnv(name: string): string | null {
 
 async function validateEthereumAddress(name: string, value: string | null): Promise<boolean> {
   if (!value) {
-    recordResult(name, 'fail', 'Invalid Ethereum address (missing)');
     return false;
   }
   try {
     ethers.getAddress(value);
     recordResult(name, 'pass', `Valid address: ${value}`);
     return true;
-  } catch (e) {
+  } catch {
     recordResult(name, 'fail', `Invalid Ethereum address: ${value}`);
     return false;
   }
@@ -97,7 +96,6 @@ async function validateRpcConnectivity(rpcUrl: string | null): Promise<boolean> 
 
 async function validatePrivateKey(name: string, value: string | null): Promise<boolean> {
   if (!value) {
-    recordResult(name, 'fail', 'Missing private key');
     return false;
   }
   try {
@@ -146,10 +144,42 @@ function validateUrl(name: string, value: string | null): boolean {
     new URL(value);
     recordResult(name, 'pass', `Valid URL: ${value}`);
     return true;
-  } catch (e) {
+  } catch {
     recordResult(name, 'fail', `Invalid URL: ${value}`);
     return false;
   }
+}
+
+function hasPlaceholderValue(value: string): boolean {
+  const normalized = value.trim().toLowerCase();
+  return [
+    'example.com',
+    'change_me',
+    'your_',
+    'your-',
+    'placeholder',
+    'localhost',
+    'sender@example.com',
+    'smtp.example.com',
+    'secure_db_password',
+    'questforge.example.com',
+    'api.questforge.example.com'
+  ].some((token) => normalized.includes(token));
+}
+
+function validateNotPlaceholder(name: string, value: string | null): boolean {
+  if (!value) {
+    recordResult(name, 'fail', 'Missing value');
+    return false;
+  }
+
+  if (hasPlaceholderValue(value)) {
+    recordResult(name, 'fail', 'Value still contains a placeholder or local-only setting');
+    return false;
+  }
+
+  recordResult(name, 'pass', 'Value does not look like a placeholder');
+  return true;
 }
 
 async function main() {
@@ -169,8 +199,14 @@ async function main() {
   console.log('\n📡 API CONFIGURATION...\n');
   const port = requireEnv('PORT');
   validatePositiveInteger('PORT', port);
-  validateUrl('FRONTEND_URL', requireEnv('FRONTEND_URL'));
-  validateUrl('API_URL', optionalEnv('API_URL'));
+  const frontendUrl = requireEnv('FRONTEND_URL');
+  validateUrl('FRONTEND_URL', frontendUrl);
+  validateNotPlaceholder('FRONTEND_URL', frontendUrl);
+  const apiUrl = optionalEnv('API_URL');
+  validateUrl('API_URL', apiUrl);
+  validateNotPlaceholder('API_URL', apiUrl);
+  const corsOrigin = requireEnv('CORS_ORIGIN');
+  validateNotPlaceholder('CORS_ORIGIN', corsOrigin);
 
   // Database
   console.log('\n🗄️  DATABASE CONFIGURATION...\n');
@@ -180,6 +216,7 @@ async function main() {
   } else {
     recordResult('DATABASE_URL', 'fail', 'Invalid database URL format');
   }
+  validateNotPlaceholder('DATABASE_URL', databaseUrl);
 
   // Blockchain Configuration
   console.log('\n⛓️  BLOCKCHAIN CONFIGURATION...\n');
@@ -213,6 +250,9 @@ async function main() {
     recordResult('OPENAI_API_KEY', 'warning', 'Not set (quest generation may fail)');
   } else {
     recordResult('OPENAI_API_KEY', 'fail', 'Invalid OpenAI key format');
+  }
+  if (openaiKey) {
+    validateNotPlaceholder('OPENAI_API_KEY', openaiKey);
   }
 
   // JWT Configuration
@@ -255,7 +295,7 @@ async function main() {
 
   // RPC Connectivity Check (LAST - expensive operation)
   console.log('\n🌐 RPC CONNECTIVITY CHECK...\n');
-  const rpcOk = await validateRpcConnectivity(rpcUrl);
+  await validateRpcConnectivity(rpcUrl);
 
   // Summary
   console.log('\n═══════════════════════════════════════════════════════════');

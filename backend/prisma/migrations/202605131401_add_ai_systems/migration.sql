@@ -150,27 +150,30 @@ CREATE INDEX "WorldEvent_startTime_endTime_idx" ON "WorldEvent"("startTime", "en
 CREATE INDEX "DailyQuest_date_idx" ON "DailyQuest"("date");
 
 -- Update User model to add AI and Clan relationships
-ALTER TABLE "User" ADD COLUMN "agentId" TEXT;
-ALTER TABLE "User" ADD COLUMN "clanId" TEXT;
-ALTER TABLE "User" ADD COLUMN "joinedClanAt" TIMESTAMP(3);
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "agentId" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "clanId" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "joinedClanAt" TIMESTAMP(3);
 
 -- Update NPCConversation to link to NPC
-ALTER TABLE "NPCConversation" ADD COLUMN "npcId" TEXT;
+ALTER TABLE "NPCConversation" ADD COLUMN IF NOT EXISTS "npcId" TEXT;
+ALTER TABLE "NPCConversation" DROP CONSTRAINT IF EXISTS "NPCConversation_npcId_fkey";
 ALTER TABLE "NPCConversation" ADD CONSTRAINT "NPCConversation_npcId_fkey" FOREIGN KEY ("npcId") REFERENCES "NPC" ("id") ON DELETE CASCADE;
-ALTER TABLE "NPCConversation" ADD CONSTRAINT "NPCConversation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE;
-ALTER TABLE "NPCConversation" DROP COLUMN "npcType" IF EXISTS;
-ALTER TABLE "NPCConversation" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "NPCConversation" DROP COLUMN IF EXISTS "npcType";
+ALTER TABLE "NPCConversation" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
 
 -- Update Quest model to support NPCs, clans, and multi-TX
-ALTER TABLE "Quest" ADD COLUMN "npcGiverId" TEXT;
-ALTER TABLE "Quest" ADD COLUMN "transactionCount" INTEGER NOT NULL DEFAULT 0;
-ALTER TABLE "Quest" ADD COLUMN "requiredTxTypes" JSONB;
-ALTER TABLE "Quest" ADD COLUMN "isEventQuest" BOOLEAN NOT NULL DEFAULT false;
-ALTER TABLE "Quest" ADD COLUMN "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "Quest" ADD COLUMN IF NOT EXISTS "npcGiverId" TEXT;
+ALTER TABLE "Quest" ADD COLUMN IF NOT EXISTS "transactionCount" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "Quest" ADD COLUMN IF NOT EXISTS "requiredTxTypes" JSONB;
+ALTER TABLE "Quest" ADD COLUMN IF NOT EXISTS "isEventQuest" BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE "Quest" ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE "Quest" DROP CONSTRAINT IF EXISTS "Quest_npcGiverId_fkey";
 ALTER TABLE "Quest" ADD CONSTRAINT "Quest_npcGiverId_fkey" FOREIGN KEY ("npcGiverId") REFERENCES "NPC" ("id") ON DELETE SET NULL;
 
 -- Add foreign keys for User
+ALTER TABLE "User" DROP CONSTRAINT IF EXISTS "User_agentId_fkey";
 ALTER TABLE "User" ADD CONSTRAINT "User_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "AgentIdentity" ("id") ON DELETE SET NULL;
+ALTER TABLE "User" DROP CONSTRAINT IF EXISTS "User_clanId_fkey";
 ALTER TABLE "User" ADD CONSTRAINT "User_clanId_fkey" FOREIGN KEY ("clanId") REFERENCES "Clan" ("id") ON DELETE SET NULL;
 
 -- Add indexes for new fields

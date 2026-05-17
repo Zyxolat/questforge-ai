@@ -20,9 +20,11 @@ class ProductionEventIngestor {
   private timer: NodeJS.Timeout | null = null;
   private isSyncing = false;
   private lastBlockProcessed: number | null = null;
+  private lastSuccessfulSyncAt: string | null = null;
+  private lastError: string | null = null;
   private consecutiveErrors = 0;
   private maxConsecutiveErrors = 10;
-  private reorgCheckInterval = 20; // Check reorg every 20 blocks
+  private validatedContractAddresses: string[] = [];
 
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -32,39 +34,97 @@ class ProductionEventIngestor {
 
     if (!env.ENABLE_EVENT_STREAM) {
       logger.info('[INDEXER] Disabled via ENABLE_EVENT_STREAM');
+      this.lastError = null;
       return;
     }
 
-    this.isRunning = true;
-    logger.info('[INDEXER] Started');
-
-    // Initialize RPC failover
-    const rpcUrls = [
-      env.CELO_RPC_URL,
-      'https://celo-mainnet.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161',
-      'https://alfajores-forno.celo-testnet.org'
-    ].filter(Boolean);
-
     try {
+      const rpcUrls = [env.CELO_RPC_URL, ...env.CELO_RPC_FALLBACK_URLS].filter(Boolean);
+
       await rpcFailoverManager.initialize(rpcUrls);
-    } catch (error) {
-      logger.error('[INDEXER] Failed to initialize RPC failover', { error: (error as Error).message });
-    }
+      await this.validateContractDeployments();
 
-    // Initial sync
-    await this.syncEvents();
+      this.isRunning = true;
+      this.lastError = null;
+      logger.info('[INDEXER] Starting initial sync');
 
-    // Setup polling with error isolation
-    this.timer = setInterval(() => {
-      this.syncEvents().catch((error) => {
-        logger.error('[INDEXER] Unhandled error in poll', { error: (error as Error).message });
+      await this.syncEvents({ throwOnFailure: true, trigger: 'startup' });
+
+      this.timer = setInterval(() => {
+        void this.syncEvents({ trigger: 'poll' }).catch((error) => {
+          this.lastError = error instanceof Error ? error.message : String(error);
+          logger.error('[INDEXER] Unhandled error in poll', error, {
+            service: 'eventIngestor'
+          });
+        });
+      }, env.EVENT_POLL_INTERVAL_MS);
+
+      logger.info('[INDEXER] Started', {
+        pollIntervalMs: env.EVENT_POLL_INTERVAL_MS,
+        validatedContracts: this.validatedContractAddresses
       });
-    }, env.EVENT_POLL_INTERVAL_MS);
+    } catch (error) {
+      this.isRunning = false;
+      this.lastError = error instanceof Error ? error.message : String(error);
+
+      if (this.timer) {
+        clearInterval(this.timer);
+        this.timer = null;
+      }
+
+      await rpcFailoverManager.cleanup().catch((cleanupError) => {
+        logger.error('[INDEXER] Failed to cleanup RPC failover after startup error', cleanupError);
+      });
+
+      logger.error('[INDEXER] Failed to start', error, {
+        service: 'eventIngestor'
+      });
+      throw error;
+    }
   }
 
-  private async syncEvents(): Promise<void> {
+  private async validateContractDeployments(): Promise<void> {
+    const requiredContracts = [
+      { name: 'FORGE_QUEST_MANAGER_ADDRESS', address: env.FORGE_QUEST_MANAGER_ADDRESS },
+      { name: 'REWARD_NFT_ADDRESS', address: env.REWARD_NFT_ADDRESS },
+      { name: 'REPUTATION_ADDRESS', address: env.REPUTATION_ADDRESS },
+      { name: 'TREASURY_ADDRESS', address: env.TREASURY_ADDRESS }
+    ];
+
+    const validatedContracts: string[] = [];
+
+    for (const contract of requiredContracts) {
+      const bytecode = await rpcFailoverManager.callWithFailover(
+        (provider) => provider.getCode(contract.address),
+        `getCode ${contract.name}`,
+        3
+      );
+
+      if (!bytecode || bytecode === '0x') {
+        throw new Error(
+          `${contract.name} (${contract.address}) has no deployed bytecode on Celo Mainnet. Check Railway contract env vars.`
+        );
+      }
+
+      validatedContracts.push(contract.name);
+    }
+
+    this.validatedContractAddresses = validatedContracts;
+    logger.info('[INDEXER] Contract deployment validation passed', {
+      contracts: validatedContracts
+    });
+  }
+
+  private async syncEvents(options?: { throwOnFailure?: boolean; trigger?: 'startup' | 'poll' }): Promise<void> {
+    const throwOnFailure = options?.throwOnFailure ?? false;
+    const trigger = options?.trigger ?? 'poll';
+
     if (this.isSyncing) {
-      logger.debug('[INDEXER] Sync in progress, skipping');
+      if (throwOnFailure) {
+        throw new Error('Event sync is already in progress');
+      }
+
+      logger.debug('[INDEXER] Sync in progress, skipping', { trigger });
       return;
     }
 
@@ -73,8 +133,13 @@ class ProductionEventIngestor {
     try {
       // Get current block
       const currentBlock = await rpcFailoverManager.getBlockNumber();
-      if (!currentBlock) {
-        this.recordError('Failed to get block number');
+      if (currentBlock === null) {
+        const error = new Error('Failed to get block number from any RPC endpoint');
+        this.recordError(error.message);
+        this.lastError = error.message;
+        if (throwOnFailure) {
+          throw error;
+        }
         return;
       }
 
@@ -125,8 +190,16 @@ class ProductionEventIngestor {
         this.recordSuccess();
       }
     } catch (error) {
-      logger.error('[INDEXER] Sync error', { error: (error as Error).message });
-      this.recordError((error as Error).message);
+      const message = error instanceof Error ? error.message : String(error);
+      this.lastError = message;
+      logger.error('[INDEXER] Sync error', error, {
+        service: 'eventIngestor',
+        trigger
+      });
+      this.recordError(message);
+      if (throwOnFailure) {
+        throw error;
+      }
     } finally {
       this.isSyncing = false;
     }
@@ -269,7 +342,12 @@ class ProductionEventIngestor {
                 isFinalized: blockNumber < toBlock - 10
               }
             })
-            .catch(() => null); // Ignore conflicts
+            .catch((error) => {
+              logger.error('[INDEXER] Failed to upsert block header', error, {
+                blockNumber
+              });
+              return null;
+            });
         }
       } catch (error) {
         logger.warn('[INDEXER] Failed to fetch block metadata', {
@@ -362,7 +440,9 @@ class ProductionEventIngestor {
         await productionEventQueue.enqueueBatch(jobsData);
         logger.info('[INDEXER] Events enqueued', { count: jobsData.length });
       } catch (error) {
-        logger.error('[INDEXER] Failed to enqueue', { error: (error as Error).message });
+        logger.error('[INDEXER] Failed to enqueue', error, {
+          count: jobsData.length
+        });
       }
     }
   }
@@ -407,6 +487,8 @@ class ProductionEventIngestor {
 
   private recordSuccess(): void {
     this.consecutiveErrors = 0;
+    this.lastError = null;
+    this.lastSuccessfulSyncAt = new Date().toISOString();
   }
 
   private recordError(reason: string): void {
@@ -420,7 +502,10 @@ class ProductionEventIngestor {
   }
 
   async stop(): Promise<void> {
-    if (this.timer) clearInterval(this.timer);
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
     this.isRunning = false;
     await rpcFailoverManager.cleanup();
     logger.info('[INDEXER] Stopped');
@@ -431,8 +516,11 @@ class ProductionEventIngestor {
       running: this.isRunning,
       syncing: this.isSyncing,
       lastBlockProcessed: this.lastBlockProcessed,
+      lastSuccessfulSyncAt: this.lastSuccessfulSyncAt,
+      lastError: this.lastError,
       consecutiveErrors: this.consecutiveErrors,
-      enabled: env.ENABLE_EVENT_STREAM
+      enabled: env.ENABLE_EVENT_STREAM,
+      validatedContracts: this.validatedContractAddresses
     };
   }
 }

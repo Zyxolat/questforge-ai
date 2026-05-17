@@ -20,18 +20,31 @@ import * as dotenv from 'dotenv';
 // Ensure we're in the project root
 const projectRoot = path.join(__dirname, '..');
 const envPath = path.join(projectRoot, '.env.production');
+const deploymentArtifactPath = path.join(projectRoot, 'contracts', 'deployments', 'celo-addresses.json');
+
+type DeployedAddresses = {
+  REWARD_NFT_ADDRESS: string;
+  TREASURY_ADDRESS: string;
+  REPUTATION_ADDRESS: string;
+  FORGE_QUEST_MANAGER_ADDRESS: string;
+};
 
 interface DeploymentLog {
   timestamp: string;
   step: string;
   status: 'start' | 'success' | 'error';
   message: string;
-  details?: Record<string, any>;
+  details?: Record<string, unknown>;
 }
 
 const deploymentLogs: DeploymentLog[] = [];
 
-function log(step: string, status: 'start' | 'success' | 'error', message: string, details?: Record<string, any>) {
+function log(
+  step: string,
+  status: 'start' | 'success' | 'error',
+  message: string,
+  details?: Record<string, unknown>
+) {
   const entry: DeploymentLog = {
     timestamp: new Date().toISOString(),
     step,
@@ -48,14 +61,71 @@ function log(step: string, status: 'start' | 'success' | 'error', message: strin
 
 function exec(command: string, description: string): string {
   try {
-    const output = execSync(command, { encoding: 'utf-8', stdio: 'pipe' });
-    log('EXEC', 'success', `${description}`);
+    const output = execSync(command, {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+    });
+
+    log('EXEC', 'success', description);
+
     return output;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
+    const message =
+      error instanceof Error ? error.message : String(error);
+
     log('EXEC', 'error', `${description} failed: ${message}`);
-    throw new Error(`Failed: ${description}`);
+
+    throw new Error(`Failed: ${description}`, {
+      cause: error,
+    });
   }
+}
+
+function writeFileAtomic(filePath: string, content: string) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, content);
+  fs.renameSync(tempPath, filePath);
+}
+
+function requireNormalizedAddress(name: string, value: string | undefined) {
+  if (!value?.trim()) {
+    throw new Error(`Missing deployed address ${name}`);
+  }
+
+  const normalized = value.trim();
+  if (!/^0x[a-fA-F0-9]{40}$/.test(normalized) || normalized === '0x0000000000000000000000000000000000000000') {
+    throw new Error(`Invalid deployed address ${name}: ${normalized}`);
+  }
+
+  return normalized;
+}
+
+function readDeploymentArtifact(): DeployedAddresses {
+  if (!fs.existsSync(deploymentArtifactPath)) {
+    throw new Error(`Deployment artifact not found at ${deploymentArtifactPath}`);
+  }
+
+  const parsed = JSON.parse(fs.readFileSync(deploymentArtifactPath, 'utf-8')) as Record<string, string>;
+
+  return {
+    REWARD_NFT_ADDRESS: requireNormalizedAddress('REWARD_NFT_ADDRESS', parsed.REWARD_NFT_ADDRESS),
+    TREASURY_ADDRESS: requireNormalizedAddress('TREASURY_ADDRESS', parsed.TREASURY_ADDRESS),
+    REPUTATION_ADDRESS: requireNormalizedAddress('REPUTATION_ADDRESS', parsed.REPUTATION_ADDRESS),
+    FORGE_QUEST_MANAGER_ADDRESS: requireNormalizedAddress(
+      'FORGE_QUEST_MANAGER_ADDRESS',
+      parsed.FORGE_QUEST_MANAGER_ADDRESS
+    )
+  };
+}
+
+function upsertEnvValue(envContent: string, name: string, value: string) {
+  const pattern = new RegExp(`^${name}=.*$`, 'm');
+  if (pattern.test(envContent)) {
+    return envContent.replace(pattern, `${name}=${value}`);
+  }
+
+  return `${envContent.trimEnd()}\n${name}=${value}\n`;
 }
 
 async function main() {
@@ -76,8 +146,13 @@ async function main() {
     
     // Check critical env vars
     const requiredVars = [
-      'NODE_ENV', 'CELO_RPC_URL', 'PRIVATE_KEY',
-      'DATABASE_URL', 'FRONTEND_URL', 'JWT_SECRET'
+      'CELO_RPC_URL',
+      'CELO_CHAIN_ID',
+      'PRIVATE_KEY',
+      'DATABASE_URL',
+      'FRONTEND_URL',
+      'CORS_ORIGIN',
+      'JWT_SECRET'
     ];
     
     const missing: string[] = [];
@@ -108,7 +183,7 @@ async function main() {
     try {
       process.chdir(path.join(projectRoot, 'contracts'));
       exec('npm test', 'Run contract tests');
-    } catch (e) {
+    } catch {
       log('TESTS', 'error', 'Contract tests failed - reviewing details');
       // Continue anyway, but note the failure
     } finally {
@@ -117,29 +192,18 @@ async function main() {
 
     // Step 4: Deploy contracts
     log('DEPLOYMENT', 'start', 'Deploying contracts to Celo Mainnet...');
-    let deploymentOutput = '';
     try {
       process.chdir(path.join(projectRoot, 'contracts'));
-      deploymentOutput = exec('npm run deploy:mainnet', 'Deploy to Celo Mainnet');
+      exec('npm run deploy:mainnet', 'Deploy to Celo Mainnet');
     } finally {
       process.chdir(projectRoot);
     }
-    
-    // Extract deployed addresses from output
-    const addressRegex = /✓ (\w+) deployed at: (0x[a-fA-F0-9]{40})/g;
-    const deployedAddresses: Record<string, string> = {};
-    let match;
-    
-    while ((match = addressRegex.exec(deploymentOutput)) !== null) {
-      const contractName = match[1];
-      const address = match[2];
-      deployedAddresses[contractName] = address;
-      log('DEPLOYMENT', 'success', `${contractName} deployed at ${address}`);
-    }
 
-    if (Object.keys(deployedAddresses).length === 0) {
-      throw new Error('No contracts were deployed (deployment output parsing failed)');
-    }
+    const deployedAddresses = readDeploymentArtifact();
+    log('DEPLOYMENT', 'success', `RewardNFT deployed at ${deployedAddresses.REWARD_NFT_ADDRESS}`);
+    log('DEPLOYMENT', 'success', `Treasury deployed at ${deployedAddresses.TREASURY_ADDRESS}`);
+    log('DEPLOYMENT', 'success', `Reputation deployed at ${deployedAddresses.REPUTATION_ADDRESS}`);
+    log('DEPLOYMENT', 'success', `ForgeQuestManager deployed at ${deployedAddresses.FORGE_QUEST_MANAGER_ADDRESS}`);
 
     // Step 5: Validate deployed contracts
     log('VALIDATION', 'start', 'Validating deployed contracts...');
@@ -177,40 +241,23 @@ async function main() {
     const envContent = fs.readFileSync(envPath, 'utf-8');
     let updatedEnv = envContent;
     
-    // Map contract names to env var names
-    const addressMapping: Record<string, string> = {
-      'RewardNFT': 'REWARD_NFT_ADDRESS',
-      'Treasury': 'TREASURY_ADDRESS',
-      'Reputation': 'REPUTATION_ADDRESS',
-      'ForgeQuestManager': 'FORGE_QUEST_MANAGER_ADDRESS',
-    };
-    
-    for (const [contractName, envVarName] of Object.entries(addressMapping)) {
-      if (deployedAddresses[contractName]) {
-        const regex = new RegExp(`^${envVarName}=.*$`, 'm');
-        updatedEnv = updatedEnv.replace(regex, `${envVarName}=${deployedAddresses[contractName]}`);
-      }
-    }
-    
-    fs.writeFileSync(envPath, updatedEnv);
+    updatedEnv = upsertEnvValue(updatedEnv, 'REWARD_NFT_ADDRESS', deployedAddresses.REWARD_NFT_ADDRESS);
+    updatedEnv = upsertEnvValue(updatedEnv, 'TREASURY_ADDRESS', deployedAddresses.TREASURY_ADDRESS);
+    updatedEnv = upsertEnvValue(updatedEnv, 'REPUTATION_ADDRESS', deployedAddresses.REPUTATION_ADDRESS);
+    updatedEnv = upsertEnvValue(
+      updatedEnv,
+      'FORGE_QUEST_MANAGER_ADDRESS',
+      deployedAddresses.FORGE_QUEST_MANAGER_ADDRESS
+    );
+
+    writeFileAtomic(envPath, updatedEnv);
     log('WIRING', 'success', 'Deployed addresses wired to .env.production');
 
     // Step 9: Generate deployment report
     log('REPORTING', 'start', 'Generating deployment report...');
-    
-    const deploymentReport = {
-      timestamp: new Date().toISOString(),
-      environment: 'production',
-      network: 'Celo Mainnet',
-      chainId: 42220,
-      status: 'success',
-      deployedContracts: deployedAddresses,
-      logs: deploymentLogs,
-    };
-    
-    const reportPath = path.join(projectRoot, 'deployment-report.json');
-    fs.writeFileSync(reportPath, JSON.stringify(deploymentReport, null, 2));
-    log('REPORTING', 'success', `Deployment report saved to ${reportPath}`);
+
+    exec('npm run generate:report', 'Generate deployment report');
+    log('REPORTING', 'success', 'Deployment report regenerated from deployment artifacts');
 
     // Summary
     console.log('\n╔════════════════════════════════════════════════════════════╗');
@@ -218,7 +265,12 @@ async function main() {
     console.log('╚════════════════════════════════════════════════════════════╝\n');
 
     console.log('📜 DEPLOYED CONTRACTS:\n');
-    for (const [contract, address] of Object.entries(deployedAddresses)) {
+    for (const [contract, address] of Object.entries({
+      RewardNFT: deployedAddresses.REWARD_NFT_ADDRESS,
+      Treasury: deployedAddresses.TREASURY_ADDRESS,
+      Reputation: deployedAddresses.REPUTATION_ADDRESS,
+      ForgeQuestManager: deployedAddresses.FORGE_QUEST_MANAGER_ADDRESS
+    })) {
       console.log(`  ${contract.padEnd(22)} ${address}`);
     }
 
@@ -239,7 +291,7 @@ async function main() {
     
     // Save deployment log
     const logPath = path.join(projectRoot, 'deployment-error.log');
-    fs.writeFileSync(logPath, JSON.stringify(deploymentLogs, null, 2));
+    writeFileAtomic(logPath, `${JSON.stringify(deploymentLogs, null, 2)}\n`);
     console.error(`\nDeployment logs saved to ${logPath}`);
     
     process.exit(1);

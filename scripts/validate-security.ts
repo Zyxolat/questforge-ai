@@ -29,12 +29,17 @@ interface SecurityTest {
   name: string;
   status: 'pass' | 'fail' | 'blocked';
   message: string;
-  details?: any;
+  details?: unknown;
 }
 
 const results: SecurityTest[] = [];
 
-function recordResult(name: string, status: 'pass' | 'fail' | 'blocked', message: string, details?: any) {
+function recordResult(
+  name: string,
+  status: 'pass' | 'fail' | 'blocked',
+  message: string,
+  details?: unknown
+) {
   results.push({ name, status, message, details });
   const icon = status === 'pass' ? '✓' : status === 'blocked' ? '🚫' : '❌';
   const color = status === 'pass' ? '\x1b[32m' : status === 'blocked' ? '\x1b[33m' : '\x1b[31m';
@@ -96,9 +101,6 @@ async function validateSecurity() {
       }, { timeout: 5000 });
 
       const nonce = nonceRes.data.nonce;
-      const validMessage = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
-      const validSignature = await wallet1.signMessage(validMessage);
-
       // Try with invalid signature
       const invalidSignature = '0x' + '0'.repeat(128);
 
@@ -200,15 +202,13 @@ async function validateSecurity() {
       const message = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
       const signature = await wallet1.signMessage(message);
 
-      const authRes = await axios.post(`${apiUrl}/auth/verify`, {
+      await axios.post(`${apiUrl}/auth/verify`, {
         address: wallet1.address,
         nonce,
         signature,
       }, { timeout: 5000 });
 
-      const token1 = authRes.data.token;
-
-      // Try to use token1 for wallet2's quest (cross-wallet attack)
+      // Try to use the same flow for wallet2's quest (cross-wallet attack)
       // This depends on implementation, but we can test unauthenticated access
       try {
         await axios.post(`${apiUrl}/quests/generate`, {
@@ -324,7 +324,6 @@ async function main() {
   console.log('║                    SECURITY SUMMARY                         ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-  const passed = results.filter(r => r.status === 'pass' || r.status === 'blocked').length;
   const failed = results.filter(r => r.status === 'fail').length;
 
   console.log(`✓ Passed:  ${results.filter(r => r.status === 'pass').length}`);

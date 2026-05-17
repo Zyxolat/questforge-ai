@@ -1,4 +1,7 @@
-import hre, { ethers } from 'hardhat';
+import '@nomicfoundation/hardhat-ethers';
+import hre from 'hardhat';
+
+const { ethers } = hre;
 
 const CELO_MAINNET_CHAIN_ID = 42220;
 const CELO_EXPLORER_BASE_URL = 'https://celoscan.io';

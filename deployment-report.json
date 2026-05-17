@@ -1,177 +1,98 @@
 {
-  "generatedAt": "2026-05-10T02:52:38.449Z",
+  "generatedAt": "2026-05-16T00:39:34.710Z",
   "environment": "production",
   "network": "Celo Mainnet",
   "chainId": 42220,
-  "status": "partial",
-  "readinessScore": 93,
+  "status": "success",
+  "readinessScore": 95,
   "deploymentSummary": {
     "contracts": {
-      "RewardNFT": "pending",
-      "Treasury": "pending",
-      "Reputation": "pending",
-      "ForgeQuestManager": "pending"
+      "RewardNFT": "0xc9539e553acC578d063A23B3F4f62C760356Cf6D",
+      "Treasury": "0xEdFdE2946D0D31a636CE115d0026Ce6096957D5B",
+      "Reputation": "0x8aB46e0Bf56EC119DEfd8c279b75ce19E72B083c",
+      "ForgeQuestManager": "0xFDF8901BB33Bd52ef199F3d3E6647b8a1f86D2d2"
     },
     "coreServices": [
       "Backend API (Node.js + Express)",
       "Frontend (React + Vite)",
       "PostgreSQL Database",
-      "Celo RPC Provider",
-      "OpenAI Integration"
+      "Celo RPC Provider"
     ],
     "externalDependencies": [
-      "Celo Mainnet RPC: https://forno.celo.org",
-      "OpenAI API (Quest Generation)",
-      "PostgreSQL 14+",
+      "Celo Mainnet RPC",
+      "Railway",
+      "PostgreSQL",
       "Celoscan Block Explorer"
     ]
   },
   "configuration": {
     "apiUrl": "https://api.questforge.example.com",
     "frontendUrl": "https://questforge.example.com",
-    "databaseUrl": "pending",
+    "databaseUrl": "postgresql://localhost:5432/questforge_prod",
     "rpcUrl": "https://forno.celo.org"
   },
   "validationResults": {
-    "environment": "pending",
-    "contracts": "pending",
-    "treasury": "pending",
-    "gameplay": "pending",
-    "security": "pending"
+    "environment": "pass",
+    "contracts": "pass",
+    "treasury": "fail",
+    "gameplay": "not_run",
+    "security": "not_run"
   },
   "postDeploymentActions": [
     {
-      "action": "Fund Treasury Reward Pool",
-      "status": "pending",
-      "details": "Send minimum 100 CELO to Treasury contract for reward distribution"
+      "action": "Inject contract addresses into Railway environment",
+      "status": "blocked",
+      "details": "Use the generated celo.env or deployment-report.json values in Railway service variables."
     },
     {
-      "action": "Verify Contracts on Celoscan",
-      "status": "pending",
-      "details": "Verify all 4 contracts on Celo explorer for transparency"
+      "action": "Restart Railway backend after env update",
+      "status": "blocked",
+      "details": "Restart the backend after setting FORGE_QUEST_MANAGER_ADDRESS, REWARD_NFT_ADDRESS, REPUTATION_ADDRESS, and TREASURY_ADDRESS."
     },
     {
-      "action": "Configure Monitoring Alerts",
-      "status": "pending",
-      "details": "Set up Sentry, DataDog, or similar for production monitoring"
+      "action": "Fund Treasury reward pool",
+      "status": "blocked",
+      "details": "Call fundNativeRewardPool or send CELO to the Treasury before opening quests."
     },
     {
-      "action": "Enable Rate Limiting",
-      "status": "pending",
-      "details": "Configure Redis for distributed rate limiting"
-    },
-    {
-      "action": "Set up Backups",
-      "status": "pending",
-      "details": "Configure daily database backups"
-    },
-    {
-      "action": "Configure DNS Records",
-      "status": "pending",
-      "details": "Point API and frontend domains to deployed services"
-    },
-    {
-      "action": "SSL Certificate Installation",
-      "status": "pending",
-      "details": "Install Let's Encrypt or equivalent SSL certificates"
-    },
-    {
-      "action": "Run Load Testing",
-      "status": "pending",
-      "details": "Simulate peak player load to validate capacity"
+      "action": "Run post-deploy validation",
+      "status": "blocked",
+      "details": "Run contracts/scripts/validateDeployment.ts against the deployed Celo contracts."
     }
   ],
-  "knownIssues": [],
+  "knownIssues": [
+    "Treasury native reward pool is empty. Fund the treasury before creating production quests."
+  ],
   "nextSteps": [
-    "1. Run environment validation: npm run validate:production-env",
-    "2. Review contracts compilation and tests: cd contracts && npm test",
-    "3. Deploy contracts to Celo Mainnet: npm run deploy:production",
-    "4. Validate treasury health: npm run validate:treasury",
-    "5. Run end-to-end gameplay validation: npm run validate:gameplay",
-    "6. Run security validation: npm run validate:security",
-    "7. Review deployment report: cat deployment-report.json",
-    "8. Monitor backend logs: tail -f logs/production.log",
-    "9. Set up monitoring dashboards in Sentry/DataDog",
-    "10. Coordinate with DevOps team for post-deployment setup"
+    "1. Copy the generated contract addresses into Railway environment variables.",
+    "2. Restart the Railway backend so it picks up the deployed addresses.",
+    "3. Run contract deployment validation on Celo Mainnet.",
+    "4. Fund the Treasury if the native reward pool is still empty."
   ],
   "reviewChecklist": [
     {
-      "item": "All tests passing",
+      "item": "RewardNFT deployed",
+      "completed": true
+    },
+    {
+      "item": "Treasury deployed",
+      "completed": true
+    },
+    {
+      "item": "Reputation deployed",
+      "completed": true
+    },
+    {
+      "item": "ForgeQuestManager deployed",
+      "completed": true
+    },
+    {
+      "item": "Deployment report written atomically",
+      "completed": true
+    },
+    {
+      "item": "Railway address injection still required",
       "completed": false
-    },
-    {
-      "item": "Contracts compiled successfully",
-      "completed": false
-    },
-    {
-      "item": "Environment variables validated",
-      "completed": false
-    },
-    {
-      "item": "RPC connectivity verified",
-      "completed": false
-    },
-    {
-      "item": "Contracts deployed to Celo Mainnet",
-      "completed": false
-    },
-    {
-      "item": "Treasury funded with initial rewards",
-      "completed": false
-    },
-    {
-      "item": "All contract roles configured",
-      "completed": false
-    },
-    {
-      "item": "End-to-end gameplay tested",
-      "completed": false
-    },
-    {
-      "item": "Security tests passing",
-      "completed": false
-    },
-    {
-      "item": "Monitoring alerts configured",
-      "completed": false
-    },
-    {
-      "item": "Database backups enabled",
-      "completed": false
-    },
-    {
-      "item": "SSL certificates installed",
-      "completed": false
-    },
-    {
-      "item": "Rate limiting active",
-      "completed": false
-    },
-    {
-      "item": "Contracts verified on explorer",
-      "completed": false
-    },
-    {
-      "item": "Load tests passed",
-      "completed": false
-    }
-  ],
-  "supportContacts": [
-    {
-      "role": "Smart Contract Engineer",
-      "responsibility": "Contract deployment, upgrades, security"
-    },
-    {
-      "role": "Backend Engineer",
-      "responsibility": "API operations, database, indexer"
-    },
-    {
-      "role": "DevOps Engineer",
-      "responsibility": "Infrastructure, monitoring, backups"
-    },
-    {
-      "role": "Product Manager",
-      "responsibility": "Feature decisions, release coordination"
     }
   ]
 }

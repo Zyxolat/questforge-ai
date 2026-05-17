@@ -24,6 +24,9 @@ class RpcFailoverManager {
       throw new Error('No RPC endpoints provided');
     }
 
+    await this.cleanup();
+    this.currentEndpointIndex = 0;
+
     // Initialize providers
     for (const url of endpointUrls) {
       const provider = new ethers.JsonRpcProvider(url, env.CELO_CHAIN_ID);
@@ -49,8 +52,22 @@ class RpcFailoverManager {
           },
           update: {}
         })
-        .catch((e) => logger.error('[RPC] Failed to upsert endpoint', { url, error: e.message }));
+        .catch((error) =>
+          logger.error('[RPC] Failed to upsert endpoint', error, {
+            url
+          })
+        );
     }
+
+    const initialBlock = await this.getBlockNumber();
+    if (initialBlock === null) {
+      throw new Error('Unable to reach any configured RPC endpoint during startup');
+    }
+
+    logger.info('[RPC] Startup connectivity validated', {
+      lastSuccessfulEndpoint: this.getLastSuccessfulEndpoint(),
+      blockNumber: initialBlock
+    });
 
     // Start health checks
     this.startHealthChecks();
@@ -140,10 +157,9 @@ class RpcFailoverManager {
       }
     }
 
-    logger.error('[RPC] All failover attempts exhausted', {
+    logger.error('[RPC] All failover attempts exhausted', lastError, {
       operation: operationName,
-      attemptedEndpoints: attemptedEndpoints.map((e) => this.maskEndpoint(e)),
-      error: lastError?.message
+      attemptedEndpoints: attemptedEndpoints.map((e) => this.maskEndpoint(e))
     });
 
     return null;
@@ -207,7 +223,9 @@ class RpcFailoverManager {
         }
       });
     } catch (error) {
-      logger.error('[RPC] Failed to record success', { endpoint, error: (error as Error).message });
+      logger.error('[RPC] Failed to record success', error, {
+        endpoint
+      });
     }
   }
 
@@ -236,10 +254,9 @@ class RpcFailoverManager {
         }
       });
     } catch (error) {
-      logger.error('[RPC] Failed to record failure', {
+      logger.error('[RPC] Failed to record failure', error, {
         endpoint,
-        latencyMs,
-        error: (error as Error).message
+        latencyMs
       });
     }
   }
@@ -248,9 +265,13 @@ class RpcFailoverManager {
    * Health check loop
    */
   private startHealthChecks(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
     this.healthCheckInterval = setInterval(() => {
       this.endpoints.forEach((endpoint) => {
-        this.checkEndpointHealth(endpoint.url);
+        void this.checkEndpointHealth(endpoint.url);
       });
     }, 30000); // Every 30 seconds
   }
@@ -324,9 +345,11 @@ class RpcFailoverManager {
   async cleanup(): Promise<void> {
     if (this.healthCheckInterval) {
       clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
     }
     this.providers.clear();
     this.endpoints = [];
+    this.lastSuccessfulEndpoint = null;
     logger.info('[RPC] Failover manager cleaned up');
   }
 }

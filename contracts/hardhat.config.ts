@@ -6,8 +6,20 @@ import "@typechain/hardhat";
 import "hardhat-gas-reporter";
 import "solidity-coverage";
 import * as dotenv from "dotenv";
+import * as fs from "fs";
+import * as path from "path";
 
-dotenv.config();
+const envPaths = [
+  path.join(__dirname, ".env"),
+  path.join(__dirname, "..", ".env"),
+  path.join(__dirname, "..", ".env.production"),
+];
+
+for (const envPath of envPaths) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override: false });
+  }
+}
 
 const config: HardhatUserConfig = {
   solidity: {

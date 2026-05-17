@@ -30,11 +30,16 @@ class ProductionEventQueue {
   private isInitialized = false;
   private maxQueueDepth = 10000;
   private lastDepthWarning = 0;
+  private depthMonitor: NodeJS.Timeout | null = null;
 
   async initialize(): Promise<void> {
-    if (this.isInitialized || !env.REDIS_URL) {
-      logger.warn('[QUEUE] Redis not configured or already initialized');
+    if (this.isInitialized) {
+      logger.warn('[QUEUE] Already initialized');
       return;
+    }
+
+    if (!env.REDIS_URL) {
+      throw new Error('REDIS_URL is required for the production event queue when ENABLE_EVENT_STREAM=true');
     }
 
     try {
@@ -54,6 +59,8 @@ class ProductionEventQueue {
         connection: redisConfig
       });
 
+      await Promise.all([this.queue.waitUntilReady(), this.queueEvents.waitUntilReady()]);
+
       this.queueEvents.on('completed', (data: QueueCompletedEvent) => {
         logger.debug('[QUEUE] Job completed', { jobId: data.jobId });
       });
@@ -66,9 +73,15 @@ class ProductionEventQueue {
       this.monitorQueueDepth();
 
       this.isInitialized = true;
-      logger.info('[QUEUE] Initialized');
+      logger.info('[QUEUE] Initialized', {
+        redisHost: redisUrl.hostname || 'localhost',
+        redisPort: redisConfig.port
+      });
     } catch (error) {
-      logger.error('[QUEUE] Failed to initialize', { error: (error as Error).message });
+      await this.cleanup();
+      logger.error('[QUEUE] Failed to initialize', error, {
+        service: 'eventQueue'
+      });
       throw error;
     }
   }
@@ -122,7 +135,10 @@ class ProductionEventQueue {
       logger.debug('[QUEUE] Event enqueued', { jobId: job.id, eventKey: `${event.transactionHash}:${event.logIndex}` });
       return job.id || '';
     } catch (error) {
-      logger.error('[QUEUE] Failed to enqueue', { error: (error as Error).message });
+      logger.error('[QUEUE] Failed to enqueue', error, {
+        transactionHash: event.transactionHash,
+        logIndex: event.logIndex
+      });
       throw error;
     }
   }
@@ -143,9 +159,10 @@ class ProductionEventQueue {
           await this.sleep(delayMs);
         }
       } catch (error) {
-        logger.error('[QUEUE] Failed to enqueue item in batch', {
+        logger.error('[QUEUE] Failed to enqueue item in batch', error, {
           index: i,
-          error: (error as Error).message
+          transactionHash: events[i]?.transactionHash,
+          logIndex: events[i]?.logIndex
         });
       }
     }
@@ -158,7 +175,7 @@ class ProductionEventQueue {
    * Monitor queue depth
    */
   private monitorQueueDepth(): void {
-    setInterval(async () => {
+    this.depthMonitor = setInterval(async () => {
       if (!this.queue) return;
 
       try {
@@ -197,7 +214,9 @@ class ProductionEventQueue {
 
         logger.debug('[QUEUE] Depth', { waiting, active, delayed, failed, completed, total });
       } catch (error) {
-        logger.error('[QUEUE] Failed to monitor depth', { error: (error as Error).message });
+        logger.error('[QUEUE] Failed to monitor depth', error, {
+          service: 'eventQueueMonitor'
+        });
       }
     }, 10000);
   }
@@ -226,7 +245,9 @@ class ProductionEventQueue {
         healthy: waiting < this.maxQueueDepth
       };
     } catch (error) {
-      logger.error('[QUEUE] Failed to get stats', { error: (error as Error).message });
+      logger.error('[QUEUE] Failed to get stats', error, {
+        service: 'eventQueue'
+      });
       return null;
     }
   }
@@ -237,12 +258,20 @@ class ProductionEventQueue {
 
   async cleanup(): Promise<void> {
     try {
+      if (this.depthMonitor) {
+        clearInterval(this.depthMonitor);
+        this.depthMonitor = null;
+      }
       if (this.queueEvents) await this.queueEvents.close();
       if (this.queue) await this.queue.close();
+      this.queueEvents = null;
+      this.queue = null;
       this.isInitialized = false;
       logger.info('[QUEUE] Cleaned up');
     } catch (error) {
-      logger.error('[QUEUE] Cleanup error', { error: (error as Error).message });
+      logger.error('[QUEUE] Cleanup error', error, {
+        service: 'eventQueue'
+      });
     }
   }
 
