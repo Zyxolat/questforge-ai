@@ -20,6 +20,7 @@ import * as dotenv from 'dotenv';
 // Ensure we're in the project root
 const projectRoot = path.join(__dirname, '..');
 const envPath = path.join(projectRoot, '.env.production');
+const contractsEnvPath = path.join(projectRoot, 'contracts', '.env.production');
 const deploymentArtifactPath = path.join(projectRoot, 'contracts', 'deployments', 'celo-addresses.json');
 
 type DeployedAddresses = {
@@ -38,6 +39,12 @@ interface DeploymentLog {
 }
 
 const deploymentLogs: DeploymentLog[] = [];
+
+function createErrorWithCause(message: string, cause: unknown) {
+  const wrappedError = new Error(message) as Error & { cause?: unknown };
+  wrappedError.cause = cause;
+  return wrappedError;
+}
 
 function log(
   step: string,
@@ -75,10 +82,34 @@ function exec(command: string, description: string): string {
 
     log('EXEC', 'error', `${description} failed: ${message}`);
 
-    throw new Error(`Failed: ${description}`, {
-      cause: error,
-    });
+    throw createErrorWithCause(`Failed: ${description}`, error);
   }
+}
+
+function parseEnvFile(filePath: string) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  return dotenv.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function loadEffectiveProductionEnv() {
+  const rootEnv = parseEnvFile(envPath);
+  const contractsEnv = parseEnvFile(contractsEnvPath);
+  const mergedEnv = {
+    ...rootEnv,
+    ...contractsEnv,
+    ...process.env,
+  };
+
+  for (const [name, value] of Object.entries(mergedEnv)) {
+    if (typeof value === 'string' && process.env[name] === undefined) {
+      process.env[name] = value;
+    }
+  }
+
+  return mergedEnv;
 }
 
 function writeFileAtomic(filePath: string, content: string) {
@@ -141,8 +172,8 @@ async function main() {
     if (!fs.existsSync(envPath)) {
       throw new Error(`.env.production not found at ${envPath}`);
     }
-    
-    dotenv.config({ path: envPath });
+
+    const effectiveEnv = loadEffectiveProductionEnv();
     
     // Check critical env vars
     const requiredVars = [
@@ -157,7 +188,7 @@ async function main() {
     
     const missing: string[] = [];
     for (const varName of requiredVars) {
-      if (!process.env[varName]) {
+      if (!effectiveEnv[varName]) {
         missing.push(varName);
       }
     }

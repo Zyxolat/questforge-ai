@@ -1,5 +1,12 @@
 import hre from 'hardhat';
 import '@nomicfoundation/hardhat-ethers';
+import {
+  ForgeQuestManager__factory,
+  MockERC20__factory,
+  Reputation__factory,
+  RewardNFT__factory,
+  Treasury__factory
+} from '../typechain-types';
 import { writeDeploymentArtifacts, type DeploymentAddresses } from './deploymentArtifacts';
 
 const { ethers } = hre;
@@ -21,7 +28,7 @@ type DeployTransaction = {
 };
 
 type DeployableContract = {
-  deploymentTransaction?: () => DeployTransaction | undefined;
+  deploymentTransaction?: () => DeployTransaction | null | undefined;
   waitForDeployment?: () => Promise<unknown>;
   getAddress?: () => Promise<string>;
   target?: unknown;
@@ -31,6 +38,16 @@ type DeployableContract = {
 type WaitableTransaction = {
   wait?: (confirmations?: number) => Promise<unknown>;
 };
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function createErrorWithCause(message: string, cause: unknown) {
+  const wrappedError = new Error(message) as Error & { cause?: unknown };
+  wrappedError.cause = cause;
+  return wrappedError;
+}
 
 /* -------------------------
    HELPERS
@@ -61,16 +78,14 @@ function requireValidPrivateKey(name: string) {
   const value = readOptionalEnv(name);
   if (!value) {
     throw new Error(
-      `${name} is missing or empty. Set it in your shell or repo-root .env.production before deploying to Celo.`
+      `${name} is missing or empty. Set it in your shell, contracts/.env.production, or repo-root .env.production before deploying to Celo.`
     );
   }
 
   try {
     return new ethers.Wallet(value).privateKey;
   } catch (error) {
-    throw new Error(`${name} is invalid: ${error instanceof Error ? error.message : String(error)}`, {
-      cause: error
-    });
+    throw createErrorWithCause(`${name} is invalid: ${getErrorMessage(error)}`, error);
   }
 }
 
@@ -89,9 +104,7 @@ function validateCeloPrerequisites() {
   try {
     ethers.getAddress(rewardTokenAddress);
   } catch (error) {
-    throw new Error(`REWARD_TOKEN_ADDRESS is invalid: ${error instanceof Error ? error.message : String(error)}`, {
-      cause: error
-    });
+    throw createErrorWithCause(`REWARD_TOKEN_ADDRESS is invalid: ${getErrorMessage(error)}`, error);
   }
 }
 
@@ -141,9 +154,9 @@ async function getCodeWithRetry(address: string) {
    DEPLOY CORE (FIXED)
 -------------------------- */
 
-async function deployContract(
+async function deployContract<TContract extends DeployableContract>(
   label: string,
-  factoryFn: () => Promise<DeployableContract>
+  factoryFn: () => Promise<TContract>
 ) {
   console.log(`\n🚀 Deploying ${label}...`);
 
@@ -189,9 +202,7 @@ async function deployContract(
 
     return { contract, address };
   } catch (error) {
-    throw new Error(`❌ Deployment failed (${label}): ${String(error)}`, {
-      cause: error
-    });
+    throw createErrorWithCause(`❌ Deployment failed (${label}): ${String(error)}`, error);
   }
 }
 
@@ -207,9 +218,7 @@ async function waitForTx(label: string, fn: () => Promise<WaitableTransaction | 
     if (tx?.wait) await tx.wait(getRequiredConfirmations());
     console.log(`✅ ${label}`);
   } catch (error) {
-    throw new Error(`❌ Tx failed (${label}): ${String(error)}`, {
-      cause: error
-    });
+    throw createErrorWithCause(`❌ Tx failed (${label}): ${String(error)}`, error);
   }
 }
 
@@ -237,7 +246,7 @@ async function main() {
         'No deployer account is available for this network.',
         `Network: ${hre.network.name}.`,
         'Check the configured account list for this Hardhat network.',
-        'For Celo, set a funded PRIVATE_KEY in your shell or repo-root .env.production.'
+        'For Celo, set a funded PRIVATE_KEY in your shell, contracts/.env.production, or repo-root .env.production.'
       ].join(' ')
     );
   }
@@ -269,8 +278,7 @@ async function main() {
     }
 
     const mock = await deployContract('MockERC20', async () => {
-      const f = await ethers.getContractFactory('MockERC20');
-      return f.deploy();
+      return new MockERC20__factory(deployer).deploy();
     });
 
     rewardTokenAddress = mock.address;
@@ -290,23 +298,19 @@ async function main() {
   -------------------------- */
 
   const rewardNFT = await deployContract('RewardNFT', async () => {
-    const f = await ethers.getContractFactory('RewardNFT');
-    return f.deploy(deployerAddress);
+    return new RewardNFT__factory(deployer).deploy(deployerAddress);
   });
 
   const treasury = await deployContract('Treasury', async () => {
-    const f = await ethers.getContractFactory('Treasury');
-    return f.deploy(rewardTokenAddress);
+    return new Treasury__factory(deployer).deploy(rewardTokenAddress);
   });
 
   const reputation = await deployContract('Reputation', async () => {
-    const f = await ethers.getContractFactory('Reputation');
-    return f.deploy();
+    return new Reputation__factory(deployer).deploy();
   });
 
   const forgeQuestManager = await deployContract('ForgeQuestManager', async () => {
-    const f = await ethers.getContractFactory('ForgeQuestManager');
-    return f.deploy(
+    return new ForgeQuestManager__factory(deployer).deploy(
       rewardNFT.address,
       reputation.address,
       treasury.address

@@ -32,6 +32,13 @@ npx prisma migrate dev --name init
 npm run dev
 ```
 
+From the repo root, the equivalent Prisma commands are:
+
+```bash
+npm run prisma:generate
+npm run prisma:migrate -- --name init
+```
+
 ### 2. Contracts
 
 ```bash

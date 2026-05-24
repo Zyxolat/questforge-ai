@@ -9,16 +9,28 @@ import * as dotenv from "dotenv";
 import * as fs from "fs";
 import * as path from "path";
 
-const envPaths = [
-  path.join(__dirname, ".env"),
+function loadEnvFile(envPath: string, override: boolean) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath, override });
+  }
+}
+
+const baseEnvPaths = [
   path.join(__dirname, "..", ".env"),
-  path.join(__dirname, "..", ".env.production"),
+  path.join(__dirname, ".env"),
 ];
 
-for (const envPath of envPaths) {
-  if (fs.existsSync(envPath)) {
-    dotenv.config({ path: envPath, override: false });
-  }
+const productionEnvPaths = [
+  path.join(__dirname, "..", ".env.production"),
+  path.join(__dirname, ".env.production"),
+];
+
+for (const envPath of baseEnvPaths) {
+  loadEnvFile(envPath, false);
+}
+
+for (const envPath of productionEnvPaths) {
+  loadEnvFile(envPath, true);
 }
 
 const config: HardhatUserConfig = {
