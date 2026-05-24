@@ -29,6 +29,7 @@ type StartupServiceKey =
   | 'database'
   | 'openai'
   | 'worldState'
+  | 'proofVerificationWorker'
   | 'eventQueue'
   | 'eventWorker'
   | 'eventIngestor';
@@ -138,6 +139,7 @@ async function bootstrap() {
   const { assertAuthStorageReady } = await import('./services/auth');
   const { aiQuestGenerationEngine } = await import('./services/aiQuestGenerationEngine');
   const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
+  const { startProofVerificationWorker, stopProofVerificationWorker } = await import('./services/verification');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
 
   await prisma.$queryRaw`SELECT 1`;
@@ -159,6 +161,7 @@ async function bootstrap() {
       database: createServiceState(false),
       openai: createServiceState(true),
       worldState: createServiceState(false),
+      proofVerificationWorker: createServiceState(true),
       eventQueue: createServiceState(false),
       eventWorker: createServiceState(false),
       eventIngestor: createServiceState(false)
@@ -359,6 +362,10 @@ async function bootstrap() {
         await worldStateCoordinator.initialize();
       }, { timeoutMs: 15000 });
 
+      await runStartupStep('proofVerificationWorker', attempt, async () => {
+        startProofVerificationWorker();
+      }, { timeoutMs: 5000, optional: true });
+
       if (!env.ENABLE_EVENT_STREAM) {
         markServiceSkipped('eventQueue', 'ENABLE_EVENT_STREAM=false');
         markServiceSkipped('eventWorker', 'ENABLE_EVENT_STREAM=false');
@@ -432,6 +439,7 @@ async function bootstrap() {
     const shutdownTasks = [
       { name: 'Ingestor', fn: () => productionEventIngestor.stop() },
       { name: 'Worker', fn: () => productionEventWorker.stopWorker() },
+      { name: 'Proof Verification Worker', fn: () => stopProofVerificationWorker() },
       { name: 'Queue', fn: () => productionEventQueue.cleanup() },
       { name: 'WebSocket', fn: () => productionWebSocketBroadcaster.cleanup() },
       { name: 'RPC Failover', fn: () => rpcFailoverManager.cleanup() },

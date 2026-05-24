@@ -9,7 +9,9 @@ import { useWallet } from '../context/WalletContext';
 import { extractAuthFailure, fetchDailyMissions, generateQuest, registerOnchainQuest, registerQuestStart, submitProofForVerification } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
+import { parseReceiptEvent, summarizeReceiptLogs } from '../lib/questTransactions';
 import { describeTransactionFailure, formatCeloAmount } from '../lib/transactionDiagnostics';
+import { estimateContractWriteGas, sendContractWrite, waitForTransactionReceipt } from '../lib/walletProvider';
 
 type DailyMission = {
   id: string;
@@ -84,6 +86,7 @@ export default function CommandCenter() {
     chainId,
     isCorrectNetwork,
     isMiniPay,
+    walletProvider,
     status,
     authStatus,
     authMessage,
@@ -97,8 +100,10 @@ export default function CommandCenter() {
     connectionStatus,
     player,
     syncNow,
+    refreshQuestFeed,
     upsertQuest,
-    patchQuest
+    patchQuest,
+    getQuest
   } = useRealtimeState();
   const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
   const [proofUri, setProofUri] = useState('');
@@ -157,24 +162,150 @@ export default function CommandCenter() {
     return true;
   }
 
-  function parseQuestCreatedId(receipt: ethers.TransactionReceipt | null) {
-    if (!forgeQuestManager) return null;
+  function logReceiptDiagnostics(label: string, receipt: ethers.TransactionReceipt | null) {
+    if (!forgeQuestManager || !receipt) {
+      return;
+    }
 
-    const parsedLog = receipt?.logs
-      ?.map((log) => {
-        try {
-          return forgeQuestManager.interface.parseLog(log);
-        } catch {
-          return null;
-        }
+    console.info(`[CommandCenter] ${label} receipt`, {
+      hash: receipt.hash,
+      status: receipt.status,
+      blockNumber: receipt.blockNumber,
+      gasUsed: receipt.gasUsed.toString(),
+      logs: summarizeReceiptLogs(receipt, {
+        contractAddress: contractAddresses.forgeQuestManagerAddress,
+        contractInterface: forgeQuestManager.interface
       })
-      .find((item) => item?.name === 'QuestCreated');
+    });
+  }
+
+  function parseQuestCreatedId(receipt: ethers.TransactionReceipt | null) {
+    if (!forgeQuestManager || !receipt) return null;
+
+    const parsedLog = parseReceiptEvent(
+      receipt,
+      {
+        contractAddress: contractAddresses.forgeQuestManagerAddress,
+        contractInterface: forgeQuestManager.interface
+      },
+      'QuestCreated'
+    );
+
+    console.info('[CommandCenter] Parsed QuestCreated log from receipt', {
+      found: Boolean(parsedLog),
+      questId: parsedLog?.args?.questId?.toString?.() ?? null
+    });
 
     if (!parsedLog?.args?.questId) {
       return null;
     }
 
     return parsedLog.args.questId.toString();
+  }
+
+  async function submitForgeWrite(
+    functionName: 'createQuest' | 'startQuest' | 'submitQuest',
+    args: unknown[],
+    options?: {
+      value?: bigint;
+      gasLimit?: bigint;
+    }
+  ) {
+    if (!forgeQuestManager || !provider || !address) {
+      throw new Error('Wallet is not ready for onchain transactions.');
+    }
+
+    if (!isMiniPay) {
+      const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (...methodArgs: unknown[]) => Promise<ethers.ContractTransactionResponse>;
+      const tx = await transactionMethod(...args, {
+        ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
+        ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+      });
+      const receipt = await tx.wait();
+      logReceiptDiagnostics(functionName, receipt);
+      return {
+        hash: tx.hash,
+        receipt
+      };
+    }
+
+    if (!walletProvider) {
+      throw new Error('MiniPay provider is unavailable. Reconnect your wallet and try again.');
+    }
+
+    const gasLimit =
+      options?.gasLimit ??
+      (await estimateContractWriteGas({
+        provider: walletProvider,
+        contractAddress: contractAddresses.forgeQuestManagerAddress,
+        contractInterface: forgeQuestManager.interface,
+        functionName,
+        args,
+        from: address,
+        ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+      }));
+
+    const { txHash, request } = await sendContractWrite({
+      provider: walletProvider,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      contractInterface: forgeQuestManager.interface,
+      functionName,
+      args,
+      from: address,
+      gasLimit,
+      ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+    });
+
+    console.info('[CommandCenter] MiniPay transaction submitted', {
+      functionName,
+      txHash,
+      request
+    });
+
+    const receipt = await waitForTransactionReceipt(provider, txHash);
+    logReceiptDiagnostics(functionName, receipt);
+
+    return {
+      hash: txHash,
+      receipt
+    };
+  }
+
+  async function resolveQuestForChainAction(quest: QuestState, fallbackMessage: string) {
+    let latestQuest = getQuest(questMatcher(quest)) ?? quest;
+
+    console.info('[CommandCenter] Resolving quest for onchain action', {
+      questId: latestQuest.id ?? null,
+      orchestrationId: latestQuest.orchestrationId ?? null,
+      chainQuestId: latestQuest.chainQuestId ?? null,
+      status: latestQuest.status ?? null
+    });
+
+    if (latestQuest.chainQuestId) {
+      return latestQuest;
+    }
+
+    setMessage('Quest is syncing with backend. Refreshing quest feed and realtime state...');
+    await refreshQuestFeed();
+    latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+
+    if (!latestQuest.chainQuestId) {
+      await syncNow();
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+    }
+
+    console.info('[CommandCenter] Quest sync resolution result', {
+      questId: latestQuest.id ?? null,
+      chainQuestId: latestQuest.chainQuestId ?? null,
+      status: latestQuest.status ?? null
+    });
+
+    if (!latestQuest.chainQuestId) {
+      throw new Error(fallbackMessage);
+    }
+
+    return latestQuest;
   }
 
   async function registerOnchainQuestWithRetry(
@@ -187,11 +318,20 @@ export default function CommandCenter() {
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        console.info(`[CommandCenter] Backend onchain quest registration attempt ${attempt}/${maxRetries}`);
+        console.info(`[CommandCenter] Backend onchain quest registration attempt ${attempt}/${maxRetries}`, {
+          questId,
+          chainQuestId,
+          creationTxHash
+        });
         const registrationResponse = await registerOnchainQuest(questId, chainQuestId, creationTxHash);
         const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
         if (registeredQuest) {
-          console.info('[CommandCenter] Backend onchain quest registration succeeded', { questId, chainQuestId });
+          console.info('[CommandCenter] Backend onchain quest registration succeeded', {
+            questId,
+            chainQuestId,
+            responseQuestId: registeredQuest.id ?? null,
+            responseChainQuestId: registeredQuest.chainQuestId ?? null
+          });
           return registeredQuest;
         }
         return null;
@@ -240,26 +380,22 @@ export default function CommandCenter() {
         xpReward: template.xpReward
       });
 
-      const tx = await forgeQuestManager.createQuest(
+      const createQuestArgs = [
         template.title,
         template.metadataUri,
         ethers.parseEther(template.stakeAmount.toString()),
         ethers.parseEther(template.rewardAmount.toString()),
         BigInt(template.xpReward),
         BigInt(template.durationSeconds)
-      );
-      console.info('[CommandCenter] createQuest transaction submitted', {
-        hash: tx.hash,
-        contract: contractAddresses.forgeQuestManagerAddress
-      });
-      const receipt = await tx.wait();
+      ] as const;
+      const { hash: creationTxHash, receipt } = await submitForgeWrite('createQuest', [...createQuestArgs]);
       const chainQuestId = parseQuestCreatedId(receipt);
       if (!chainQuestId) {
         throw new Error('Quest creation receipt did not include a quest id');
       }
 
       console.info('[CommandCenter] createQuest confirmed', {
-        hash: tx.hash,
+        hash: creationTxHash,
         chainQuestId
       });
 
@@ -276,7 +412,7 @@ export default function CommandCenter() {
       setMessage('Quest forged onchain. Syncing with backend...');
 
       try {
-        const registeredQuest = await registerOnchainQuestWithRetry(String(template.id), chainQuestId, tx.hash);
+        const registeredQuest = await registerOnchainQuestWithRetry(String(template.id), chainQuestId, creationTxHash);
         if (registeredQuest) {
           persistedQuest = {
             ...persistedQuest,
@@ -314,26 +450,18 @@ export default function CommandCenter() {
     setMessage('Checking quest status and syncing...');
 
     try {
-      if (!activeQuest.chainQuestId) {
-        setMessage('Quest is syncing with backend. Attempting to refresh...');
-        await syncNow();
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-
-        if (!activeQuest.chainQuestId) {
-          throw new Error(
-            'Quest is still missing its onchain id after sync. Please wait a moment and try again, or regenerate the quest.'
-          );
-        }
-
-        setMessage('Quest sync complete. Proceeding to start...');
-      }
+      const resolvedQuest = await resolveQuestForChainAction(
+        activeQuest,
+        'Quest is still missing its onchain id after sync. Please wait a moment and try again, or regenerate the quest.'
+      );
+      setMessage('Quest sync complete. Proceeding to start...');
 
       if (!provider) {
         throw new Error('Wallet provider is unavailable. Reconnect your wallet and try again.');
       }
 
       const signerAddress = await signer.getAddress();
-      const chainQuestId = BigInt(String(activeQuest.chainQuestId));
+      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
       const onchainQuest = await forgeQuestManager.quests(chainQuestId);
       if (Number(onchainQuest.status) !== 0) {
         throw new Error(`Quest is no longer available to start. Onchain status=${Number(onchainQuest.status)}.`);
@@ -369,7 +497,17 @@ export default function CommandCenter() {
 
       let gasEstimate: bigint;
       try {
-        gasEstimate = await forgeQuestManager.startQuest.estimateGas(chainQuestId, { value: stakeValue });
+        gasEstimate = isMiniPay && walletProvider
+          ? await estimateContractWriteGas({
+              provider: walletProvider,
+              contractAddress: contractAddresses.forgeQuestManagerAddress,
+              contractInterface: forgeQuestManager.interface,
+              functionName: 'startQuest',
+              args: [chainQuestId],
+              from: signerAddress,
+              value: stakeValue
+            })
+          : await forgeQuestManager.startQuest.estimateGas(chainQuestId, { value: stakeValue });
       } catch (preflightError) {
         const preflightFailure = describeTransactionFailure(preflightError);
         console.error('[CommandCenter] startQuest gas estimation failed', {
@@ -401,30 +539,29 @@ export default function CommandCenter() {
         );
       }
 
-      const tx = await forgeQuestManager.startQuest(chainQuestId, {
+      const { hash: startTxHash } = await submitForgeWrite('startQuest', [chainQuestId], {
         value: stakeValue,
-        ...(gasLimit ? { gasLimit } : {})
+        gasLimit
       });
       console.info('[CommandCenter] startQuest submitted', {
-        hash: tx.hash,
+        hash: startTxHash,
         chainQuestId: chainQuestId.toString(),
         wallet: signerAddress,
         valueWei: stakeValue.toString()
       });
-      await tx.wait();
 
       let persistedQuest: QuestState = {
-        ...activeQuest,
+        ...resolvedQuest,
         status: 'ACTIVE',
         treasuryPayout: {
-          ...(activeQuest.treasuryPayout || {}),
+          ...(resolvedQuest.treasuryPayout || {}),
           status: 'LOCKED'
         }
       };
 
-      if (activeQuest.id) {
+      if (resolvedQuest.id) {
         try {
-          const startRegistrationResponse = await registerQuestStart(String(activeQuest.id), chainQuestId.toString(), tx.hash);
+          const startRegistrationResponse = await registerQuestStart(String(resolvedQuest.id), chainQuestId.toString(), startTxHash);
           const registeredQuest = (startRegistrationResponse.data as { quest?: QuestState }).quest;
           if (registeredQuest) {
             persistedQuest = {
@@ -475,34 +612,25 @@ export default function CommandCenter() {
     setMessage('Submitting proof to the Forge Master...');
 
     try {
-      if (!activeQuest.chainQuestId) {
-        setMessage('Quest is syncing with backend. Attempting to refresh...');
-        await syncNow();
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+      const resolvedQuest = await resolveQuestForChainAction(
+        activeQuest,
+        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
+      );
+      setMessage('Quest sync complete. Proceeding with proof submission...');
 
-        if (!activeQuest.chainQuestId) {
-          throw new Error(
-            'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
-          );
-        }
-
-        setMessage('Quest sync complete. Proceeding with proof submission...');
-      }
-
-      const chainQuestId = BigInt(String(activeQuest.chainQuestId));
-      const submitTx = await forgeQuestManager.submitQuest(chainQuestId, proofUri);
+      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+      const { hash: submissionTxHash } = await submitForgeWrite('submitQuest', [chainQuestId, proofUri]);
       console.info('[CommandCenter] submitQuest submitted', {
-        hash: submitTx.hash,
+        hash: submissionTxHash,
         chainQuestId: chainQuestId.toString()
       });
-      await submitTx.wait();
 
-      patchQuest(questMatcher(activeQuest), { status: 'SUBMITTED' });
-      if (!activeQuest.id) {
+      patchQuest(questMatcher(resolvedQuest), { status: 'SUBMITTED' });
+      if (!resolvedQuest.id) {
         throw new Error('Quest is missing a persistent id');
       }
 
-      await submitProofForVerification(activeQuest.id, proofUri, submitTx.hash);
+      await submitProofForVerification(resolvedQuest.id, proofUri, submissionTxHash);
       setMessage('Proof submitted onchain and queued for deterministic verification. Realtime settlement updates will stream here.');
       await syncNow();
       setProofUri('');

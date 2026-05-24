@@ -32,6 +32,10 @@ class AIRewardEngine {
     difficulty: number;
     stakeAmount: number;
     streakMultiplier: number;
+    rewardBounds: {
+      min: number;
+      max: number;
+    };
   }): Promise<RewardCalculation> {
     try {
       const [activity, activeWorldModifiers, treasuryState] = await Promise.all([
@@ -47,6 +51,17 @@ class AIRewardEngine {
         QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO - (activity?.rewardsEarned ?? 0)
       );
       const minimumRewardForStake = this.minimumRewardForStake(input.stakeAmount);
+      const minimumPlayableReward = this.roundCelo(
+        Math.max(BASE_REWARD_FLOOR, minimumRewardForStake, input.rewardBounds.min)
+      );
+      const rewardCeiling = this.roundCelo(
+        Math.min(
+          QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
+          input.rewardBounds.max,
+          rewardsRemaining,
+          treasuryState.treasuryCap
+        )
+      );
 
       if (treasuryState.availableRewardLiquidity <= 0) {
         throw new QuestGenerationError(
@@ -62,14 +77,7 @@ class AIRewardEngine {
       }
 
       let rewardAmount = baseReward * input.streakMultiplier * worldMultiplier;
-      rewardAmount = this.roundCelo(
-        Math.min(
-          QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
-          rewardsRemaining,
-          treasuryState.treasuryCap,
-          Math.max(BASE_REWARD_FLOOR, rewardAmount)
-        )
-      );
+      rewardAmount = this.roundCelo(Math.max(BASE_REWARD_FLOOR, rewardAmount));
 
       if (treasuryState.treasuryCap < minimumRewardForStake) {
         throw new QuestGenerationError(
@@ -85,7 +93,29 @@ class AIRewardEngine {
         );
       }
 
-      rewardAmount = Math.max(rewardAmount, minimumRewardForStake);
+      if (rewardCeiling < minimumPlayableReward) {
+        const dailyRewardsEarned = activity?.rewardsEarned ?? 0;
+        const reasonDetails = [
+          `Minimum playable reward: ${minimumPlayableReward.toFixed(4)} CELO`,
+          `Reward ceiling: ${rewardCeiling.toFixed(4)} CELO`,
+          `Difficulty reward bounds: ${input.rewardBounds.min.toFixed(4)}-${input.rewardBounds.max.toFixed(4)} CELO`,
+          `Stake safety floor: ${minimumRewardForStake.toFixed(4)} CELO`,
+          `Daily rewards earned: ${dailyRewardsEarned.toFixed(4)} / ${QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO.toFixed(4)} CELO`,
+          `Treasury reward cap: ${treasuryState.treasuryCap.toFixed(4)} CELO`
+        ];
+
+        const dailyCapIsLimiting = rewardsRemaining < minimumPlayableReward;
+        throw new QuestGenerationError(
+          dailyCapIsLimiting ? 'QUEST_DAILY_REWARD_CAPACITY_EXHAUSTED' : 'QUEST_REWARD_CAPACITY_UNAVAILABLE',
+          dailyCapIsLimiting
+            ? 'Quest generation is temporarily unavailable because the remaining daily reward capacity is below the minimum safe quest reward.'
+            : 'Quest generation is temporarily unavailable because the treasury cannot support a reward within the allowed gameplay bounds.',
+          dailyCapIsLimiting ? 429 : 503,
+          reasonDetails
+        );
+      }
+
+      rewardAmount = this.roundCelo(Math.max(minimumPlayableReward, Math.min(rewardAmount, rewardCeiling)));
 
       const xpReward = Math.max(
         150,

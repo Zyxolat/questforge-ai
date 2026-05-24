@@ -12,6 +12,13 @@ import {
 } from '../lib/api';
 import { formatDetectedChain, formatSupportedNetworkMessage, isSupportedCeloChain, normalizeChainId } from '../lib/celo';
 import { env } from '../lib/env';
+import {
+  getInjectedWalletSelection,
+  requestWalletProvider,
+  requestWalletSignature,
+  type WalletProviderKind,
+  type WalletProviderShape
+} from '../lib/walletProvider';
 
 type WalletStatus = 'disconnected' | 'connected' | 'unsupported';
 type AuthStatus = 'idle' | 'restoring' | 'unauthenticated' | 'authenticating' | 'authenticated' | 'expired' | 'error';
@@ -32,6 +39,8 @@ interface WalletContextValue {
   isAuthReady: boolean;
   signer: ethers.JsonRpcSigner | null;
   provider: BrowserProvider | null;
+  walletProvider: WalletProviderShape | null;
+  walletKind: WalletProviderKind | null;
   connectWallet: () => Promise<void>;
   authenticateWallet: () => Promise<boolean>;
   disconnectWallet: () => Promise<void>;
@@ -42,13 +51,6 @@ const WalletContext = createContext<WalletContextValue | undefined>(undefined);
 
 const targetChainId = env.CELO_CHAIN_ID;
 const targetChainHex = env.CELO_CHAIN_HEX;
-
-type WalletProviderShape = ethers.Eip1193Provider & {
-  chainId?: string | number;
-  isMiniPay?: boolean;
-  on?: (event: string, listener: (...args: unknown[]) => void) => void;
-  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
-};
 
 function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -129,6 +131,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [network, setNetwork] = useState<string | null>(null);
   const [balance, setBalance] = useState('0.0000');
   const [provider, setProvider] = useState<BrowserProvider | null>(null);
+  const [walletProvider, setWalletProvider] = useState<WalletProviderShape | null>(null);
+  const [walletKind, setWalletKind] = useState<WalletProviderKind | null>(null);
   const [signer, setSigner] = useState<ethers.JsonRpcSigner | null>(null);
   const [status, setStatus] = useState<WalletStatus>('disconnected');
   const [authStatus, setAuthStatus] = useState<AuthStatus>('idle');
@@ -139,11 +143,14 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const restorePromiseRef = useRef<Promise<RestoreOutcome> | null>(null);
   const authenticatePromiseRef = useRef<Promise<boolean> | null>(null);
   const activeAddressRef = useRef<string | null>(null);
+  const activeWalletProviderRef = useRef<WalletProviderShape | null>(null);
+  const autoConnectAttemptedRef = useRef(false);
   const authStateRef = useRef<{ status: AuthStatus; message: string | null }>({
     status: 'idle',
     message: null
   });
-  const hasProvider = typeof window !== 'undefined' && Boolean((window as Window & { ethereum?: unknown }).ethereum);
+  const walletSelection = typeof window !== 'undefined' ? getInjectedWalletSelection('auto') : null;
+  const hasProvider = Boolean(walletSelection?.provider);
 
   function clearWalletState(nextStatus: WalletStatus = 'disconnected', reason = 'unspecified') {
     console.debug('[WalletContext] Wallet state transition', {
@@ -155,10 +162,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setAddress(null);
     setSigner(null);
     setProvider(null);
+    setWalletProvider(null);
+    setWalletKind(null);
     setChainId(null);
     setNetwork(null);
     setBalance('0.0000');
     setStatus(nextStatus);
+    if (nextStatus !== 'connected') {
+      setIsMiniPay(false);
+    }
+    activeWalletProviderRef.current = null;
   }
 
   function clearAuthState(nextStatus: AuthStatus = 'unauthenticated', message: string | null = null, reason = 'unspecified') {
@@ -176,6 +189,27 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     };
     setAuthStatus(nextStatus);
     setAuthMessage(message);
+  }
+
+  function resolveWalletSelection(preferredKind: WalletProviderKind | 'auto' = 'auto') {
+    const selection = getInjectedWalletSelection(preferredKind);
+
+    if (selection) {
+      console.debug('[WalletContext] Selected injected provider', {
+        preferredKind,
+        selectedKind: selection.kind,
+        candidateKinds: selection.candidates.map((candidate) => `${candidate.kind}:${candidate.source}`),
+        isMiniPayUserAgent:
+          typeof navigator !== 'undefined' &&
+          /minipay|opera mini/i.test(navigator.userAgent)
+      });
+    } else {
+      console.warn('[WalletContext] No injected wallet providers detected', {
+        preferredKind
+      });
+    }
+
+    return selection;
   }
 
   async function restoreSessionForWallet(nextAddress: string): Promise<RestoreOutcome> {
@@ -267,9 +301,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return restoreTask;
   }
 
-  async function syncWalletState(browserProvider: BrowserProvider, reason: 'init' | 'connect' | 'change' | 'switch' = 'init') {
+  async function syncWalletState(
+    browserProvider: BrowserProvider,
+    reason: 'init' | 'connect' | 'change' | 'switch' = 'init',
+    rawProviderOverride?: WalletProviderShape | null,
+    walletKindOverride?: WalletProviderKind | null
+  ) {
     try {
-      const ethereum = (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+      const selection =
+        rawProviderOverride && walletKindOverride
+          ? {
+              provider: rawProviderOverride,
+              kind: walletKindOverride
+            }
+          : resolveWalletSelection(rawProviderOverride?.isMiniPay ? 'minipay' : 'auto');
+      const activeWalletProvider = rawProviderOverride ?? selection?.provider ?? null;
+      const activeWalletKind = walletKindOverride ?? selection?.kind ?? null;
+
+      if (!activeWalletProvider || !activeWalletKind) {
+        clearWalletState('unsupported', 'wallet-provider-missing-during-sync');
+        clearAuthState('error', 'Unable to detect a compatible wallet provider.', 'wallet-provider-missing-during-sync');
+        return;
+      }
+
       const accounts = (await withRpcRetry('eth_accounts', () => browserProvider.send('eth_accounts', []))) as string[];
 
       if (!accounts.length) {
@@ -284,7 +338,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       const signerInstance = await withRpcRetry('getSigner', () => browserProvider.getSigner());
       const nextAddress = await signerInstance.getAddress();
-      const rawChainId = ethereum?.chainId ?? (await withRpcRetry('eth_chainId', () => browserProvider.send('eth_chainId', [])));
+      const rawChainId =
+        activeWalletProvider.chainId ?? (await withRpcRetry('eth_chainId', () => browserProvider.send('eth_chainId', [])));
       const networkData = await withRpcRetry('getNetwork', () => browserProvider.getNetwork());
       const diagnostics = getChainDiagnostics(rawChainId, networkData.chainId, networkData.name);
       const nextBalance = await withRpcRetry('getBalance', () => browserProvider.getBalance(nextAddress));
@@ -293,20 +348,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       console.info('[WalletContext] chain diagnostics', {
         reason,
+        walletKind: activeWalletKind,
+        isMiniPay: Boolean(activeWalletProvider.isMiniPay),
         rawChainId: diagnostics.rawChainId,
         normalizedChainId: diagnostics.normalizedChainId,
         expectedChainId: diagnostics.expectedChainId
       });
 
+      activeWalletProviderRef.current = activeWalletProvider;
       activeAddressRef.current = nextAddress;
       setProvider(browserProvider);
+      setWalletProvider(activeWalletProvider);
+      setWalletKind(activeWalletKind);
       setSigner(signerInstance);
       setAddress(nextAddress);
       setChainId(diagnostics.normalizedChainId);
       setNetwork(diagnostics.detectedNetwork);
       setBalance(formatBalance(nextBalance));
       setStatus('connected');
-      setIsMiniPay(Boolean(ethereum?.isMiniPay));
+      setIsMiniPay(Boolean(activeWalletProvider.isMiniPay));
 
       if (changedWallet) {
         await logoutAuthSession().catch(() => undefined);
@@ -348,18 +408,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const activeSigner = signerOverride ?? signer;
     const activeAddress = addressOverride ?? address;
     const activeChainId = chainIdOverride ?? chainId;
+    const activeWalletProvider = activeWalletProviderRef.current ?? walletProvider;
 
     console.debug('[AUTH] authenticateWallet called', {
       hasSigner: !!activeSigner,
+      hasWalletProvider: !!activeWalletProvider,
       hasAddress: !!activeAddress,
       hasChainId: !!activeChainId,
       address: activeAddress ? `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}` : null,
       chainId: activeChainId
     });
 
-    if (!activeSigner || !activeAddress || !activeChainId) {
+    if ((!activeSigner && !activeWalletProvider) || !activeAddress || !activeChainId) {
       console.warn('[AUTH] authenticateWallet failed: missing credentials', {
         hasSigner: !!activeSigner,
+        hasWalletProvider: !!activeWalletProvider,
         hasAddress: !!activeAddress,
         hasChainId: !!activeChainId
       });
@@ -393,10 +456,31 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         });
 
         console.debug('[AUTH] Requesting wallet signature', {
-          messageLength: nonceResponse.data.message.length
+          messageLength: nonceResponse.data.message.length,
+          prefersProviderSignature: Boolean(activeWalletProvider?.isMiniPay)
         });
 
-        const signature = await activeSigner.signMessage(nonceResponse.data.message);
+        let signature: string;
+        try {
+          if (activeWalletProvider?.isMiniPay) {
+            signature = await requestWalletSignature(activeWalletProvider, activeAddress, nonceResponse.data.message);
+          } else {
+            if (!activeSigner) {
+              throw new Error('Wallet signer is unavailable for signature request.');
+            }
+            signature = await activeSigner.signMessage(nonceResponse.data.message);
+          }
+        } catch (signError) {
+          if (!activeWalletProvider) {
+            throw signError;
+          }
+
+          console.warn('[AUTH] Signer signMessage failed, retrying through provider request', {
+            walletKind,
+            error: signError instanceof Error ? signError.message : String(signError)
+          });
+          signature = await requestWalletSignature(activeWalletProvider, activeAddress, nonceResponse.data.message);
+        }
 
         console.debug('[AUTH] Signature received', {
           signatureLength: signature.length,
@@ -532,16 +616,22 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const ethereum = (window as Window & { ethereum?: unknown }).ethereum;
-    if (!ethereum) {
+    const selection = resolveWalletSelection('auto');
+    const selectedProvider = selection?.provider;
+    const selectedKind = selection?.kind;
+
+    if (!selectedProvider || !selectedKind) {
+      setWalletReady(true);
+      setStatus('unsupported');
+      clearAuthState('unauthenticated', 'Install a compatible wallet to continue.', 'wallet-provider-selection-missing');
       return;
     }
 
-    const browserProvider = new BrowserProvider(ethereum as WalletProviderShape);
+    const browserProvider = new BrowserProvider(selectedProvider);
     setProvider(browserProvider);
 
     const handleAccountsChanged = () => {
-      void syncWalletState(browserProvider, 'change');
+      void syncWalletState(browserProvider, 'change', selectedProvider, selectedKind);
     };
     const handleChainChanged = (nextChainId?: unknown) => {
       const diagnostics = getChainDiagnostics(nextChainId);
@@ -550,19 +640,34 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         normalizedChainId: diagnostics.normalizedChainId,
         expectedChainId: diagnostics.expectedChainId
       });
-      void syncWalletState(browserProvider, 'change');
+      void syncWalletState(browserProvider, 'change', selectedProvider, selectedKind);
     };
 
-    void syncWalletState(browserProvider, 'init');
+    void syncWalletState(browserProvider, 'init', selectedProvider, selectedKind);
 
-    (ethereum as WalletProviderShape).on?.('accountsChanged', handleAccountsChanged);
-    (ethereum as WalletProviderShape).on?.('chainChanged', handleChainChanged);
+    selectedProvider.on?.('accountsChanged', handleAccountsChanged);
+    selectedProvider.on?.('chainChanged', handleChainChanged);
 
     return () => {
-      (ethereum as WalletProviderShape).removeListener?.('accountsChanged', handleAccountsChanged);
-      (ethereum as WalletProviderShape).removeListener?.('chainChanged', handleChainChanged);
+      selectedProvider.removeListener?.('accountsChanged', handleAccountsChanged);
+      selectedProvider.removeListener?.('chainChanged', handleChainChanged);
     };
   }, [hasProvider]);
+
+  useEffect(() => {
+    if (!hasProvider || autoConnectAttemptedRef.current || address || status === 'connected') {
+      return;
+    }
+
+    const selection = resolveWalletSelection('auto');
+    if (selection?.kind !== 'minipay') {
+      return;
+    }
+
+    autoConnectAttemptedRef.current = true;
+    console.info('[WalletContext] Auto-connecting MiniPay provider');
+    void connectWallet();
+  }, [address, hasProvider, status]);
 
   async function connectWallet() {
     if (!hasProvider) {
@@ -571,20 +676,20 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const ethereum = (window as Window & { ethereum?: WalletProviderShape }).ethereum;
-      if (!ethereum) {
+      const selection = resolveWalletSelection('auto');
+      if (!selection?.provider) {
         clearAuthState('error', 'No compatible wallet provider was found.');
         return;
       }
 
-      const browserProvider = new BrowserProvider(ethereum);
-      await browserProvider.send('eth_requestAccounts', []);
-      await syncWalletState(browserProvider, 'connect');
-      const rawChainId = ethereum.chainId ?? (await browserProvider.send('eth_chainId', []));
+      const browserProvider = new BrowserProvider(selection.provider);
+      await requestWalletProvider(selection.provider, 'eth_requestAccounts', []);
+      await syncWalletState(browserProvider, 'connect', selection.provider, selection.kind);
+      const rawChainId = selection.provider.chainId ?? (await browserProvider.send('eth_chainId', []));
       const normalizedChainId = normalizeChainId(rawChainId);
 
       if (!isSupportedCeloChain(normalizedChainId)) {
-        await switchCeloNetwork(browserProvider, ethereum);
+        await switchCeloNetwork(browserProvider, selection.provider);
       }
     } catch (error) {
       console.error(error);
@@ -599,6 +704,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   async function disconnectWallet() {
     await logoutAuthSession().catch(() => undefined);
     activeAddressRef.current = null;
+    autoConnectAttemptedRef.current = false;
     clearWalletState('disconnected', 'wallet-disconnect');
     clearAuthState('unauthenticated', null, 'wallet-disconnect');
     setWalletReady(true);
@@ -608,23 +714,33 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   async function switchCeloNetwork(browserProviderOverride?: BrowserProvider | null, ethereumOverride?: WalletProviderShape | null) {
     if (!hasProvider) return;
     try {
-      const ethereum = ethereumOverride ?? (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+      const selection = resolveWalletSelection(ethereumOverride?.isMiniPay ? 'minipay' : 'auto');
+      const ethereum = ethereumOverride ?? selection?.provider ?? null;
       const browserProvider =
         browserProviderOverride ?? (ethereum ? new BrowserProvider(ethereum as WalletProviderShape) : null);
+
+      if (!ethereum) {
+        throw new Error('No wallet provider available for network switching.');
+      }
 
       await ethereum?.request?.({
         method: 'wallet_switchEthereumChain',
         params: [{ chainId: targetChainHex }]
       });
       if (browserProvider) {
-        await syncWalletState(browserProvider, 'switch');
+        await syncWalletState(browserProvider, 'switch', ethereum, selection?.kind ?? null);
       }
     } catch (error) {
       if (isAddChainRequired(error)) {
         try {
-          const ethereum = ethereumOverride ?? (window as Window & { ethereum?: WalletProviderShape }).ethereum;
+          const selection = resolveWalletSelection(ethereumOverride?.isMiniPay ? 'minipay' : 'auto');
+          const ethereum = ethereumOverride ?? selection?.provider ?? null;
           const browserProvider =
             browserProviderOverride ?? (ethereum ? new BrowserProvider(ethereum as WalletProviderShape) : null);
+
+          if (!ethereum) {
+            throw new Error('No wallet provider available for add-chain request.', { cause: error });
+          }
 
           await ethereum?.request?.({
             method: 'wallet_addEthereumChain',
@@ -644,7 +760,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           });
 
           if (browserProvider) {
-            await syncWalletState(browserProvider, 'switch');
+            await syncWalletState(browserProvider, 'switch', ethereum, selection?.kind ?? null);
           }
           return;
         } catch (addError) {
@@ -673,12 +789,29 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       isAuthReady: walletReady && authStatus !== 'restoring',
       signer,
       provider,
+      walletProvider,
+      walletKind,
       connectWallet,
       authenticateWallet: () => authenticateWallet(),
       disconnectWallet,
       switchCeloNetwork
     }),
-    [address, balance, chainId, network, isCorrectNetwork, isMiniPay, status, authStatus, authMessage, walletReady, signer, provider]
+    [
+      address,
+      balance,
+      chainId,
+      network,
+      isCorrectNetwork,
+      isMiniPay,
+      status,
+      authStatus,
+      authMessage,
+      walletReady,
+      signer,
+      provider,
+      walletProvider,
+      walletKind
+    ]
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

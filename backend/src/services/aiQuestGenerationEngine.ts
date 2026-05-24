@@ -91,7 +91,8 @@ class AIQuestGenerationEngine {
       userId: user.id,
       difficulty: difficultyProfile.difficulty,
       stakeAmount: difficultyProfile.recommendedStake,
-      streakMultiplier
+      streakMultiplier,
+      rewardBounds: difficultyProfile.rewardBounds
     });
 
     logger.info('[QUEST-GENERATION] Difficulty and reward profiles computed', {

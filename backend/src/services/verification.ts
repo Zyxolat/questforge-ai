@@ -6,6 +6,7 @@ import { contracts } from './contracts';
 import { applyStreakDecay, clearQuestCooldown, hashProofUri, incrementDailyActivity, recoverStreakDecay, setQuestCooldown } from './antiAbuse';
 import { isApprovalEvent, type ObjectiveType } from './questTemplates';
 import { logger } from './logger';
+import { realtimeEventPublisher } from './realtimeEventPublisher';
 
 type VerificationMetadata = {
   type: ObjectiveType;
@@ -19,6 +20,7 @@ type VerificationMetadata = {
 type QuestVerificationRow = {
   id: string;
   chainQuestId: bigint | null;
+  difficulty: number;
   metadata: unknown;
   status: string;
   proofTx: string | null;
@@ -87,6 +89,91 @@ function assertTransactionHash(value: string, label: string) {
   return value.toLowerCase();
 }
 
+function questRarityFromDifficulty(difficulty: number) {
+  if (difficulty >= 5) return 'Legendary';
+  if (difficulty === 4) return 'Epic';
+  if (difficulty === 3) return 'Rare';
+  if (difficulty === 2) return 'Uncommon';
+  return 'Common';
+}
+
+async function resolveReceiptTimestamp(receipt: ethers.TransactionReceipt | null | undefined) {
+  if (!receipt) {
+    return new Date();
+  }
+
+  const block = await contracts.provider.getBlock(receipt.blockNumber);
+  return block ? new Date(Number(block.timestamp) * 1000) : new Date();
+}
+
+function findReceiptEvents(contract: ethers.Contract, receipt: ethers.TransactionReceipt | null | undefined, eventName: string) {
+  if (!receipt) {
+    return [] as ethers.LogDescription[];
+  }
+
+  return receipt.logs.flatMap((log) => {
+    try {
+      const parsed = contract.interface.parseLog(log);
+      return parsed?.name === eventName ? [parsed] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+async function syncUserProfileSnapshot(userId: string | null, wallet: string | null) {
+  if (!userId || !wallet) {
+    return;
+  }
+
+  try {
+    const profile = await contracts.reputation.profileFor(wallet);
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        xp: Number(profile.xp),
+        level: Number(profile.level),
+        questCount: Number(profile.questCount),
+        streak: Number(profile.streak),
+        onchainActions: Number(profile.onchainActions)
+      }
+    });
+  } catch (error) {
+    logger.warn('Unable to sync user reputation snapshot after verification settlement', {
+      userId,
+      wallet,
+      error: error instanceof Error ? error.message : 'Unknown reputation sync failure'
+    });
+  }
+}
+
+async function publishVerificationRealtimeEvent(input: {
+  replayKey: string;
+  eventName: string;
+  quest: QuestVerificationRow;
+  payload: Record<string, unknown>;
+}) {
+  if (!input.quest.playerWallet) {
+    return;
+  }
+
+  await realtimeEventPublisher.publish({
+    replayKey: input.replayKey,
+    eventName: input.eventName,
+    sourceType: 'verification_worker',
+    sourceId: input.quest.id,
+    payload: {
+      questId: input.quest.id,
+      chainQuestId: input.quest.chainQuestId?.toString() ?? null,
+      ...input.payload
+    },
+    scopes: [
+      { type: 'user', key: input.quest.playerWallet },
+      { type: 'global', key: 'global' }
+    ]
+  });
+}
+
 function readVerificationMetadata(metadata: unknown): VerificationMetadata {
   if (!metadata || typeof metadata !== 'object' || !('verification' in metadata)) {
     throw new Error('Quest metadata is missing deterministic verification rules');
@@ -113,6 +200,7 @@ async function loadQuestForVerification(questId: string) {
     SELECT
       q.id,
       q."chainQuestId",
+      q.difficulty,
       q.metadata,
       q.status,
       q."proofTx",
@@ -255,6 +343,238 @@ async function updateQuestSubmissionState(input: {
       END
     WHERE id = ${input.questId}
   `;
+}
+
+async function syncSuccessfulSettlementArtifacts(input: {
+  quest: QuestVerificationRow;
+  onchainQuest: Awaited<ReturnType<typeof resolveOnchainQuest>>;
+  receipt: ethers.TransactionReceipt | null;
+  verificationTxHash: string;
+}) {
+  const settledAt = await resolveReceiptTimestamp(input.receipt);
+  const rewardReleased = findReceiptEvents(contracts.treasury, input.receipt, 'RewardReleased').at(-1);
+  const rewardPaid = findReceiptEvents(contracts.treasury, input.receipt, 'RewardPaid').at(-1);
+  const rewardMinted = findReceiptEvents(contracts.rewardNFT, input.receipt, 'RewardMinted').at(-1);
+
+  const rewardAmount = Number(ethers.formatEther(input.onchainQuest.rewardAmount));
+  const stakeAmount = Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const totalAmount = rewardAmount + stakeAmount;
+
+  await prisma.treasuryPayout.upsert({
+    where: { questId: input.quest.id },
+    create: {
+      questId: input.quest.id,
+      userId: input.quest.playerId ?? undefined,
+      chainQuestId: input.quest.chainQuestId ?? input.onchainQuest.questId,
+      playerWallet: input.quest.playerWallet ?? undefined,
+      rewardAmount,
+      stakeAmount,
+      totalAmount,
+      status: rewardPaid ? 'PAID' : rewardReleased ? 'RELEASED' : 'LOCKED',
+      releaseTx: rewardReleased ? input.verificationTxHash : undefined,
+      payoutTx: rewardPaid ? input.verificationTxHash : undefined,
+      rewardReleasedAt: rewardReleased ? settledAt : undefined,
+      rewardPaidAt: rewardPaid ? settledAt : undefined
+    },
+    update: {
+      userId: input.quest.playerId,
+      chainQuestId: input.quest.chainQuestId ?? input.onchainQuest.questId,
+      playerWallet: input.quest.playerWallet,
+      rewardAmount,
+      stakeAmount,
+      totalAmount,
+      status: rewardPaid ? 'PAID' : rewardReleased ? 'RELEASED' : 'LOCKED',
+      releaseTx: rewardReleased ? input.verificationTxHash : undefined,
+      payoutTx: rewardPaid ? input.verificationTxHash : undefined,
+      rewardReleasedAt: rewardReleased ? settledAt : undefined,
+      rewardPaidAt: rewardPaid ? settledAt : undefined
+    }
+  });
+
+  if (input.quest.playerId && rewardPaid) {
+    const existingReward = await prisma.reward.findFirst({
+      where: {
+        userId: input.quest.playerId,
+        tokenTx: input.verificationTxHash
+      },
+      select: { id: true }
+    });
+
+    if (!existingReward) {
+      await prisma.reward.create({
+        data: {
+          userId: input.quest.playerId,
+          type: 'CELO',
+          amount: rewardAmount,
+          tokenTx: input.verificationTxHash,
+          createdAt: settledAt
+        }
+      });
+    }
+  }
+
+  if (input.quest.playerId && rewardMinted) {
+    const tokenId = rewardMinted.args?.tokenId?.toString?.();
+    if (tokenId) {
+      const existingNft = await prisma.nFT.findFirst({
+        where: { tokenId },
+        select: { id: true }
+      });
+
+      if (!existingNft) {
+        await prisma.nFT.create({
+          data: {
+            userId: input.quest.playerId,
+            tokenId,
+            metadataUri: input.quest.proofTx ?? input.onchainQuest.proofUri,
+            rarity: questRarityFromDifficulty(input.quest.difficulty),
+            xpEarned: Number(input.onchainQuest.xpReward),
+            questHistory: input.quest.id,
+            mintedAt: settledAt
+          }
+        });
+      }
+
+      await publishVerificationRealtimeEvent({
+        replayKey: `verification-success-nft:${input.quest.id}:${tokenId}`,
+        eventName: 'nft:minted',
+        quest: input.quest,
+        payload: {
+          verificationTx: input.verificationTxHash,
+          data: {
+            tokenId
+          }
+        }
+      });
+    }
+  }
+
+  await syncUserProfileSnapshot(input.quest.playerId, input.quest.playerWallet);
+
+  await publishVerificationRealtimeEvent({
+    replayKey: `verification-success-claimed:${input.quest.id}:${input.verificationTxHash}`,
+    eventName: 'reward:claimed',
+    quest: input.quest,
+    payload: {
+      verificationTx: input.verificationTxHash,
+      data: {
+        success: true
+      }
+    }
+  });
+
+  if (rewardReleased) {
+    await publishVerificationRealtimeEvent({
+      replayKey: `verification-success-released:${input.quest.id}:${input.verificationTxHash}`,
+      eventName: 'reward:released',
+      quest: input.quest,
+      payload: {
+        verificationTx: input.verificationTxHash,
+        treasuryPayout: {
+          status: 'RELEASED',
+          releaseTx: input.verificationTxHash,
+          rewardAmount,
+          stakeAmount,
+          totalAmount
+        }
+      }
+    });
+  }
+
+  if (rewardPaid) {
+    await publishVerificationRealtimeEvent({
+      replayKey: `verification-success-paid:${input.quest.id}:${input.verificationTxHash}`,
+      eventName: 'reward:paid',
+      quest: input.quest,
+      payload: {
+        verificationTx: input.verificationTxHash,
+        treasuryPayout: {
+          status: 'PAID',
+          releaseTx: rewardReleased ? input.verificationTxHash : null,
+          payoutTx: input.verificationTxHash,
+          rewardAmount,
+          stakeAmount,
+          totalAmount
+        }
+      }
+    });
+  }
+}
+
+async function syncFailedSettlementArtifacts(input: {
+  quest: QuestVerificationRow;
+  onchainQuest: Awaited<ReturnType<typeof resolveOnchainQuest>>;
+  receipt: ethers.TransactionReceipt | null;
+  verificationTxHash?: string;
+}) {
+  const refundEvent = findReceiptEvents(contracts.treasury, input.receipt, 'RewardRefunded').at(-1);
+  const settledAt = await resolveReceiptTimestamp(input.receipt);
+  const rewardAmount = refundEvent
+    ? Number(ethers.formatEther(refundEvent.args?.rewardAmount ?? 0n))
+    : Number(ethers.formatEther(input.onchainQuest.rewardAmount));
+  const stakeAmount = refundEvent
+    ? Number(ethers.formatEther(refundEvent.args?.stakeAmount ?? 0n))
+    : Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const totalAmount = rewardAmount + stakeAmount;
+
+  if (input.verificationTxHash) {
+    await prisma.treasuryPayout.upsert({
+      where: { questId: input.quest.id },
+      create: {
+        questId: input.quest.id,
+        userId: input.quest.playerId ?? undefined,
+        chainQuestId: input.quest.chainQuestId ?? input.onchainQuest.questId,
+        playerWallet: input.quest.playerWallet ?? undefined,
+        rewardAmount,
+        stakeAmount,
+        totalAmount,
+        status: 'REFUNDED',
+        refundTx: input.verificationTxHash,
+        rewardRefundedAt: settledAt
+      },
+      update: {
+        userId: input.quest.playerId,
+        chainQuestId: input.quest.chainQuestId ?? input.onchainQuest.questId,
+        playerWallet: input.quest.playerWallet,
+        rewardAmount,
+        stakeAmount,
+        totalAmount,
+        status: 'REFUNDED',
+        refundTx: input.verificationTxHash,
+        rewardRefundedAt: settledAt
+      }
+    });
+  }
+
+  await publishVerificationRealtimeEvent({
+    replayKey: `verification-failure-claimed:${input.quest.id}:${input.verificationTxHash ?? 'rejected'}`,
+    eventName: 'reward:claimed',
+    quest: input.quest,
+    payload: {
+      verificationTx: input.verificationTxHash ?? null,
+      data: {
+        success: false
+      }
+    }
+  });
+
+  if (input.verificationTxHash) {
+    await publishVerificationRealtimeEvent({
+      replayKey: `verification-failure-refunded:${input.quest.id}:${input.verificationTxHash}`,
+      eventName: 'reward:refunded',
+      quest: input.quest,
+      payload: {
+        verificationTx: input.verificationTxHash,
+        treasuryPayout: {
+          status: 'REFUNDED',
+          refundTx: input.verificationTxHash,
+          rewardAmount,
+          stakeAmount,
+          totalAmount
+        }
+      }
+    });
+  }
 }
 
 async function claimPendingProofs(limit: number) {
@@ -453,6 +773,12 @@ async function settleVerificationSuccess(quest: QuestVerificationRow, proofSubmi
   });
   await recoverStreakDecay(quest.playerId);
   await clearQuestCooldown(quest.playerId);
+  await syncSuccessfulSettlementArtifacts({
+    quest,
+    onchainQuest,
+    receipt,
+    verificationTxHash
+  });
 }
 
 async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmissionId: string, verificationReason: string) {
@@ -474,9 +800,10 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
   );
 
   let verificationTxHash: string | undefined;
+  let receipt: ethers.TransactionReceipt | null = null;
   if (contracts.forgeQuestManagerWrite && Number(onchainQuest.status) === 2) {
     const tx = await ensureVerifierContract().verifyQuest(quest.chainQuestId, false, expectedVerificationHash);
-    const receipt = await tx.wait();
+    receipt = await tx.wait();
     verificationTxHash = (receipt?.hash || tx.hash) as string;
   }
 
@@ -490,6 +817,12 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
 
   await applyStreakDecay(quest.playerId);
   await setQuestCooldown(quest.playerId, 15, 'quest_failure');
+  await syncFailedSettlementArtifacts({
+    quest,
+    onchainQuest,
+    receipt,
+    verificationTxHash
+  });
 }
 
 async function verifyQueuedProof(proofSubmissionId: string) {
@@ -650,4 +983,15 @@ export function startProofVerificationWorker() {
   workerTimer = setInterval(() => {
     void processPendingProofSubmissions();
   }, env.VERIFICATION_WORKER_INTERVAL_MS);
+}
+
+export async function stopProofVerificationWorker() {
+  if (workerTimer) {
+    clearInterval(workerTimer);
+    workerTimer = null;
+  }
+
+  while (workerActive) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
 }

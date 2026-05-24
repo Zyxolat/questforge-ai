@@ -70,6 +70,14 @@ type GeneratedQuestPayload = {
       promptHash?: string;
       fallbackReason?: string | null;
     };
+    metadata?: {
+      verification?: {
+        minValueCelo?: number;
+        allowContractTarget?: boolean;
+        requireContractCall?: boolean;
+        requireTokenApproval?: boolean;
+      };
+    };
     stakeAmount: string | number;
     rewardAmount: string | number;
     xpReward: string | number;
@@ -83,15 +91,25 @@ type DeploymentAddresses = {
   REWARD_NFT_ADDRESS: string;
   REPUTATION_ADDRESS: string;
   TREASURY_ADDRESS: string;
+  REWARD_TOKEN_ADDRESS: string;
+};
+
+type ActiveQuestSnapshot = {
+  id?: string;
+  chainQuestId?: string | number | null;
+  status?: string | null;
+  [key: string]: unknown;
 };
 
 const tests: GameplayTest[] = [];
-const CELO_CHAIN_ID = Number(process.env.CELO_CHAIN_ID || '42220');
+const AUTH_CHAIN_ID = Number(process.env.AUTH_CHAIN_ID || process.env.CELO_CHAIN_ID || '42220');
+const RPC_CHAIN_ID = Number(process.env.RPC_CHAIN_ID || process.env.VALIDATION_CHAIN_ID || process.env.CELO_CHAIN_ID || '42220');
 const DEFAULT_RPC_URL = process.env.VALIDATION_RPC_URL || process.env.CELO_RPC_URL || 'https://forno.celo.org';
 
 const FORGE_QUEST_MANAGER_ABI = [
   'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
   'function startQuest(uint256 questId) external payable',
+  'function submitQuest(uint256 questId,string proofUri) external',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)'
 ];
@@ -110,7 +128,9 @@ function recordTest(
 }
 
 function loadDeploymentAddresses(): DeploymentAddresses {
-  const deploymentPath = path.join(__dirname, '../contracts/deployments/celo-addresses.json');
+  const deploymentPath = process.env.DEPLOYMENT_ADDRESSES_FILE?.trim()
+    ? path.resolve(process.cwd(), process.env.DEPLOYMENT_ADDRESSES_FILE.trim())
+    : path.join(__dirname, '../contracts/deployments/celo-addresses.json');
   if (fs.existsSync(deploymentPath)) {
     const parsed = JSON.parse(fs.readFileSync(deploymentPath, 'utf8')) as DeploymentAddresses;
     return parsed;
@@ -160,10 +180,90 @@ function buildApiClient(apiUrl: string, accessToken?: string) {
   });
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitForQuestState(
+  client: AxiosInstance,
+  questId: string,
+  predicate: (quest: ActiveQuestSnapshot | undefined) => boolean,
+  timeoutMs: number,
+  intervalMs = 500
+) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const activeQuestsResponse = await client.get('/quests/active');
+    const activeQuests: ActiveQuestSnapshot[] = Array.isArray(activeQuestsResponse.data?.quests)
+      ? activeQuestsResponse.data.quests
+      : [];
+    const updatedQuest = activeQuests.find((quest) => quest.id === questId);
+
+    if (predicate(updatedQuest)) {
+      return updatedQuest;
+    }
+
+    await sleep(intervalMs);
+  }
+
+  const activeQuestsResponse = await client.get('/quests/active');
+  const activeQuests: ActiveQuestSnapshot[] = Array.isArray(activeQuestsResponse.data?.quests)
+    ? activeQuestsResponse.data?.quests
+    : [];
+  return activeQuests.find((quest) => quest.id === questId);
+}
+
+async function submitProofTransaction(params: {
+  signer: ethers.Signer;
+  signerAddress: string;
+  deployment: DeploymentAddresses;
+  verification?: {
+    minValueCelo?: number;
+    requireContractCall?: boolean;
+    requireTokenApproval?: boolean;
+  };
+}) {
+  const minValueCelo = Number(params.verification?.minValueCelo ?? 0);
+  const minimumValue = ethers.parseEther(Math.max(0, minValueCelo).toFixed(18));
+
+  if (params.verification?.requireContractCall || params.verification?.requireTokenApproval) {
+    const rewardToken = new ethers.Contract(
+      params.deployment.REWARD_TOKEN_ADDRESS,
+      ['function approve(address spender,uint256 value) external returns (bool)'],
+      params.signer
+    );
+
+    const approvalAmount = minimumValue > 0n ? minimumValue : 1n;
+    const tx = await rewardToken.approve(params.deployment.TREASURY_ADDRESS, approvalAmount);
+    await tx.wait();
+
+    return {
+      txHash: tx.hash,
+      mode: params.verification?.requireTokenApproval ? 'token_approval' : 'contract_call',
+      amountWei: approvalAmount.toString()
+    };
+  }
+
+  const tx = await params.signer.sendTransaction({
+    to: params.signerAddress === '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
+      ? '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+      : '0x70997970C51812dc3A010C7d01b50e0d17dc79C8',
+    value: minimumValue > 0n ? minimumValue : ethers.parseEther('0.01')
+  });
+  await tx.wait();
+
+  return {
+    txHash: tx.hash,
+    mode: 'native_transfer',
+    amountWei: (minimumValue > 0n ? minimumValue : ethers.parseEther('0.01')).toString()
+  };
+}
+
 async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet): Promise<AuthSessionPayload> {
   const nonceResponse = await client.post('/auth/nonce', {
     wallet: wallet.address,
-    chainId: CELO_CHAIN_ID
+    chainId: AUTH_CHAIN_ID
   });
 
   const nonce = nonceResponse.data?.nonce;
@@ -177,7 +277,7 @@ async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet)
     wallet: wallet.address,
     nonce,
     signature,
-    chainId: CELO_CHAIN_ID
+    chainId: AUTH_CHAIN_ID
   });
 
   if (!verifyResponse.data?.accessToken) {
@@ -202,7 +302,8 @@ async function main() {
   console.log(`🎮 Backend root: ${rootUrl}`);
   console.log(`🔌 API base:     ${apiUrl}`);
   console.log(`👛 Test wallet:  ${authWallet.address}`);
-  console.log(`⛓️  Chain ID:     ${CELO_CHAIN_ID}\n`);
+  console.log(`⛓️  Auth Chain:   ${AUTH_CHAIN_ID}`);
+  console.log(`⛓️  RPC Chain:    ${RPC_CHAIN_ID}\n`);
 
   try {
     let startedAt = Date.now();
@@ -274,7 +375,7 @@ async function main() {
     );
 
     startedAt = Date.now();
-    const provider = new ethers.JsonRpcProvider(DEFAULT_RPC_URL, CELO_CHAIN_ID);
+    const provider = new ethers.JsonRpcProvider(DEFAULT_RPC_URL, RPC_CHAIN_ID);
     const code = await provider.getCode(deployment.FORGE_QUEST_MANAGER_ADDRESS);
     recordTest(
       'Contract Deployment',
@@ -296,8 +397,10 @@ async function main() {
         'Set VALIDATION_PRIVATE_KEY to execute createQuest -> register-onchain -> startQuest -> register-start against the live deployment.'
       );
     } else {
-      const signer = new ethers.Wallet(validationPrivateKey, provider);
-      if (signer.address.toLowerCase() !== authWallet.address.toLowerCase()) {
+      const baseSigner = new ethers.Wallet(validationPrivateKey, provider);
+      const signer = new ethers.NonceManager(baseSigner);
+      const signerAddress = await signer.getAddress();
+      if (signerAddress.toLowerCase() !== authWallet.address.toLowerCase()) {
         throw new Error('VALIDATION_PRIVATE_KEY did not produce the authenticated wallet address');
       }
 
@@ -379,10 +482,84 @@ async function main() {
         }
       );
 
+      startedAt = Date.now();
+      const proofReference = await submitProofTransaction({
+        signer,
+        signerAddress,
+        deployment,
+        verification: generatedQuest.metadata?.verification
+      });
+
+      const submitTx = await contract.submitQuest(BigInt(chainQuestId), proofReference.txHash);
+      await submitTx.wait();
+
+      await authenticatedClient.post('/quests/submit-proof', {
+        questId: generatedQuest.id,
+        proofUri: proofReference.txHash,
+        submissionTxHash: submitTx.hash
+      });
+
       recordTest(
-        'Proof / Settlement Flow',
-        'pending',
-        'Proof submission was not auto-executed because verifier-compatible gameplay transactions depend on quest-specific rules.'
+        'Onchain Proof Submission',
+        'pass',
+        `Submitted proof for chain quest ${chainQuestId} and queued backend verification`,
+        Date.now() - startedAt,
+        {
+          proofTxHash: proofReference.txHash,
+          submitTxHash: submitTx.hash,
+          chainQuestId,
+          proofMode: proofReference.mode,
+          proofAmountWei: proofReference.amountWei
+        }
+      );
+
+      startedAt = Date.now();
+      const updatedQuest = await waitForQuestState(
+        authenticatedClient,
+        generatedQuest.id,
+        (quest) => quest?.chainQuestId === chainQuestId && quest?.status === 'SUBMITTED',
+        10000
+      );
+
+      recordTest(
+        'Proof / Queue Sync',
+        updatedQuest?.chainQuestId === chainQuestId && updatedQuest?.status === 'SUBMITTED' ? 'pass' : 'fail',
+        updatedQuest?.chainQuestId === chainQuestId && updatedQuest?.status === 'SUBMITTED'
+          ? `Quest ${generatedQuest.id} retained chain quest ${chainQuestId} through submit`
+          : `Quest ${generatedQuest.id} did not retain the expected chain quest id/status after submit`,
+        Date.now() - startedAt,
+        {
+          proofTxHash: proofReference.txHash,
+          submitTxHash: submitTx.hash,
+          chainQuestId,
+          questStatus: updatedQuest?.status ?? null,
+          persistedChainQuestId: updatedQuest?.chainQuestId ?? null
+        }
+      );
+
+      startedAt = Date.now();
+      const verifiedQuest = await waitForQuestState(
+        authenticatedClient,
+        generatedQuest.id,
+        (quest) => quest?.chainQuestId === chainQuestId && (quest?.status === 'VERIFIED' || quest?.status === 'FAILED'),
+        15000
+      );
+
+      recordTest(
+        'Verification Settlement',
+        verifiedQuest?.chainQuestId === chainQuestId && verifiedQuest?.status === 'VERIFIED' ? 'pass' : 'fail',
+        verifiedQuest?.chainQuestId === chainQuestId && verifiedQuest?.status === 'VERIFIED'
+          ? `Quest ${generatedQuest.id} verified successfully with chain quest ${chainQuestId} intact`
+          : `Quest ${generatedQuest.id} did not reach VERIFIED with the expected chain quest id`,
+        Date.now() - startedAt,
+        {
+          chainQuestId,
+          status: verifiedQuest?.status ?? null,
+          verificationTx: verifiedQuest?.verificationTx ?? null,
+          treasuryPayoutStatus: verifiedQuest?.treasuryPayout?.status ?? null,
+          completedAt: verifiedQuest?.completedAt ?? null,
+          failedAt: verifiedQuest?.failedAt ?? null
+        }
       );
     }
   } catch (error) {

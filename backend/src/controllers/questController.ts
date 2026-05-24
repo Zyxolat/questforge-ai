@@ -86,6 +86,51 @@ async function loadSerializedQuestById(questId: string) {
   });
 }
 
+function summarizeForgeQuestReceipt(receipt: Awaited<ReturnType<typeof contracts.provider.getTransactionReceipt>> | null) {
+  if (!receipt) {
+    return [];
+  }
+
+  return receipt.logs.map((log) => {
+    const parsedEventName = (() => {
+      try {
+        return contracts.forgeQuestManager.interface.parseLog(log)?.name ?? null;
+      } catch {
+        return null;
+      }
+    })();
+
+    return {
+      address: log.address,
+      logIndex: Number(log.index ?? 0),
+      topic0: log.topics[0] ?? null,
+      parsedEventName
+    };
+  });
+}
+
+function parseForgeQuestReceiptEvent(
+  receipt: Awaited<ReturnType<typeof contracts.provider.getTransactionReceipt>> | null,
+  eventName: string
+) {
+  if (!receipt) {
+    return null;
+  }
+
+  for (const log of receipt.logs) {
+    try {
+      const parsed = contracts.forgeQuestManager.interface.parseLog(log);
+      if (parsed?.name === eventName) {
+        return parsed;
+      }
+    } catch {
+      // Ignore unrelated logs.
+    }
+  }
+
+  return null;
+}
+
 export async function generateQuest(req: Request, res: Response) {
   const wallet = req.auth?.wallet;
   const chain = req.body.chain || 'Celo';
@@ -266,6 +311,13 @@ export async function registerOnchainQuest(req: Request, res: Response) {
   const normalizedWallet = normalizeWallet(wallet);
 
   try {
+    logger.info('[QUEST] Register onchain quest request received', {
+      wallet: normalizedWallet,
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      creationTxHash
+    });
+
     const quest = await prisma.quest.findUnique({
       where: { id: questId }
     });
@@ -302,6 +354,15 @@ export async function registerOnchainQuest(req: Request, res: Response) {
     }
 
     const receipt = await contracts.provider.getTransactionReceipt(creationTxHash);
+    logger.info('[QUEST] Register onchain quest receipt fetched', {
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      creationTxHash,
+      receiptStatus: receipt?.status ?? null,
+      blockNumber: receipt?.blockNumber ?? null,
+      logs: summarizeForgeQuestReceipt(receipt)
+    });
+
     if (!receipt || receipt.status !== 1) {
       return res.status(409).json({
         error: {
@@ -311,17 +372,15 @@ export async function registerOnchainQuest(req: Request, res: Response) {
       });
     }
 
-    const parsedQuestCreated = receipt.logs
-      .map((log) => {
-        try {
-          return contracts.forgeQuestManager.interface.parseLog(log);
-        } catch {
-          return null;
-        }
-      })
-      .find((log) => log?.name === 'QuestCreated');
+    const parsedQuestCreated = parseForgeQuestReceiptEvent(receipt, 'QuestCreated');
 
     if (!parsedQuestCreated) {
+      logger.warn('[QUEST] QuestCreated event missing from creation receipt', {
+        questId,
+        chainQuestId: parsedChainQuestId.toString(),
+        creationTxHash,
+        logs: summarizeForgeQuestReceipt(receipt)
+      });
       return res.status(409).json({
         error: {
           code: 'QUEST_CREATION_EVENT_MISSING',
@@ -397,6 +456,14 @@ export async function registerOnchainQuest(req: Request, res: Response) {
       where: { questId }
     });
 
+    logger.info('[QUEST] Onchain quest registration DB persistence verified', {
+      questId,
+      storedChainQuestId: updatedQuest.chainQuestId?.toString() ?? null,
+      storedStatus: updatedQuest.status,
+      treasuryPayoutStatus: treasuryPayout?.status ?? null,
+      treasuryPayoutChainQuestId: treasuryPayout?.chainQuestId?.toString?.() ?? null
+    });
+
     logger.info('[QUEST] Onchain quest registration completed', {
       wallet: normalizedWallet,
       questId,
@@ -460,6 +527,13 @@ export async function registerQuestStart(req: Request, res: Response) {
   const normalizedWallet = normalizeWallet(wallet);
 
   try {
+    logger.info('[QUEST] Register quest start request received', {
+      wallet: normalizedWallet,
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      startTxHash
+    });
+
     const [user, quest] = await Promise.all([
       prisma.user.findUnique({
         where: { wallet: normalizedWallet }
@@ -501,6 +575,15 @@ export async function registerQuestStart(req: Request, res: Response) {
     }
 
     const receipt = await contracts.provider.getTransactionReceipt(startTxHash);
+    logger.info('[QUEST] Register quest start receipt fetched', {
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      startTxHash,
+      receiptStatus: receipt?.status ?? null,
+      blockNumber: receipt?.blockNumber ?? null,
+      logs: summarizeForgeQuestReceipt(receipt)
+    });
+
     if (!receipt || receipt.status !== 1) {
       return res.status(409).json({
         error: {
@@ -510,15 +593,7 @@ export async function registerQuestStart(req: Request, res: Response) {
       });
     }
 
-    const parsedQuestStarted = receipt.logs
-      .map((log) => {
-        try {
-          return contracts.forgeQuestManager.interface.parseLog(log);
-        } catch {
-          return null;
-        }
-      })
-      .find((log) => log?.name === 'QuestStarted');
+    const parsedQuestStarted = parseForgeQuestReceiptEvent(receipt, 'QuestStarted');
 
     if (!parsedQuestStarted) {
       return res.status(409).json({
@@ -615,6 +690,13 @@ export async function registerQuestStart(req: Request, res: Response) {
     });
 
     const serializedQuest = await loadSerializedQuestById(questId);
+
+    logger.info('[QUEST] Quest start registration DB persistence verified', {
+      questId,
+      chainQuestId: serializedQuest?.chainQuestId ?? null,
+      status: serializedQuest?.status ?? null,
+      treasuryPayoutStatus: serializedQuest?.treasuryPayout?.status ?? null
+    });
 
     logger.info('[QUEST] Quest start registration completed', {
       wallet: normalizedWallet,

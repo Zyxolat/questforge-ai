@@ -2,7 +2,7 @@ import { createContext, ReactNode, useContext, useEffect, useRef, useState } fro
 import { io, Socket } from 'socket.io-client';
 import { useWallet } from './WalletContext';
 import { env } from '../lib/env';
-import { fetchRealtimeBootstrap, fetchRealtimeSync } from '../lib/api';
+import { fetchActiveQuests, fetchRealtimeBootstrap, fetchRealtimeSync } from '../lib/api';
 
 type JsonObject = Record<string, unknown>;
 
@@ -179,8 +179,10 @@ type RealtimeStateContextValue = {
   notifications: RealtimeEventEnvelope[];
   npcDialogues: Record<string, string>;
   syncNow: () => Promise<void>;
+  refreshQuestFeed: () => Promise<void>;
   upsertQuest: (quest: QuestState) => void;
   patchQuest: (matcher: QuestMatcher, patch: Partial<QuestState>) => void;
+  getQuest: (matcher: QuestMatcher) => QuestState | null;
   setNpcDialogue: (npcName: string, dialogue: string) => void;
 };
 
@@ -249,7 +251,7 @@ function uniqueById<T extends { id?: string | number }>(items: T[]) {
   return output;
 }
 
-function matchesQuest(quest: QuestState, matcher: QuestMatcher) {
+export function matchesQuest(quest: QuestState, matcher: QuestMatcher) {
   return (
     (matcher.id && quest.id === matcher.id) ||
     (matcher.chainQuestId && quest.chainQuestId === matcher.chainQuestId) ||
@@ -295,6 +297,119 @@ function treasuryStatusForEvent(eventName: string) {
   return undefined;
 }
 
+const QUEST_STATUS_RANK: Record<string, number> = {
+  AVAILABLE: 0,
+  ACTIVE: 1,
+  SUBMITTED: 2,
+  VERIFIED: 3,
+  FAILED: 3,
+  CANCELLED: 3
+};
+
+const TREASURY_STATUS_RANK: Record<string, number> = {
+  RESERVED: 0,
+  LOCKED: 1,
+  RELEASED: 2,
+  PAID: 3,
+  REFUNDED: 3
+};
+
+function compactDefined<T extends Record<string, unknown>>(value: T) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => typeof entry !== 'undefined')) as Partial<T>;
+}
+
+function preferStatus(current?: string, incoming?: string, ranking?: Record<string, number>) {
+  if (!incoming) {
+    return current;
+  }
+
+  if (!current || !ranking) {
+    return incoming;
+  }
+
+  const currentRank = ranking[current] ?? 0;
+  const incomingRank = ranking[incoming] ?? 0;
+  return incomingRank >= currentRank ? incoming : current;
+}
+
+export function normalizeQuestState(quest: QuestState) {
+  return {
+    ...quest,
+    chainQuestId: asString(quest.chainQuestId),
+    orchestrationId: asString(quest.orchestrationId),
+    id: asString(quest.id),
+    status: asString(quest.status),
+    treasuryPayout: quest.treasuryPayout
+      ? {
+          ...quest.treasuryPayout,
+          status: asString(quest.treasuryPayout.status)
+        }
+      : quest.treasuryPayout
+  };
+}
+
+function mergeTreasuryPayoutState(current?: TreasuryPayoutState | null, incoming?: TreasuryPayoutState | null) {
+  if (!incoming) {
+    return current ?? incoming ?? null;
+  }
+
+  if (!current) {
+    return incoming;
+  }
+
+  const merged = {
+    ...current,
+    ...compactDefined(incoming)
+  };
+  merged.status = preferStatus(current.status, incoming.status, TREASURY_STATUS_RANK);
+  return merged;
+}
+
+export function mergeQuestState(current: QuestState, incoming: QuestState, reason: string) {
+  const normalizedIncoming = normalizeQuestState(incoming);
+  const merged: QuestState = {
+    ...current,
+    ...compactDefined(normalizedIncoming as Record<string, unknown>)
+  };
+
+  merged.id = asString(normalizedIncoming.id) ?? current.id;
+  merged.orchestrationId = asString(normalizedIncoming.orchestrationId) ?? current.orchestrationId;
+  merged.chainQuestId = asString(normalizedIncoming.chainQuestId) ?? current.chainQuestId;
+  merged.status = preferStatus(current.status, normalizedIncoming.status, QUEST_STATUS_RANK);
+  merged.treasuryPayout = mergeTreasuryPayoutState(current.treasuryPayout, normalizedIncoming.treasuryPayout);
+
+  console.debug('[Realtime] Quest merge', {
+    reason,
+    questId: merged.id ?? current.id ?? normalizedIncoming.id ?? null,
+    currentChainQuestId: current.chainQuestId ?? null,
+    incomingChainQuestId: normalizedIncoming.chainQuestId ?? null,
+    mergedChainQuestId: merged.chainQuestId ?? null,
+    currentStatus: current.status ?? null,
+    incomingStatus: normalizedIncoming.status ?? null,
+    mergedStatus: merged.status ?? null
+  });
+
+  return merged;
+}
+
+export function mergeQuestCollections(current: QuestState[], incoming: QuestState[], reason: string) {
+  const next = [...current];
+
+  incoming
+    .map((quest) => normalizeQuestState(quest))
+    .forEach((quest) => {
+      const index = next.findIndex((item) => matchesQuest(item, quest));
+
+      if (index >= 0) {
+        next[index] = mergeQuestState(next[index], quest, reason);
+      } else {
+        next.unshift(quest);
+      }
+    });
+
+  return next;
+}
+
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { address, authStatus, isAuthReady, status } = useWallet();
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
@@ -311,6 +426,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const [npcRelationships, setNpcRelationships] = useState<NpcRelationship[]>([]);
   const [notifications, setNotifications] = useState<RealtimeEventEnvelope[]>([]);
   const [npcDialogues, setNpcDialogues] = useState<Record<string, string>>({});
+  const questsRef = useRef<QuestState[]>([]);
   const socketRef = useRef<Socket | null>(null);
   const scopesRef = useRef<Scope[]>([]);
   const lastEventIdRef = useRef(0);
@@ -332,6 +448,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     setNotifications([]);
     setNpcDialogues({});
     scopesRef.current = [];
+    questsRef.current = [];
   }
 
   function disconnectSocket() {
@@ -341,26 +458,34 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     }
   }
 
+  useEffect(() => {
+    questsRef.current = quests;
+  }, [quests]);
+
   function upsertQuest(quest: QuestState) {
     setQuests((current) => {
-      const next = [...current];
-      const index = next.findIndex((item) => matchesQuest(item, quest));
-
-      if (index >= 0) {
-        next[index] = {
-          ...next[index],
-          ...quest
-        };
-      } else {
-        next.unshift(quest);
-      }
-
+      const next = mergeQuestCollections(current, [quest], 'local-upsert');
+      console.info('[Realtime] Quest upsert applied', {
+        questId: quest.id ?? null,
+        chainQuestId: quest.chainQuestId ?? null,
+        totalQuests: next.length
+      });
       return next;
     });
   }
 
   function patchQuest(matcher: QuestMatcher, patch: Partial<QuestState>) {
-    setQuests((current) => current.map((quest) => (matchesQuest(quest, matcher) ? { ...quest, ...patch } : quest)));
+    const normalizedPatch = normalizeQuestState(compactDefined(patch as Record<string, unknown>) as QuestState);
+
+    setQuests((current) =>
+      current.map((quest) =>
+        matchesQuest(quest, matcher) ? mergeQuestState(quest, normalizedPatch, 'local-patch') : quest
+      )
+    );
+  }
+
+  function getQuest(matcher: QuestMatcher) {
+    return questsRef.current.find((quest) => matchesQuest(quest, matcher)) ?? null;
   }
 
   function setNpcDialogue(npcName: string, dialogue: string) {
@@ -375,6 +500,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const questId = asString(payload.questId);
     const chainQuestId = asString(payload.chainQuestId);
     const orchestrationId = asString(payload.orchestrationId);
+
+    console.debug('[Realtime] Applying event', {
+      eventName: event.eventName,
+      eventId: event.id ?? null,
+      questId: questId ?? null,
+      chainQuestId: chainQuestId ?? null,
+      orchestrationId: orchestrationId ?? null
+    });
 
     setNotifications((current) => sortNotifications(uniqueById([{ ...event, id: event.id ?? Date.now() }, ...current])));
     if (event.id && event.id > lastEventIdRef.current) {
@@ -523,13 +656,46 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    console.info('[Realtime] Sync request started', {
+      afterId: lastEventIdRef.current,
+      wallet: address
+    });
+
     const response = await fetchRealtimeSync(lastEventIdRef.current);
     const data = response.data as SyncPayload;
+    console.info('[Realtime] Sync response received', {
+      eventCount: data.events.length,
+      afterId: lastEventIdRef.current,
+      lastEventId: data.lastEventId ?? null
+    });
     data.events.forEach((event) => applyRealtimeEvent(event));
     if (data.lastEventId) {
       lastEventIdRef.current = data.lastEventId;
       setLastEventId(data.lastEventId);
     }
+  }
+
+  async function refreshQuestFeed() {
+    if (!address || authStatus !== 'authenticated') {
+      return;
+    }
+
+    console.info('[Realtime] Refreshing quest feed from API', {
+      wallet: address
+    });
+
+    const response = await fetchActiveQuests();
+    const payload = response.data as { quests?: QuestState[] };
+    const nextQuests = payload.quests ?? [];
+
+    setQuests((current) => {
+      const merged = mergeQuestCollections(current, nextQuests, 'quest-feed-refresh');
+      console.info('[Realtime] Quest feed merge completed', {
+        incomingQuests: nextQuests.length,
+        mergedQuests: merged.length
+      });
+      return merged;
+    });
   }
 
   async function hydrate() {
@@ -539,6 +705,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     setHydrationStatus('loading');
     try {
+      console.info('[Realtime] Bootstrap hydration started', {
+        wallet: address
+      });
       const response = await fetchRealtimeBootstrap();
       const data = response.data as BootstrapPayload;
 
@@ -548,7 +717,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setPlayer(data.player);
       setGuild(data.guild);
       setLeaderboard(data.leaderboard ?? []);
-      setQuests(data.quests ?? []);
+      setQuests((current) => mergeQuestCollections(current, data.quests ?? [], 'bootstrap-hydration'));
       setInventory(uniqueInventory(data.inventory ?? []));
       setWorldState(data.worldState);
       setNarrativeState(data.narrativeState);
@@ -556,6 +725,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setNpcRelationships(data.npcRelationships ?? []);
       setNotifications(sortNotifications(data.notifications ?? []));
       setHydrationStatus('ready');
+      console.info('[Realtime] Bootstrap hydration completed', {
+        scopes: data.connection.scopes.length,
+        quests: data.quests?.length ?? 0,
+        lastEventId: data.connection.lastEventId ?? 0
+      });
     } catch (error) {
       console.error(error);
       setHydrationStatus('error');
@@ -689,8 +863,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     notifications,
     npcDialogues,
     syncNow,
+    refreshQuestFeed,
     upsertQuest,
     patchQuest,
+    getQuest,
     setNpcDialogue
   };
 
