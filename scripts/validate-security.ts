@@ -1,42 +1,57 @@
 /**
  * QuestForge AI - Security Validation
- * 
- * Tests production security safeguards:
- * 1. Replay attack prevention
- * 2. Double reward prevention
- * 3. Invalid proof rejection
- * 4. Unauthorized verifier attempts
- * 5. Treasury abuse prevention
- * 6. Rate limiting
- * 7. Anti-Sybil protection
- * 
+ *
+ * Validates the current authentication and protected-route security model:
+ * 1. Auth nonce rate limiting
+ * 2. Invalid signature rejection
+ * 3. Replay attack prevention
+ * 4. Invalid token rejection
+ * 5. Unauthenticated protected-route rejection
+ * 6. Auth input validation
+ * 7. Wrong-chain rejection
+ *
  * Usage: npx ts-node scripts/validate-security.ts
  */
 
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Load env
 const envPath = path.join(__dirname, '../.env.production');
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
 
-interface SecurityTest {
+type SecurityStatus = 'pass' | 'fail' | 'blocked';
+
+type SecurityTest = {
   name: string;
-  status: 'pass' | 'fail' | 'blocked';
+  status: SecurityStatus;
   message: string;
   details?: unknown;
-}
+};
+
+type AuthSessionPayload = {
+  accessToken: string;
+  session: {
+    id: string;
+    wallet: string;
+  };
+};
+
+type SignableWallet = {
+  address: string;
+  signMessage(message: string | Uint8Array): Promise<string>;
+};
 
 const results: SecurityTest[] = [];
+const CELO_CHAIN_ID = Number(process.env.CELO_CHAIN_ID || '42220');
 
 function recordResult(
   name: string,
-  status: 'pass' | 'fail' | 'blocked',
+  status: SecurityStatus,
   message: string,
   details?: unknown
 ) {
@@ -46,300 +61,274 @@ function recordResult(
   console.log(`${color}${icon} ${name}: ${message}\x1b[0m`);
 }
 
-async function validateSecurity() {
-  const apiUrl = process.env.API_URL || 'http://localhost:4000';
-
-  console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║       QuestForge AI - Production Security Validation        ║');
-  console.log('║                 Celo Mainnet Security Tests                 ║');
-  console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-  console.log(`🔒 Testing against API: ${apiUrl}\n`);
-
-  // Create multiple test wallets
-  const wallet1 = ethers.Wallet.createRandom();
-  const wallet2 = ethers.Wallet.createRandom();
-  const maliciousWallet = ethers.Wallet.createRandom();
-
-  try {
-    // Test 1: Rate Limiting
-    console.log('⏱️  TEST 1: Rate Limiting Protection\n');
-    
-    try {
-      let requests = 0;
-      let blocked = false;
-
-      for (let i = 0; i < 100; i++) {
-        try {
-          await axios.post(`${apiUrl}/auth/nonce`, {
-            address: maliciousWallet.address,
-          }, { timeout: 1000 });
-          requests++;
-        } catch (e) {
-          if (axios.isAxiosError(e) && e.response?.status === 429) {
-            blocked = true;
-            recordResult('Rate Limiting', 'pass', `Blocked after ${requests} requests`, { statusCode: 429 });
-            break;
-          }
-        }
-      }
-
-      if (!blocked) {
-        recordResult('Rate Limiting', 'fail', `No rate limiting detected after 100 requests`);
-      }
-    } catch (e) {
-      recordResult('Rate Limiting', 'fail', `Test error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    // Test 2: Signature Verification
-    console.log('\n🔐 TEST 2: Signature Verification\n');
-
-    try {
-      // Get nonce
-      const nonceRes = await axios.post(`${apiUrl}/auth/nonce`, {
-        address: wallet1.address,
-      }, { timeout: 5000 });
-
-      const nonce = nonceRes.data.nonce;
-      // Try with invalid signature
-      const invalidSignature = '0x' + '0'.repeat(128);
-
-      try {
-        await axios.post(`${apiUrl}/auth/verify`, {
-          address: wallet1.address,
-          nonce,
-          signature: invalidSignature,
-        }, { timeout: 5000 });
-
-        recordResult('Invalid Signature Rejection', 'fail', 'Invalid signature was accepted');
-      } catch (e) {
-        if (axios.isAxiosError(e) && (e.response?.status === 401 || e.response?.status === 400)) {
-          recordResult('Invalid Signature Rejection', 'pass', 'Invalid signature rejected', { statusCode: e.response.status });
-        } else {
-          recordResult('Invalid Signature Rejection', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // Try with modified nonce
-      const wrongMessage = `I consent to QuestForge AI accessing my account.\n\nNonce: wrong_nonce`;
-      const wrongSignature = await wallet1.signMessage(wrongMessage);
-
-      try {
-        await axios.post(`${apiUrl}/auth/verify`, {
-          address: wallet1.address,
-          nonce,
-          signature: wrongSignature,
-        }, { timeout: 5000 });
-
-        recordResult('Wrong Nonce Rejection', 'fail', 'Wrong nonce signature was accepted');
-      } catch (e) {
-        if (axios.isAxiosError(e) && (e.response?.status === 401 || e.response?.status === 400)) {
-          recordResult('Wrong Nonce Rejection', 'pass', 'Wrong nonce signature rejected', { statusCode: e.response.status });
-        } else {
-          recordResult('Wrong Nonce Rejection', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    } catch (e) {
-      recordResult('Signature Verification', 'fail', `Setup error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    // Test 3: Nonce Reuse Prevention (Replay Attack)
-    console.log('\n🔄 TEST 3: Replay Attack Prevention\n');
-
-    try {
-      // Get nonce
-      const nonceRes = await axios.post(`${apiUrl}/auth/nonce`, {
-        address: wallet2.address,
-      }, { timeout: 5000 });
-
-      const nonce = nonceRes.data.nonce;
-      const message = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
-      const signature = await wallet2.signMessage(message);
-
-      // First use - should work
-      try {
-        const auth1 = await axios.post(`${apiUrl}/auth/verify`, {
-          address: wallet2.address,
-          nonce,
-          signature,
-        }, { timeout: 5000 });
-
-        recordResult('First Nonce Use', 'pass', 'First authentication successful', { hasToken: !!auth1.data.token });
-
-        // Second use - should fail (replay attempt)
-        try {
-          await axios.post(`${apiUrl}/auth/verify`, {
-            address: wallet2.address,
-            nonce,
-            signature,
-          }, { timeout: 5000 });
-
-          recordResult('Replay Attack Prevention', 'fail', 'Same nonce accepted on replay');
-        } catch (e) {
-          if (axios.isAxiosError(e) && (e.response?.status === 401 || e.response?.status === 400)) {
-            recordResult('Replay Attack Prevention', 'pass', 'Replay attempt blocked', { statusCode: e.response.status });
-          } else {
-            recordResult('Replay Attack Prevention', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-          }
-        }
-      } catch (e) {
-        recordResult('Replay Attack Prevention', 'fail', `Setup error: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    } catch (e) {
-      recordResult('Replay Attack Prevention', 'fail', `Test error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    // Test 4: Unauthorized Proof Submission
-    console.log('\n📝 TEST 4: Proof Authorization\n');
-
-    try {
-      // Create valid auth for wallet1
-      const nonceRes = await axios.post(`${apiUrl}/auth/nonce`, {
-        address: wallet1.address,
-      }, { timeout: 5000 });
-
-      const nonce = nonceRes.data.nonce;
-      const message = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
-      const signature = await wallet1.signMessage(message);
-
-      await axios.post(`${apiUrl}/auth/verify`, {
-        address: wallet1.address,
-        nonce,
-        signature,
-      }, { timeout: 5000 });
-
-      // Try to use the same flow for wallet2's quest (cross-wallet attack)
-      // This depends on implementation, but we can test unauthenticated access
-      try {
-        await axios.post(`${apiUrl}/quests/generate`, {
-          difficulty: 1,
-        }, {
-          headers: { Authorization: 'Bearer invalid_token' },
-          timeout: 5000,
-        });
-
-        recordResult('Invalid Token Rejection', 'fail', 'Invalid token was accepted');
-      } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 401) {
-          recordResult('Invalid Token Rejection', 'pass', 'Invalid token rejected', { statusCode: 401 });
-        } else {
-          recordResult('Invalid Token Rejection', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // Try without authentication
-      try {
-        await axios.post(`${apiUrl}/quests/generate`, {
-          difficulty: 1,
-        }, { timeout: 5000 });
-
-        recordResult('Unauthenticated Quest Generation', 'fail', 'Quest generation succeeded without auth');
-      } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 401) {
-          recordResult('Unauthenticated Quest Generation', 'pass', 'Unauthenticated request rejected', { statusCode: 401 });
-        } else {
-          recordResult('Unauthenticated Quest Generation', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    } catch (e) {
-      recordResult('Proof Authorization', 'fail', `Test error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-    // Test 5: Proof Deduplication (Double Reward Prevention)
-    console.log('\n💰 TEST 5: Double Reward Prevention\n');
-
-    recordResult('Proof Deduplication', 'blocked', 'Deduplication requires full quest flow (integration test)', { note: 'See E2E tests for verification' });
-
-    // Test 6: Anti-Sybil Protection
-    console.log('\n👥 TEST 6: Anti-Sybil Protection\n');
-
-    recordResult('Progression Gating', 'blocked', 'Requires multiple quest completions (long-term test)', { note: 'Implemented in contracts' });
-
-    // Test 7: Input Validation
-    console.log('\n✔️  TEST 7: Input Validation\n');
-
-    try {
-      // Test invalid difficulty
-      try {
-        const nonceRes = await axios.post(`${apiUrl}/auth/nonce`, {
-          address: wallet1.address,
-        }, { timeout: 5000 });
-
-        const nonce = nonceRes.data.nonce;
-        const message = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
-        const signature = await wallet1.signMessage(message);
-
-        const authRes = await axios.post(`${apiUrl}/auth/verify`, {
-          address: wallet1.address,
-          nonce,
-          signature,
-        }, { timeout: 5000 });
-
-        const token = authRes.data.token;
-
-        await axios.post(`${apiUrl}/quests/generate`, {
-          difficulty: 999, // Invalid
-        }, {
-          headers: { Authorization: `Bearer ${token}` },
-          timeout: 5000,
-        });
-
-        recordResult('Invalid Difficulty Rejection', 'fail', 'Invalid difficulty was accepted');
-      } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 400) {
-          recordResult('Invalid Difficulty Rejection', 'pass', 'Invalid difficulty rejected', { statusCode: 400 });
-        } else {
-          recordResult('Invalid Difficulty Rejection', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-
-      // Test invalid address format
-      try {
-        await axios.post(`${apiUrl}/auth/nonce`, {
-          address: 'not_a_valid_address',
-        }, { timeout: 5000 });
-
-        recordResult('Invalid Address Rejection', 'fail', 'Invalid address format was accepted');
-      } catch (e) {
-        if (axios.isAxiosError(e) && e.response?.status === 400) {
-          recordResult('Invalid Address Rejection', 'pass', 'Invalid address rejected', { statusCode: 400 });
-        } else {
-          recordResult('Invalid Address Rejection', 'fail', `Unexpected error: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      }
-    } catch (e) {
-      recordResult('Input Validation', 'fail', `Test error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-  } catch (error) {
-    recordResult('Connection', 'fail', `Connection error: ${error instanceof Error ? error.message : String(error)}`);
+function resolveUrls(rawBase: string) {
+  const normalized = rawBase.replace(/\/$/, '');
+  if (normalized.endsWith('/api')) {
+    return {
+      apiUrl: normalized
+    };
   }
+
+  return {
+    apiUrl: `${normalized}/api`
+  };
+}
+
+function buildApiClient(apiUrl: string, accessToken?: string): AxiosInstance {
+  return axios.create({
+    baseURL: apiUrl,
+    timeout: 8000,
+    headers: {
+      Accept: 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+    },
+    withCredentials: true
+  });
+}
+
+async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet): Promise<AuthSessionPayload> {
+  const nonceResponse = await client.post('/auth/nonce', {
+    wallet: wallet.address,
+    chainId: CELO_CHAIN_ID
+  });
+
+  const nonce = nonceResponse.data?.nonce;
+  const message = nonceResponse.data?.message;
+  if (typeof nonce !== 'string' || typeof message !== 'string') {
+    throw new Error('Nonce response was malformed');
+  }
+
+  const signature = await wallet.signMessage(message);
+  const verifyResponse = await client.post<AuthSessionPayload>('/auth/verify', {
+    wallet: wallet.address,
+    nonce,
+    signature,
+    chainId: CELO_CHAIN_ID
+  });
+
+  if (!verifyResponse.data?.accessToken) {
+    throw new Error('Verify response did not include an access token');
+  }
+
+  return verifyResponse.data;
 }
 
 async function main() {
-  await validateSecurity();
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'http://localhost:4000';
+  const { apiUrl } = resolveUrls(rawBase);
 
-  // Summary
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║                    SECURITY SUMMARY                         ║');
+  console.log('║       QuestForge AI - Production Security Validation      ║');
+  console.log('║             Current Auth And API Security Checks          ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-  const failed = results.filter(r => r.status === 'fail').length;
+  console.log(`🔒 API base: ${apiUrl}\n`);
 
-  console.log(`✓ Passed:  ${results.filter(r => r.status === 'pass').length}`);
-  console.log(`🚫 Blocked: ${results.filter(r => r.status === 'blocked').length}`);
-  console.log(`❌ Failed:  ${failed}\n`);
+  const wallet1 = ethers.Wallet.createRandom();
+  const wallet2 = ethers.Wallet.createRandom();
+  const maliciousWallet = ethers.Wallet.createRandom();
+  const client = buildApiClient(apiUrl);
 
-  if (failed === 0) {
-    console.log('✅ All security tests PASSED! System is secure for production.\n');
-    process.exit(0);
-  } else {
-    console.log('❌ Some security tests failed. Review above for details.\n');
-    process.exit(1);
+  try {
+    console.log('⏱️  TEST 1: Rate Limiting Protection\n');
+    let requests = 0;
+    let blocked = false;
+
+    for (let i = 0; i < 100; i += 1) {
+      try {
+        await client.post('/auth/nonce', {
+          wallet: maliciousWallet.address,
+          chainId: CELO_CHAIN_ID
+        });
+        requests += 1;
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 429) {
+          blocked = true;
+          recordResult('Rate Limiting', 'pass', `Blocked nonce spam after ${requests} successful requests`, { statusCode: 429 });
+          break;
+        }
+      }
+    }
+
+    if (!blocked) {
+      recordResult('Rate Limiting', 'fail', 'No nonce rate limiting detected after 100 requests');
+    }
+
+    console.log('\n🔐 TEST 2: Signature Verification\n');
+    const nonceRes = await client.post('/auth/nonce', {
+      wallet: wallet1.address,
+      chainId: CELO_CHAIN_ID
+    });
+    const nonce = nonceRes.data.nonce as string;
+
+    try {
+      await client.post('/auth/verify', {
+        wallet: wallet1.address,
+        nonce,
+        signature: `0x${'0'.repeat(128)}`,
+        chainId: CELO_CHAIN_ID
+      });
+      recordResult('Invalid Signature Rejection', 'fail', 'Invalid signature was accepted');
+    } catch (error) {
+      if (axios.isAxiosError(error) && [400, 401].includes(error.response?.status ?? 0)) {
+        recordResult('Invalid Signature Rejection', 'pass', 'Invalid signature rejected', { statusCode: error.response?.status });
+      } else {
+        recordResult('Invalid Signature Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    try {
+      const wrongSignature = await wallet1.signMessage('wrong message');
+      await client.post('/auth/verify', {
+        wallet: wallet1.address,
+        nonce,
+        signature: wrongSignature,
+        chainId: CELO_CHAIN_ID
+      });
+      recordResult('Wrong Message Rejection', 'fail', 'Signature for the wrong message was accepted');
+    } catch (error) {
+      if (axios.isAxiosError(error) && [400, 401].includes(error.response?.status ?? 0)) {
+        recordResult('Wrong Message Rejection', 'pass', 'Signature for the wrong message was rejected', { statusCode: error.response?.status });
+      } else {
+        recordResult('Wrong Message Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    console.log('\n🔄 TEST 3: Replay Attack Prevention\n');
+    const replayNonceRes = await client.post('/auth/nonce', {
+      wallet: wallet2.address,
+      chainId: CELO_CHAIN_ID
+    });
+    const replayMessage = replayNonceRes.data.message as string;
+    const replayNonce = replayNonceRes.data.nonce as string;
+    const replaySignature = await wallet2.signMessage(replayMessage);
+
+    const firstAuth = await client.post<AuthSessionPayload>('/auth/verify', {
+      wallet: wallet2.address,
+      nonce: replayNonce,
+      signature: replaySignature,
+      chainId: CELO_CHAIN_ID
+    });
+    recordResult('First Nonce Use', 'pass', 'Initial nonce use succeeded', { sessionId: firstAuth.data.session.id });
+
+    try {
+      await client.post('/auth/verify', {
+        wallet: wallet2.address,
+        nonce: replayNonce,
+        signature: replaySignature,
+        chainId: CELO_CHAIN_ID
+      });
+      recordResult('Replay Attack Prevention', 'fail', 'A consumed nonce was accepted on replay');
+    } catch (error) {
+      if (axios.isAxiosError(error) && [401, 409].includes(error.response?.status ?? 0)) {
+        recordResult('Replay Attack Prevention', 'pass', 'Consumed nonce replay was blocked', { statusCode: error.response?.status });
+      } else {
+        recordResult('Replay Attack Prevention', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    console.log('\n🛡️  TEST 4: Protected Route Authorization\n');
+    try {
+      await client.post(
+        '/quests/generate',
+        { chain: 'Celo' },
+        {
+          headers: {
+            Authorization: 'Bearer invalid_token'
+          }
+        }
+      );
+      recordResult('Invalid Token Rejection', 'fail', 'Protected route accepted an invalid access token');
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        recordResult('Invalid Token Rejection', 'pass', 'Protected route rejected an invalid access token', { statusCode: 401 });
+      } else {
+        recordResult('Invalid Token Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    try {
+      await client.post('/quests/generate', { chain: 'Celo' });
+      recordResult('Unauthenticated Route Rejection', 'fail', 'Protected route accepted an unauthenticated request');
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        recordResult('Unauthenticated Route Rejection', 'pass', 'Protected route rejected an unauthenticated request', { statusCode: 401 });
+      } else {
+        recordResult('Unauthenticated Route Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    console.log('\n✔️  TEST 5: Input Validation\n');
+    try {
+      await client.post('/auth/nonce', {
+        wallet: 'not_a_valid_address',
+        chainId: CELO_CHAIN_ID
+      });
+      recordResult('Invalid Wallet Rejection', 'fail', 'Invalid wallet format was accepted');
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        recordResult('Invalid Wallet Rejection', 'pass', 'Invalid wallet format rejected', { statusCode: 400 });
+      } else {
+        recordResult('Invalid Wallet Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    try {
+      await client.post('/auth/nonce', {
+        wallet: wallet1.address,
+        chainId: 1
+      });
+      recordResult('Wrong Chain Rejection', 'fail', 'Wrong chain authentication request was accepted');
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 401) {
+        recordResult('Wrong Chain Rejection', 'pass', 'Wrong chain authentication request rejected', { statusCode: 401 });
+      } else {
+        recordResult('Wrong Chain Rejection', 'fail', `Unexpected error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    try {
+      const validSession = await authenticateWallet(client, wallet1);
+      const authenticatedClient = buildApiClient(apiUrl, validSession.accessToken);
+      const questResponse = await authenticatedClient.post('/quests/generate', { chain: 'Celo' });
+      recordResult(
+        'Authenticated Quest Generation',
+        questResponse.data?.quest?.id ? 'pass' : 'fail',
+        questResponse.data?.quest?.id ? 'Authenticated quest generation succeeded' : 'Authenticated quest generation response was malformed',
+        {
+          questId: questResponse.data?.quest?.id
+        }
+      );
+    } catch (error) {
+      recordResult('Authenticated Quest Generation', 'fail', `Unexpected auth-protected route failure: ${error instanceof Error ? error.message : String(error)}`);
+    }
+
+    console.log('\n🚫 TEST 6: Deferred Deep Security Checks\n');
+    recordResult(
+      'Proof Deduplication',
+      'blocked',
+      'Requires a full verifier-compatible gameplay transaction and verifier settlement path; covered by integration and contract tests.'
+    );
+  } catch (error) {
+    recordResult('Security Validation', 'fail', `Connection error: ${error instanceof Error ? error.message : String(error)}`);
   }
+
+  console.log('\n╔════════════════════════════════════════════════════════════╗');
+  console.log('║                    SECURITY SUMMARY                       ║');
+  console.log('╚════════════════════════════════════════════════════════════╝\n');
+
+  const failed = results.filter((result) => result.status === 'fail').length;
+  const passed = results.filter((result) => result.status === 'pass').length;
+  const blocked = results.filter((result) => result.status === 'blocked').length;
+
+  console.log(`✓ Passed:   ${passed}`);
+  console.log(`🚫 Blocked: ${blocked}`);
+  console.log(`❌ Failed:   ${failed}\n`);
+
+  process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error('❌ Error:', error);
   process.exit(1);
 });

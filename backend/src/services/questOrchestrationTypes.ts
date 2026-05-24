@@ -152,6 +152,16 @@ export interface QuestChainInteractionPattern {
   requireTokenApproval: boolean;
 }
 
+export interface QuestGenerationDiagnostics {
+  source: 'openai' | 'deterministic_fallback';
+  provider: 'openai' | 'deterministic';
+  model: string | null;
+  promptHash: string;
+  promptPreview: string;
+  fallbackReason: string | null;
+  generatedAt: string;
+}
+
 export interface QuestNarrativeDraft {
   title: string;
   description: string;
@@ -175,6 +185,7 @@ export interface QuestNarrativeDraft {
   chainInteraction: QuestChainInteractionPattern;
   coOpHooks: string[];
   loreContinuity: string[];
+  generation: QuestGenerationDiagnostics;
 }
 
 export interface QuestValidationInput {
@@ -227,4 +238,5 @@ export interface ValidatedQuestOutput {
   faction: QuestFactionContext;
   worldStateVersion: number;
   isEventQuest: boolean;
+  generation: QuestGenerationDiagnostics;
 }

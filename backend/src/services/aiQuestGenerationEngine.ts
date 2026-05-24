@@ -41,10 +41,14 @@ type UserWithRelations = User & {
 class AIQuestGenerationEngine {
   private diagnostics = {
     generatedCount: 0,
+    openAIGeneratedCount: 0,
+    fallbackGeneratedCount: 0,
     escalatedCount: 0,
     validationFailures: 0,
     lastGeneratedQuestId: null as string | null,
-    lastGeneratedAt: null as string | null
+    lastGeneratedAt: null as string | null,
+    lastGenerationSource: null as string | null,
+    lastPromptHash: null as string | null
   };
 
   async generateQuest(input: { wallet: string; chain: string }): Promise<QuestGenerationResult> {
@@ -252,11 +256,18 @@ class AIQuestGenerationEngine {
     });
 
     this.diagnostics.generatedCount += 1;
+    if (validated.generation.source === 'openai') {
+      this.diagnostics.openAIGeneratedCount += 1;
+    } else {
+      this.diagnostics.fallbackGeneratedCount += 1;
+    }
     if (escalated) {
       this.diagnostics.escalatedCount += 1;
     }
     this.diagnostics.lastGeneratedQuestId = persistedQuest.id;
     this.diagnostics.lastGeneratedAt = new Date().toISOString();
+    this.diagnostics.lastGenerationSource = validated.generation.source;
+    this.diagnostics.lastPromptHash = validated.generation.promptHash;
 
     logger.info('[QUEST-GENERATION] Quest generated successfully', {
       wallet,
@@ -626,15 +637,28 @@ class AIQuestGenerationEngine {
       questId: input.questId,
       orchestrationId: input.orchestrationId,
       wallet: input.wallet,
+      title: input.validated.title,
+      description: input.validated.description,
+      lore: input.validated.lore,
       difficulty: input.validated.difficulty,
+      questType: input.validated.questType,
+      objective: input.validated.objective,
+      stakeAmount: input.validated.stakeAmount,
+      rewardAmount: input.validated.rewardAmount,
+      xpReward: input.validated.xpReward,
+      durationSeconds: input.validated.durationSeconds,
+      estimatedDurationSeconds: input.validated.estimatedDurationSeconds,
       riskLevel: input.validated.riskLevel,
       npc: {
         id: input.validated.npc.npcId,
-        name: input.validated.npc.name
+        name: input.validated.npc.name,
+        openingDialogue: input.validated.npc.openingDialogue
       },
       faction: input.validated.faction,
       worldStateVersion: input.validated.worldStateVersion,
       transactionCount: input.validated.transactionCount,
+      requiredTxTypes: input.validated.requiredTxTypes,
+      generation: input.validated.generation,
       timestamp: new Date().toISOString()
     };
 

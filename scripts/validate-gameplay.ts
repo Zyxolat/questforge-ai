@@ -1,46 +1,104 @@
 /**
- * QuestForge AI - End-to-End Gameplay Validation
- * 
- * Validates complete gameplay flow on Celo Mainnet:
- * 1. Wallet connection
- * 2. Player signup/authentication
- * 3. Quest generation
- * 4. Quest start (tx #1)
- * 5. Proof submission (tx #2)
- * 6. On-chain verification
- * 7. Reward payout (tx #3)
- * 8. NFT minting
- * 9. XP updates
- * 10. Leaderboard updates
- * 
- * Usage: npx ts-node scripts/validate-gameplay.ts
+ * QuestForge AI - Wallet-Driven Gameplay Validation
+ *
+ * Validates the current production gameplay path:
+ * 1. Backend health
+ * 2. Wallet authentication challenge flow
+ * 3. Quest generation API
+ * 4. Realtime/bootstrap visibility
+ * 5. Contract deployment configuration
+ * 6. Optional onchain create -> register -> start -> register-start flow
+ *
+ * Usage:
+ *   npx ts-node scripts/validate-gameplay.ts
+ *
+ * Optional env for onchain validation:
+ *   VALIDATION_PRIVATE_KEY=0x...
+ *   VALIDATION_RPC_URL=https://forno.celo.org
  */
 
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 import { ethers } from 'ethers';
 import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Load env
 const envPath = path.join(__dirname, '../.env.production');
 if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
 
-interface GameplayTest {
+type GameplayStatus = 'pass' | 'fail' | 'pending';
+
+type GameplayTest = {
   name: string;
-  status: 'pass' | 'fail' | 'pending';
+  status: GameplayStatus;
   duration: number;
   message: string;
   details?: unknown;
-}
+};
+
+type AuthSessionPayload = {
+  accessToken: string;
+  session: {
+    id: string;
+    wallet: string;
+    expiresAt: string;
+  };
+  user: {
+    id: string;
+    wallet: string;
+  };
+};
+
+type SignableWallet = {
+  address: string;
+  signMessage(message: string | Uint8Array): Promise<string>;
+};
+
+type GeneratedQuestPayload = {
+  quest: {
+    id: string;
+    orchestrationId?: string;
+    title: string;
+    metadataUri: string;
+    metadata?: Record<string, unknown>;
+    generation?: {
+      source?: string;
+      provider?: string;
+      model?: string | null;
+      promptHash?: string;
+      fallbackReason?: string | null;
+    };
+    stakeAmount: string | number;
+    rewardAmount: string | number;
+    xpReward: string | number;
+    durationSeconds: string | number;
+    status?: string;
+  };
+};
+
+type DeploymentAddresses = {
+  FORGE_QUEST_MANAGER_ADDRESS: string;
+  REWARD_NFT_ADDRESS: string;
+  REPUTATION_ADDRESS: string;
+  TREASURY_ADDRESS: string;
+};
 
 const tests: GameplayTest[] = [];
+const CELO_CHAIN_ID = Number(process.env.CELO_CHAIN_ID || '42220');
+const DEFAULT_RPC_URL = process.env.VALIDATION_RPC_URL || process.env.CELO_RPC_URL || 'https://forno.celo.org';
+
+const FORGE_QUEST_MANAGER_ABI = [
+  'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
+  'function startQuest(uint256 questId) external payable',
+  'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
+  'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)'
+];
 
 function recordTest(
   name: string,
-  status: 'pass' | 'fail' | 'pending',
+  status: GameplayStatus,
   message: string,
   duration = 0,
   details?: unknown
@@ -51,266 +109,304 @@ function recordTest(
   console.log(`${color}${icon} [${duration}ms] ${name}: ${message}\x1b[0m`);
 }
 
-async function validateGameplay() {
-  const apiUrl = process.env.API_URL || 'http://localhost:4000';
-
-  console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║    QuestForge AI - End-to-End Gameplay Validation           ║');
-  console.log('║                 Celo Mainnet Flow Test                      ║');
-  console.log('╚════════════════════════════════════════════════════════════╝\n');
-
-  console.log(`🎮 Testing against API: ${apiUrl}\n`);
-
-  try {
-    // Test 1: API Health Check
-    console.log('📡 Step 1: API Health Check\n');
-    let startTime = Date.now();
-    try {
-      const response = await axios.get(`${apiUrl}/health`, { timeout: 5000 });
-      const duration = Date.now() - startTime;
-      recordTest('API Health', 'pass', 'Backend is running', duration, response.data);
-    } catch (e) {
-      const duration = Date.now() - startTime;
-      recordTest('API Health', 'fail', `Backend unavailable: ${e instanceof Error ? e.message : String(e)}`, duration);
-      return;
-    }
-
-    // Test 2: Authentication
-    console.log('\n🔐 Step 2: Authentication\n');
-    
-    // Create test wallet
-    const testWallet = ethers.Wallet.createRandom();
-    recordTest('Test Wallet', 'pass', `Created wallet: ${testWallet.address}`);
-
-    startTime = Date.now();
-    try {
-      const nonceResponse = await axios.post(`${apiUrl}/auth/nonce`, {
-        address: testWallet.address,
-      }, { timeout: 5000 });
-      
-      const duration = Date.now() - startTime;
-      const nonce = nonceResponse.data.nonce;
-      recordTest('Auth Nonce', 'pass', `Got nonce: ${nonce}`, duration);
-
-      // Sign nonce
-      const message = `I consent to QuestForge AI accessing my account.\n\nNonce: ${nonce}`;
-      const signature = await testWallet.signMessage(message);
-      recordTest('Message Signing', 'pass', `Signed message`, 0, { signature: signature.substring(0, 20) + '...' });
-
-      // Verify signature
-      startTime = Date.now();
-      const authResponse = await axios.post(`${apiUrl}/auth/verify`, {
-        address: testWallet.address,
-        nonce,
-        signature,
-      }, { timeout: 5000 });
-      
-      const duration2 = Date.now() - startTime;
-      const token = authResponse.data.token;
-      recordTest('Auth Verify', 'pass', `Got JWT token`, duration2, { token: token.substring(0, 20) + '...' });
-
-      // Test 3: Quest Generation
-      console.log('\n🎯 Step 3: Quest Generation\n');
-      startTime = Date.now();
-      try {
-        const questResponse = await axios.post(
-          `${apiUrl}/quests/generate`,
-          { difficulty: 1 },
-          {
-            headers: { Authorization: `Bearer ${token}` },
-            timeout: 15000,
-          }
-        );
-        
-        const duration = Date.now() - startTime;
-        const quest = questResponse.data;
-        recordTest('Quest Generation', 'pass', `Generated quest: ${quest.id}`, duration, {
-          difficulty: quest.difficulty,
-          reward: quest.reward,
-          description: quest.description?.substring(0, 50),
-        });
-
-        // Test 4: Quest Start
-        console.log('\n⚡ Step 4: Quest Start Transaction\n');
-        startTime = Date.now();
-        try {
-          const startResponse = await axios.post(
-            `${apiUrl}/quests/${quest.id}/start`,
-            {},
-            {
-              headers: { Authorization: `Bearer ${token}` },
-              timeout: 15000,
-            }
-          );
-          
-          const duration = Date.now() - startTime;
-          const questStart = startResponse.data;
-          recordTest('Quest Start (TX #1)', 'pass', `Quest started`, duration, {
-            txHash: questStart.txHash?.substring(0, 20),
-            questId: quest.id,
-          });
-
-          // Test 5: Proof Submission
-          console.log('\n📝 Step 5: Proof Submission\n');
-          const proofData = {
-            action: 'completed_task',
-            description: 'User completed the on-chain interaction task',
-            proofUri: 'ipfs://QmTest123',
-          };
-
-          startTime = Date.now();
-          try {
-            const proofResponse = await axios.post(
-              `${apiUrl}/quests/${quest.id}/submit-proof`,
-              proofData,
-              {
-                headers: { Authorization: `Bearer ${token}` },
-                timeout: 15000,
-              }
-            );
-            
-            const duration = Date.now() - startTime;
-            const proof = proofResponse.data;
-            recordTest('Proof Submission (TX #2)', 'pass', `Proof submitted`, duration, {
-              proofId: proof.id,
-              status: proof.verificationStatus,
-            });
-
-            // Test 6: Verification Status
-            console.log('\n✅ Step 6: Verification Status\n');
-            startTime = Date.now();
-            let verificationStatus = 'pending';
-            let attempts = 0;
-            
-            while (verificationStatus === 'pending' && attempts < 10) {
-              try {
-                const statusResponse = await axios.get(
-                  `${apiUrl}/quests/${quest.id}/verification-status`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` },
-                    timeout: 5000,
-                  }
-                );
-                verificationStatus = statusResponse.data.status;
-                attempts++;
-                
-                if (verificationStatus !== 'pending') {
-                  break;
-                }
-                await new Promise(resolve => setTimeout(resolve, 1000));
-              } catch {
-                break;
-              }
-            }
-            
-            const verificationDuration = Date.now() - startTime;
-            if (verificationStatus === 'verified' || verificationStatus === 'completed') {
-              recordTest('On-Chain Verification', 'pass', `Proof verified: ${verificationStatus}`, verificationDuration);
-
-              // Test 7: Reward Payout
-              console.log('\n💰 Step 7: Reward Payout & NFT Minting\n');
-              startTime = Date.now();
-              try {
-                const playerResponse = await axios.get(
-                  `${apiUrl}/players/${testWallet.address}`,
-                  {
-                    headers: { Authorization: `Bearer ${token}` },
-                    timeout: 5000,
-                  }
-                );
-                
-                const duration = Date.now() - startTime;
-                const player = playerResponse.data;
-                recordTest('Reward Payout (TX #3)', 'pass', `Rewards distributed`, duration, {
-                  totalRewards: player.totalRewards,
-                  xp: player.xp,
-                  level: player.level,
-                  nftsMinted: player.nftsMinted,
-                });
-
-                // Test 8: Leaderboard
-                console.log('\n🏆 Step 8: Leaderboard Update\n');
-                startTime = Date.now();
-                try {
-                  const leaderboardResponse = await axios.get(
-                    `${apiUrl}/leaderboard?limit=10`,
-                    {
-                      headers: { Authorization: `Bearer ${token}` },
-                      timeout: 5000,
-                    }
-                  );
-                  
-                  const duration = Date.now() - startTime;
-                  const leaderboard = leaderboardResponse.data;
-                  const playerRank = Array.isArray(leaderboard.entries)
-                    ? leaderboard.entries.findIndex(
-                        (entry: { address?: string }) => entry.address === testWallet.address
-                      )
-                    : -1;
-                  
-                  if (playerRank >= 0) {
-                    recordTest('Leaderboard Update', 'pass', `Player ranked #${playerRank + 1}`, duration);
-                  } else {
-                    recordTest('Leaderboard Update', 'pending', `Player not yet on leaderboard`, duration);
-                  }
-                } catch (e) {
-                  recordTest('Leaderboard Update', 'fail', `Failed to fetch leaderboard: ${e instanceof Error ? e.message : String(e)}`);
-                }
-              } catch (e) {
-                recordTest('Reward Payout', 'fail', `Failed to fetch player data: ${e instanceof Error ? e.message : String(e)}`);
-              }
-            } else {
-              recordTest(
-                'On-Chain Verification',
-                'fail',
-                `Verification failed or timed out: ${verificationStatus}`,
-                verificationDuration
-              );
-            }
-          } catch (e) {
-            recordTest('Proof Submission', 'fail', `Failed: ${e instanceof Error ? e.message : String(e)}`);
-          }
-        } catch (e) {
-          recordTest('Quest Start', 'fail', `Failed: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      } catch (e) {
-        recordTest('Quest Generation', 'fail', `Failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
-    } catch (e) {
-      recordTest('Auth Nonce', 'fail', `Failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-
-  } catch (error) {
-    recordTest('Connection', 'fail', `Connection error: ${error instanceof Error ? error.message : String(error)}`);
+function loadDeploymentAddresses(): DeploymentAddresses {
+  const deploymentPath = path.join(__dirname, '../contracts/deployments/celo-addresses.json');
+  if (fs.existsSync(deploymentPath)) {
+    const parsed = JSON.parse(fs.readFileSync(deploymentPath, 'utf8')) as DeploymentAddresses;
+    return parsed;
   }
+
+  const manager = process.env.FORGE_QUEST_MANAGER_ADDRESS || process.env.VITE_FORGE_QUEST_MANAGER_ADDRESS;
+  const rewardNft = process.env.REWARD_NFT_ADDRESS || process.env.VITE_REWARD_NFT_ADDRESS;
+  const reputation = process.env.REPUTATION_ADDRESS || process.env.VITE_REPUTATION_ADDRESS;
+  const treasury = process.env.TREASURY_ADDRESS || process.env.VITE_TREASURY_ADDRESS;
+
+  if (!manager || !rewardNft || !reputation || !treasury) {
+    throw new Error('Missing deployment addresses. Provide env vars or contracts/deployments/celo-addresses.json.');
+  }
+
+  return {
+    FORGE_QUEST_MANAGER_ADDRESS: manager,
+    REWARD_NFT_ADDRESS: rewardNft,
+    REPUTATION_ADDRESS: reputation,
+    TREASURY_ADDRESS: treasury
+  };
+}
+
+function resolveUrls(rawBase: string) {
+  const normalized = rawBase.replace(/\/$/, '');
+  if (normalized.endsWith('/api')) {
+    return {
+      rootUrl: normalized.slice(0, -4),
+      apiUrl: normalized
+    };
+  }
+
+  return {
+    rootUrl: normalized,
+    apiUrl: `${normalized}/api`
+  };
+}
+
+function buildApiClient(apiUrl: string, accessToken?: string) {
+  return axios.create({
+    baseURL: apiUrl,
+    timeout: 15000,
+    headers: {
+      Accept: 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {})
+    },
+    withCredentials: true
+  });
+}
+
+async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet): Promise<AuthSessionPayload> {
+  const nonceResponse = await client.post('/auth/nonce', {
+    wallet: wallet.address,
+    chainId: CELO_CHAIN_ID
+  });
+
+  const nonce = nonceResponse.data?.nonce;
+  const message = nonceResponse.data?.message;
+  if (typeof nonce !== 'string' || typeof message !== 'string') {
+    throw new Error('Auth nonce response was malformed');
+  }
+
+  const signature = await wallet.signMessage(message);
+  const verifyResponse = await client.post<AuthSessionPayload>('/auth/verify', {
+    wallet: wallet.address,
+    nonce,
+    signature,
+    chainId: CELO_CHAIN_ID
+  });
+
+  if (!verifyResponse.data?.accessToken) {
+    throw new Error('Auth verify response did not include an access token');
+  }
+
+  return verifyResponse.data;
 }
 
 async function main() {
-  await validateGameplay();
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'http://localhost:4000';
+  const { rootUrl, apiUrl } = resolveUrls(rawBase);
+  const deployment = loadDeploymentAddresses();
+  const validationPrivateKey = process.env.VALIDATION_PRIVATE_KEY?.trim();
+  const authWallet = validationPrivateKey ? new ethers.Wallet(validationPrivateKey) : ethers.Wallet.createRandom();
 
-  // Summary
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║                    VALIDATION SUMMARY                       ║');
+  console.log('║      QuestForge AI - Wallet Gameplay Validation           ║');
+  console.log('║            Current Celo Mainnet Production Flow           ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
-  const passed = tests.filter(t => t.status === 'pass').length;
-  const failed = tests.filter(t => t.status === 'fail').length;
-  const pending = tests.filter(t => t.status === 'pending').length;
+  console.log(`🎮 Backend root: ${rootUrl}`);
+  console.log(`🔌 API base:     ${apiUrl}`);
+  console.log(`👛 Test wallet:  ${authWallet.address}`);
+  console.log(`⛓️  Chain ID:     ${CELO_CHAIN_ID}\n`);
+
+  try {
+    let startedAt = Date.now();
+    try {
+      const response = await axios.get(`${rootUrl}/health`, { timeout: 5000 });
+      recordTest('Backend Health', 'pass', 'Backend health endpoint responded', Date.now() - startedAt, response.data);
+    } catch (error) {
+      recordTest('Backend Health', 'fail', `Backend unavailable: ${error instanceof Error ? error.message : String(error)}`, Date.now() - startedAt);
+      throw error;
+    }
+
+    const unauthenticatedClient = buildApiClient(apiUrl);
+
+    startedAt = Date.now();
+    const authSession = await authenticateWallet(unauthenticatedClient, authWallet);
+    recordTest(
+      'Wallet Authentication',
+      'pass',
+      `Authenticated wallet session ${authSession.session.id}`,
+      Date.now() - startedAt,
+      {
+        wallet: authSession.session.wallet,
+        userId: authSession.user.id,
+        expiresAt: authSession.session.expiresAt
+      }
+    );
+
+    const authenticatedClient = buildApiClient(apiUrl, authSession.accessToken);
+
+    startedAt = Date.now();
+    const generatedQuestResponse = await authenticatedClient.post<GeneratedQuestPayload>('/quests/generate', {
+      chain: 'Celo'
+    });
+    const generatedQuest = generatedQuestResponse.data.quest;
+    const generation = generatedQuest.generation || {};
+    const promptHash = generation.promptHash || (generatedQuest.metadata?.generation as { promptHash?: string } | undefined)?.promptHash;
+    const hasGenerationDiagnostics = Boolean(generation.provider && promptHash);
+
+    recordTest(
+      'Quest Generation',
+      hasGenerationDiagnostics ? 'pass' : 'fail',
+      hasGenerationDiagnostics
+        ? `Generated quest ${generatedQuest.id} with ${generation.source || 'unknown'} narrative provenance`
+        : `Generated quest ${generatedQuest.id} but provenance metadata was incomplete`,
+      Date.now() - startedAt,
+      {
+        questId: generatedQuest.id,
+        orchestrationId: generatedQuest.orchestrationId,
+        provider: generation.provider,
+        model: generation.model,
+        promptHash,
+        fallbackReason: generation.fallbackReason ?? null
+      }
+    );
+
+    startedAt = Date.now();
+    const realtimeBootstrap = await authenticatedClient.get('/realtime/bootstrap');
+    const realtimeQuests = Array.isArray(realtimeBootstrap.data?.quests) ? realtimeBootstrap.data.quests : [];
+    const foundQuest = realtimeQuests.find((quest: { id?: string }) => quest.id === generatedQuest.id);
+
+    recordTest(
+      'Realtime Bootstrap',
+      foundQuest ? 'pass' : 'fail',
+      foundQuest ? `Generated quest ${generatedQuest.id} is visible in realtime bootstrap` : `Generated quest ${generatedQuest.id} was not present in realtime bootstrap`,
+      Date.now() - startedAt,
+      {
+        questCount: realtimeQuests.length
+      }
+    );
+
+    startedAt = Date.now();
+    const provider = new ethers.JsonRpcProvider(DEFAULT_RPC_URL, CELO_CHAIN_ID);
+    const code = await provider.getCode(deployment.FORGE_QUEST_MANAGER_ADDRESS);
+    recordTest(
+      'Contract Deployment',
+      code !== '0x' ? 'pass' : 'fail',
+      code !== '0x'
+        ? `ForgeQuestManager deployed at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`
+        : `No bytecode found at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`,
+      Date.now() - startedAt,
+      {
+        manager: deployment.FORGE_QUEST_MANAGER_ADDRESS,
+        treasury: deployment.TREASURY_ADDRESS
+      }
+    );
+
+    if (!validationPrivateKey) {
+      recordTest(
+        'Wallet Tx Flow',
+        'pending',
+        'Set VALIDATION_PRIVATE_KEY to execute createQuest -> register-onchain -> startQuest -> register-start against the live deployment.'
+      );
+    } else {
+      const signer = new ethers.Wallet(validationPrivateKey, provider);
+      if (signer.address.toLowerCase() !== authWallet.address.toLowerCase()) {
+        throw new Error('VALIDATION_PRIVATE_KEY did not produce the authenticated wallet address');
+      }
+
+      const contract = new ethers.Contract(
+        deployment.FORGE_QUEST_MANAGER_ADDRESS,
+        FORGE_QUEST_MANAGER_ABI,
+        signer
+      );
+
+      startedAt = Date.now();
+      const createTx = await contract.createQuest(
+        generatedQuest.title,
+        generatedQuest.metadataUri,
+        ethers.parseEther(String(generatedQuest.stakeAmount)),
+        ethers.parseEther(String(generatedQuest.rewardAmount)),
+        BigInt(generatedQuest.xpReward),
+        BigInt(generatedQuest.durationSeconds)
+      );
+      const createReceipt = await createTx.wait();
+
+      const parsedCreatedLog = createReceipt?.logs
+        ?.map((log: ethers.Log) => {
+          try {
+            return contract.interface.parseLog(log);
+          } catch {
+            return null;
+          }
+        })
+        .find((log: ethers.LogDescription | null) => log?.name === 'QuestCreated');
+
+      const chainQuestId = parsedCreatedLog?.args?.questId?.toString();
+      if (!chainQuestId) {
+        throw new Error('Quest creation receipt did not include QuestCreated');
+      }
+
+      await authenticatedClient.post('/quests/register-onchain', {
+        questId: generatedQuest.id,
+        chainQuestId,
+        creationTxHash: createTx.hash
+      });
+
+      recordTest(
+        'Onchain Quest Creation',
+        'pass',
+        `Created and registered chain quest ${chainQuestId}`,
+        Date.now() - startedAt,
+        {
+          txHash: createTx.hash,
+          chainQuestId
+        }
+      );
+
+      startedAt = Date.now();
+      const onchainQuest = await contract.quests(BigInt(chainQuestId));
+      const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
+      const gasEstimate = await contract.startQuest.estimateGas(BigInt(chainQuestId), { value: stakeValue });
+      const startTx = await contract.startQuest(BigInt(chainQuestId), {
+        value: stakeValue,
+        gasLimit: gasEstimate + gasEstimate / 5n
+      });
+      await startTx.wait();
+
+      await authenticatedClient.post('/quests/register-start', {
+        questId: generatedQuest.id,
+        chainQuestId,
+        startTxHash: startTx.hash
+      });
+
+      recordTest(
+        'Onchain Quest Start',
+        'pass',
+        `Started and registered chain quest ${chainQuestId}`,
+        Date.now() - startedAt,
+        {
+          txHash: startTx.hash,
+          chainQuestId,
+          stakeValueWei: stakeValue.toString(),
+          gasEstimate: gasEstimate.toString()
+        }
+      );
+
+      recordTest(
+        'Proof / Settlement Flow',
+        'pending',
+        'Proof submission was not auto-executed because verifier-compatible gameplay transactions depend on quest-specific rules.'
+      );
+    }
+  } catch (error) {
+    recordTest('Gameplay Validation', 'fail', error instanceof Error ? error.message : String(error));
+  }
+
+  console.log('\n╔════════════════════════════════════════════════════════════╗');
+  console.log('║                     VALIDATION SUMMARY                     ║');
+  console.log('╚════════════════════════════════════════════════════════════╝\n');
+
+  const passed = tests.filter((test) => test.status === 'pass').length;
+  const failed = tests.filter((test) => test.status === 'fail').length;
+  const pending = tests.filter((test) => test.status === 'pending').length;
 
   console.log(`✓ Passed:  ${passed}`);
-  console.log(`❌ Failed:  ${failed}`);
-  console.log(`⏳ Pending: ${pending}\n`);
+  console.log(`⏳ Pending: ${pending}`);
+  console.log(`❌ Failed:  ${failed}\n`);
 
-  if (failed === 0) {
-    console.log('✅ All gameplay validation tests PASSED!\n');
-    process.exit(0);
-  } else {
-    console.log('❌ Some tests failed. Review above for details.\n');
+  if (failed > 0) {
     process.exit(1);
   }
 }
 
-main().catch(error => {
+main().catch((error) => {
   console.error('❌ Error:', error);
   process.exit(1);
 });

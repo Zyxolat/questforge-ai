@@ -117,7 +117,8 @@ class QuestValidationEngine {
       npc: input.narrative.npc,
       faction: input.narrative.faction,
       worldStateVersion: input.worldState.version,
-      isEventQuest: input.worldState.activeEvents.length > 0
+      isEventQuest: input.worldState.activeEvents.length > 0,
+      generation: input.narrative.generation
     };
   }
 
@@ -245,6 +246,7 @@ class QuestValidationEngine {
         treasuryCap: input.treasuryCap,
         activeWorldModifiers: input.activeWorldModifiers
       },
+      generation: input.narrative.generation,
       orchestration: {
         missionStructure: input.narrative.missionStructure,
         missionObjectives: input.narrative.missionObjectives,

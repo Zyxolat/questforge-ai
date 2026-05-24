@@ -1,8 +1,10 @@
+import crypto from 'crypto';
 import OpenAI from 'openai';
 import { env } from '../config/env';
 import { aiValidator } from './aiSafety';
 import { logger } from './logger';
 import type {
+  QuestGenerationDiagnostics,
   QuestChainInteractionPattern,
   PlayerQuestProfile,
   QuestBranchingHook,
@@ -55,6 +57,7 @@ type NarrativeResponseShape = {
 const openai = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 const MAX_ITEMS = 4;
 const RISK_LEVELS = new Set(['low', 'moderate', 'high', 'extreme']);
+const OPENAI_MODEL = 'gpt-4o-mini';
 
 function safeJsonParse<T>(value: string): T | null {
   try {
@@ -91,6 +94,14 @@ function normalizeStringArray(value: unknown, fallback: string[], maxLength = 16
     .filter(Boolean);
 
   return items.length > 0 ? items.slice(0, MAX_ITEMS) : fallback;
+}
+
+function hashPrompt(value: string) {
+  return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function promptPreview(value: string) {
+  return value.replace(/\s+/g, ' ').trim().slice(0, 240);
 }
 
 function buildAIQuestPrompt(context: NarrativeContext) {
@@ -136,12 +147,39 @@ Rules:
 - Objectives must support a multi-step quest progression, not a single action.
 - Reference recurring lore, factions, and the named NPC.
 - Co-op hooks must be optional and future clan compatible.
+- Title must feel like a distinct fantasy operation name, never a placeholder label.
+- Description must explain the exact onchain action in player-facing language.
+- Lore must mention what is at stake in the current season and faction conflict.
+- At least one objective should explicitly describe the real blockchain action the player performs.
 - Output JSON only.`;
 }
 
 class QuestNarrativeEngine {
   async generateQuestNarrative(context: NarrativeContext): Promise<QuestNarrativeDraft> {
-    const fallback = this.buildDeterministicNarrative(context);
+    const prompt = buildAIQuestPrompt(context);
+    const promptHash = hashPrompt(prompt);
+    const promptSummary = promptPreview(prompt);
+    const baseFallbackGeneration: QuestGenerationDiagnostics = {
+      source: 'deterministic_fallback',
+      provider: 'deterministic',
+      model: null,
+      promptHash,
+      promptPreview: promptSummary,
+      fallbackReason: !openai ? 'OPENAI_API_KEY not configured' : 'OpenAI fallback requested',
+      generatedAt: new Date().toISOString()
+    };
+    const fallback = this.buildDeterministicNarrative(context, baseFallbackGeneration);
+
+    logger.info('[NARRATIVE] Quest generation prompt prepared', {
+      wallet: context.wallet,
+      difficulty: context.difficulty,
+      rewardAmount: context.rewardAmount,
+      stakeAmount: context.stakeAmount,
+      providerEnabled: Boolean(openai),
+      model: openai ? OPENAI_MODEL : null,
+      promptHash,
+      promptPreview: promptSummary
+    });
 
     if (!openai) {
       return fallback;
@@ -149,19 +187,19 @@ class QuestNarrativeEngine {
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: OPENAI_MODEL,
         response_format: { type: 'json_object' },
-        temperature: 0.45,
+        temperature: 0.78,
         max_tokens: 1100,
         messages: [
           {
             role: 'system',
             content:
-              'You generate persistent, verifier-safe, lore-consistent quest narratives for an onchain RPG. Do not introduce unsafe or protocol-critical values.'
+              'You generate persistent, verifier-safe, lore-consistent quest narratives for an onchain RPG. Do not introduce unsafe or protocol-critical values. Make titles vivid, distinct, and worthy of a fantasy operation log.'
           },
           {
             role: 'user',
-            content: buildAIQuestPrompt(context)
+            content: prompt
           }
         ]
       });
@@ -169,6 +207,11 @@ class QuestNarrativeEngine {
       const raw = response.choices[0]?.message?.content || '';
       const parsed = safeJsonParse<NarrativeResponseShape>(raw);
       if (!parsed) {
+        logger.warn('[NARRATIVE] OpenAI returned non-JSON quest payload, using deterministic fallback', {
+          wallet: context.wallet,
+          model: OPENAI_MODEL,
+          promptHash
+        });
         return fallback;
       }
 
@@ -178,18 +221,40 @@ class QuestNarrativeEngine {
       if (hallCheck.isHallucinated) {
         logger.warn('[NARRATIVE] Falling back after hallucination detection', {
           wallet: context.wallet,
+          model: OPENAI_MODEL,
+          promptHash,
           reason: hallCheck.reason
         });
         return fallback;
       }
 
-      return this.mergeWithFallback(parsed, fallback);
+      logger.info('[NARRATIVE] OpenAI quest narrative accepted', {
+        wallet: context.wallet,
+        model: OPENAI_MODEL,
+        promptHash
+      });
+
+      return this.mergeWithFallback(parsed, fallback, {
+        source: 'openai',
+        provider: 'openai',
+        model: OPENAI_MODEL,
+        promptHash,
+        promptPreview: promptSummary,
+        fallbackReason: null,
+        generatedAt: new Date().toISOString()
+      });
     } catch (error) {
       logger.warn('[NARRATIVE] OpenAI generation failed, using deterministic fallback', {
         wallet: context.wallet,
+        model: OPENAI_MODEL,
+        promptHash,
         error: error instanceof Error ? error.message : 'Unknown narrative generation failure'
       });
-      return fallback;
+      return this.buildDeterministicNarrative(context, {
+        ...baseFallbackGeneration,
+        fallbackReason: error instanceof Error ? error.message : 'Unknown narrative generation failure',
+        generatedAt: new Date().toISOString()
+      });
     }
   }
 
@@ -202,7 +267,7 @@ class QuestNarrativeEngine {
 
     try {
       const response = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: OPENAI_MODEL,
         temperature: 0.65,
         max_tokens: 180,
         messages: [
@@ -228,7 +293,11 @@ class QuestNarrativeEngine {
     }
   }
 
-  private mergeWithFallback(raw: NarrativeResponseShape, fallback: QuestNarrativeDraft): QuestNarrativeDraft {
+  private mergeWithFallback(
+    raw: NarrativeResponseShape,
+    fallback: QuestNarrativeDraft,
+    generation: QuestGenerationDiagnostics
+  ): QuestNarrativeDraft {
     const title = normalizeString(raw.title, fallback.title, 120);
     const description = normalizeString(raw.description, fallback.description, 320);
     const lore = normalizeString(raw.lore, fallback.lore, 500);
@@ -262,6 +331,7 @@ class QuestNarrativeEngine {
       branchingHooks,
       coOpHooks,
       loreContinuity,
+      generation,
       npc: {
         ...fallback.npc,
         openingDialogue
@@ -423,7 +493,10 @@ class QuestNarrativeEngine {
     };
   }
 
-  private buildDeterministicNarrative(context: NarrativeContext): QuestNarrativeDraft {
+  private buildDeterministicNarrative(
+    context: NarrativeContext,
+    generation: QuestGenerationDiagnostics
+  ): QuestNarrativeDraft {
     const worldTheme = context.worldState.questThemes[0] ?? 'stabilize an unstable frontier';
     const seasonalHook = context.worldState.seasonalContent[0] ?? context.worldState.season.theme;
     const primaryFaction = context.worldState.factions[0];
@@ -437,6 +510,9 @@ class QuestNarrativeEngine {
     const memoryReferences = context.npc.memoryReferences.length
       ? context.npc.memoryReferences
       : context.playerProfile.relationshipSummary.slice(0, 2);
+    const titleLead = this.pickTitleLead(primaryInteraction, riskLevel);
+    const themeAnchor = this.pickThemeAnchor(worldTheme, seasonalHook, primaryFaction.name);
+    const titleSuffix = this.pickTitleSuffix(context.difficulty, context.worldState.activeEvents.length);
 
     const objectives: QuestObjectiveDraft[] = [
       {
@@ -522,9 +598,9 @@ class QuestNarrativeEngine {
     ];
 
     return {
-      title: `${context.npc.name}'s ${context.worldState.season.label} Mandate`,
-      description: `Coordinate a ${worldTheme} mission for ${primaryFaction.name}, navigate faction pressure from ${opposingFaction.name}, and return with proof that survives deterministic settlement.`,
-      lore: `${context.npc.name} remembers ${memoryReferences.join(' and ') || 'your recent progress'} and believes this operation can shift the balance of ${context.worldState.activeConflicts[0]?.label ?? 'the frontier conflict'}.`,
+      title: `${titleLead} the ${themeAnchor} ${titleSuffix}`,
+      description: `Coordinate a ${worldTheme} operation for ${primaryFaction.name}. You will start the quest by staking ${context.stakeAmount.toFixed(4)} CELO, complete a verifier-compatible ${primaryInteraction.replace('_', ' ')} action on Celo, and return with proof that survives deterministic settlement.`,
+      lore: `${context.npc.name} remembers ${memoryReferences.join(' and ') || 'your recent progress'} and believes this operation can shift the balance of ${context.worldState.activeConflicts[0]?.label ?? 'the frontier conflict'}. ${opposingFaction.name} is already moving against the corridor, so the chain record itself must become your witness.`,
       missionStructure: 'Three-act onchain operation with preparation, live execution, and verifier-backed resolution.',
       missionObjectives: objectives,
       missionChapters: [
@@ -604,7 +680,8 @@ class QuestNarrativeEngine {
       loreContinuity: [
         `${context.npc.name} references the player streak of ${context.playerProfile.questHistory.questStreak}.`,
         `${primaryFaction.name} is tracking the same conflict across multiple quests.`
-      ]
+      ],
+      generation
     };
   }
 
@@ -616,6 +693,35 @@ class QuestNarrativeEngine {
   private pickRarity(worldState: WorldStateSnapshotData) {
     const entries = Object.entries(worldState.rarityWeights).sort((left, right) => right[1] - left[1]);
     return (entries[0]?.[0] ?? 'rare') as QuestNarrativeDraft['worldInfluence']['rarity'];
+  }
+
+  private pickTitleLead(primaryInteraction: QuestChainInteractionPattern['primary'], riskLevel: QuestNarrativeDraft['riskLevel']) {
+    const byInteraction: Record<QuestChainInteractionPattern['primary'], string[]> = {
+      native_transfer: ['Stabilize', 'Secure', 'Escort'],
+      contract_call: ['Reignite', 'Fortify', 'Restore'],
+      token_approval: ['Recover', 'Unseal', 'Sanction']
+    };
+    const options = byInteraction[primaryInteraction];
+    if (riskLevel === 'extreme') {
+      return options[1] ?? options[0];
+    }
+    return options[0];
+  }
+
+  private pickThemeAnchor(worldTheme: string, seasonalHook: string, factionName: string) {
+    const candidates = [worldTheme, seasonalHook, factionName]
+      .flatMap((entry) => entry.split(/[^a-zA-Z0-9]+/))
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length >= 4);
+
+    return candidates[0] ?? 'Onchain';
+  }
+
+  private pickTitleSuffix(difficulty: number, activeEventCount: number) {
+    if (difficulty >= 5) return 'Sigil';
+    if (difficulty >= 4) return activeEventCount > 0 ? 'Conduit' : 'Relay';
+    if (activeEventCount > 1) return 'Accord';
+    return 'Mandate';
   }
 }
 
