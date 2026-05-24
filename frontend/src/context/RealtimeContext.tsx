@@ -74,12 +74,19 @@ export type QuestState = {
   orchestrationId?: string;
   title?: string;
   description?: string;
+  lore?: string;
   difficulty?: number | string;
+  questType?: string;
+  objective?: string;
   rewardAmount?: number | string;
   stakeAmount?: number | string;
   xpReward?: number | string;
   durationSeconds?: number | string;
+  estimatedDurationSeconds?: number | string;
+  requiredTxTypes?: string[];
   metadataUri?: string;
+  metadata?: JsonObject;
+  generation?: JsonObject;
   status?: string;
   treasuryPayout?: TreasuryPayoutState | null;
   proofTx?: string | null;
@@ -379,11 +386,28 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       case 'quest:generated':
       case 'quest:escalated':
         if (questId) {
+          const generation = asObject(payload.generation);
+          const npc = asObject(payload.npc);
           upsertQuest({
             id: questId,
             orchestrationId,
+            title: asString(payload.title),
+            description: asString(payload.description),
+            lore: asString(payload.lore),
             difficulty: payload.difficulty as QuestState['difficulty'],
+            questType: asString(payload.questType),
+            objective: asString(payload.objective),
+            stakeAmount: payload.stakeAmount as QuestState['stakeAmount'],
+            rewardAmount: payload.rewardAmount as QuestState['rewardAmount'],
+            xpReward: payload.xpReward as QuestState['xpReward'],
+            durationSeconds: payload.durationSeconds as QuestState['durationSeconds'],
+            estimatedDurationSeconds: payload.estimatedDurationSeconds as QuestState['estimatedDurationSeconds'],
+            requiredTxTypes: Array.isArray(payload.requiredTxTypes)
+              ? payload.requiredTxTypes.filter((value): value is string => typeof value === 'string')
+              : undefined,
             riskLevel: payload.riskLevel,
+            generation: generation ?? undefined,
+            npc: npc ?? undefined,
             worldStateVersion: payload.worldStateVersion,
             status: asString(payload.status) ?? 'AVAILABLE'
           });

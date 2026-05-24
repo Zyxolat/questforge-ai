@@ -6,9 +6,10 @@ import GlowButton from '../components/GlowButton';
 import LoadingScreen from '../components/LoadingScreen';
 import { QuestState, useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
-import { extractAuthFailure, fetchDailyMissions, generateQuest, submitProofForVerification } from '../lib/api';
+import { extractAuthFailure, fetchDailyMissions, generateQuest, registerOnchainQuest, registerQuestStart, submitProofForVerification } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
+import { describeTransactionFailure, formatCeloAmount } from '../lib/transactionDiagnostics';
 
 type DailyMission = {
   id: string;
@@ -26,6 +27,14 @@ type GeneratedQuestTemplate = QuestState & {
   durationSeconds: string | number;
 };
 
+type GenerationProfile = {
+  source?: string;
+  provider?: string;
+  model?: string | null;
+  promptHash?: string | null;
+  fallbackReason?: string | null;
+};
+
 function questMatcher(quest: QuestState | null) {
   return {
     id: quest?.id ?? undefined,
@@ -34,10 +43,43 @@ function questMatcher(quest: QuestState | null) {
   };
 }
 
+function asObject(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function resolveGenerationProfile(quest: QuestState | null): GenerationProfile | null {
+  const direct = asObject(quest?.generation);
+  if (direct) {
+    return direct as GenerationProfile;
+  }
+
+  const metadata = asObject(quest?.metadata);
+  const generation = metadata ? asObject(metadata.generation) : null;
+  return generation as GenerationProfile | null;
+}
+
+function formatActionFailure(error: unknown, fallbackLabel: string) {
+  const txFailure = describeTransactionFailure(error);
+  if (txFailure.kind !== 'unknown') {
+    const details = txFailure.details.slice(0, 2).join(' ');
+    return details ? `${txFailure.message} ${details}`.trim() : txFailure.message;
+  }
+
+  const authFailure = extractAuthFailure(error);
+  const detailText = authFailure.details?.length ? ` ${authFailure.details.join(' ')}` : '';
+  if (authFailure.code !== 'AUTH_UNKNOWN' || authFailure.message) {
+    return `${authFailure.message}${detailText}`.trim();
+  }
+
+  return fallbackLabel;
+}
+
 export default function CommandCenter() {
   const {
     address,
+    balance,
     signer,
+    provider,
     network,
     chainId,
     isCorrectNetwork,
@@ -172,13 +214,22 @@ export default function CommandCenter() {
         BigInt(template.xpReward),
         BigInt(template.durationSeconds)
       );
+      console.info('[CommandCenter] createQuest transaction submitted', {
+        hash: tx.hash,
+        contract: contractAddresses.forgeQuestManagerAddress
+      });
       const receipt = await tx.wait();
       const chainQuestId = parseQuestCreatedId(receipt);
       if (!chainQuestId) {
         throw new Error('Quest creation receipt did not include a quest id');
       }
 
-      upsertQuest({
+      console.info('[CommandCenter] createQuest confirmed', {
+        hash: tx.hash,
+        chainQuestId
+      });
+
+      let persistedQuest: QuestState = {
         ...template,
         chainQuestId,
         creator: address,
@@ -186,28 +237,39 @@ export default function CommandCenter() {
         treasuryPayout: {
           status: 'RESERVED'
         }
-      });
-      setMessage('Quest forged onchain. Realtime state is tracking it now.');
+      };
+
+      try {
+        const registrationResponse = await registerOnchainQuest(String(template.id), chainQuestId, tx.hash);
+        const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
+        if (registeredQuest) {
+          persistedQuest = {
+            ...persistedQuest,
+            ...registeredQuest
+          };
+        }
+      } catch (registrationError) {
+        console.error('[CommandCenter] Backend onchain quest registration failed', registrationError);
+        setMessage(`Quest forged onchain, but backend registration is still catching up. ${formatActionFailure(registrationError, 'Backend sync is delayed.')}`);
+      }
+
+      upsertQuest(persistedQuest);
+      setMessage((current) =>
+        typeof current === 'string' && current.startsWith('Quest forged onchain')
+          ? current
+          : 'Quest forged onchain. Realtime state is tracking it now.'
+      );
       await syncNow();
     } catch (error) {
       console.error('[CommandCenter] Generate quest flow failed', error);
-      const failure = extractAuthFailure(error);
-      console.debug('[CommandCenter] Generate quest failure extracted', {
-        code: failure.code,
-        status: failure.status,
-        message: failure.message,
-        details: failure.details
-      });
-
-      const detailText = failure.details?.length ? ` ${failure.details.join(' ')}` : '';
-      setMessage(`${failure.message}${detailText}`.trim());
+      setMessage(formatActionFailure(error, 'Quest creation failed.'));
     } finally {
       setLoading(false);
     }
   }
 
   async function handleStartQuest() {
-    if (!address || !forgeQuestManager || !activeQuest) return;
+    if (!address || !forgeQuestManager || !activeQuest || !signer) return;
     if (!(await requireReadyAuth('starting quests'))) {
       return;
     }
@@ -216,23 +278,135 @@ export default function CommandCenter() {
     setMessage('Submitting your stake to the Forge...');
 
     try {
-      const stakeValue = ethers.parseEther(String(activeQuest.stakeAmount));
-      const tx = await forgeQuestManager.startQuest(BigInt(String(activeQuest.chainQuestId)), { value: stakeValue });
+      if (!activeQuest.chainQuestId) {
+        throw new Error('Quest is missing its onchain id. Wait for backend sync or regenerate the quest.');
+      }
+
+      if (!provider) {
+        throw new Error('Wallet provider is unavailable. Reconnect your wallet and try again.');
+      }
+
+      const signerAddress = await signer.getAddress();
+      const chainQuestId = BigInt(String(activeQuest.chainQuestId));
+      const onchainQuest = await forgeQuestManager.quests(chainQuestId);
+      if (Number(onchainQuest.status) !== 0) {
+        throw new Error(`Quest is no longer available to start. Onchain status=${Number(onchainQuest.status)}.`);
+      }
+
+      const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
+      const availableBalance = await provider.getBalance(signerAddress);
+      const feeData = await provider.getFeeData();
+      const fallbackGasPrice = await provider
+        .send('eth_gasPrice', [])
+        .then((value) => ethers.getBigInt(value))
+        .catch(() => 0n);
+      const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? fallbackGasPrice;
+
+      console.info('[CommandCenter] startQuest preflight:start', {
+        wallet: signerAddress,
+        contract: contractAddresses.forgeQuestManagerAddress,
+        chainId,
+        network,
+        chainQuestId: chainQuestId.toString(),
+        stakeValueWei: stakeValue.toString(),
+        stakeValueCelo: formatCeloAmount(stakeValue),
+        availableBalanceWei: availableBalance.toString(),
+        availableBalanceCelo: formatCeloAmount(availableBalance),
+        gasPriceWei: gasPrice.toString()
+      });
+
+      if (availableBalance < stakeValue) {
+        throw new Error(
+          `Insufficient funds for the quest stake. Need ${formatCeloAmount(stakeValue)} CELO and wallet has ${formatCeloAmount(availableBalance)} CELO.`
+        );
+      }
+
+      let gasEstimate: bigint;
+      try {
+        gasEstimate = await forgeQuestManager.startQuest.estimateGas(chainQuestId, { value: stakeValue });
+      } catch (preflightError) {
+        const preflightFailure = describeTransactionFailure(preflightError);
+        console.error('[CommandCenter] startQuest gas estimation failed', {
+          wallet: signerAddress,
+          chainQuestId: chainQuestId.toString(),
+          stakeValueWei: stakeValue.toString(),
+          failureKind: preflightFailure.kind,
+          details: preflightFailure.details
+        });
+        throw preflightError;
+      }
+
+      const gasLimit = gasEstimate + gasEstimate / 5n;
+      const estimatedGasCost = gasEstimate * gasPrice;
+
+      console.info('[CommandCenter] startQuest preflight:success', {
+        wallet: signerAddress,
+        chainQuestId: chainQuestId.toString(),
+        gasEstimate: gasEstimate.toString(),
+        gasLimit: gasLimit.toString(),
+        gasPriceWei: gasPrice.toString(),
+        estimatedGasCostWei: estimatedGasCost.toString(),
+        estimatedGasCostCelo: formatCeloAmount(estimatedGasCost)
+      });
+
+      if (availableBalance < stakeValue + estimatedGasCost) {
+        throw new Error(
+          `Insufficient funds for stake plus gas. Need about ${formatCeloAmount(stakeValue + estimatedGasCost)} CELO and wallet has ${formatCeloAmount(availableBalance)} CELO.`
+        );
+      }
+
+      const tx = await forgeQuestManager.startQuest(chainQuestId, {
+        value: stakeValue,
+        ...(gasLimit ? { gasLimit } : {})
+      });
+      console.info('[CommandCenter] startQuest submitted', {
+        hash: tx.hash,
+        chainQuestId: chainQuestId.toString(),
+        wallet: signerAddress,
+        valueWei: stakeValue.toString()
+      });
       await tx.wait();
 
-      patchQuest(questMatcher(activeQuest), {
+      let persistedQuest: QuestState = {
+        ...activeQuest,
         status: 'ACTIVE',
         treasuryPayout: {
           ...(activeQuest.treasuryPayout || {}),
           status: 'LOCKED'
         }
-      });
-      setMessage('Quest started onchain. Waiting for realtime reconciliation.');
+      };
+
+      if (activeQuest.id) {
+        try {
+          const startRegistrationResponse = await registerQuestStart(String(activeQuest.id), chainQuestId.toString(), tx.hash);
+          const registeredQuest = (startRegistrationResponse.data as { quest?: QuestState }).quest;
+          if (registeredQuest) {
+            persistedQuest = {
+              ...persistedQuest,
+              ...registeredQuest
+            };
+          }
+        } catch (registrationError) {
+          console.error('[CommandCenter] Backend quest start registration failed', registrationError);
+          setMessage(
+            `Quest started onchain, but backend start reconciliation is still catching up. ${formatActionFailure(
+              registrationError,
+              'Backend sync is delayed.'
+            )}`
+          );
+        }
+      }
+
+      upsertQuest(persistedQuest);
+      setMessage((current) =>
+        typeof current === 'string' && current.startsWith('Quest started onchain')
+          ? current
+          : 'Quest started onchain. Wallet stake is locked and realtime reconciliation is running.'
+      );
       await syncNow();
     } catch (error) {
-      console.error(error);
-      const failure = extractAuthFailure(error);
-      setMessage(failure.code === 'AUTH_UNKNOWN' ? 'Start quest transaction failed.' : failure.message);
+      console.error('[CommandCenter] startQuest failed', error);
+      setMessage(formatActionFailure(error, 'Start quest transaction failed.'));
     } finally {
       setLoading(false);
     }
@@ -255,7 +429,16 @@ export default function CommandCenter() {
     setMessage('Submitting proof to the Forge Master...');
 
     try {
-      const submitTx = await forgeQuestManager.submitQuest(BigInt(String(activeQuest.chainQuestId)), proofUri);
+      if (!activeQuest.chainQuestId) {
+        throw new Error('Quest is missing its onchain id. Wait for backend sync before submitting proof.');
+      }
+
+      const chainQuestId = BigInt(String(activeQuest.chainQuestId));
+      const submitTx = await forgeQuestManager.submitQuest(chainQuestId, proofUri);
+      console.info('[CommandCenter] submitQuest submitted', {
+        hash: submitTx.hash,
+        chainQuestId: chainQuestId.toString()
+      });
       await submitTx.wait();
 
       patchQuest(questMatcher(activeQuest), { status: 'SUBMITTED' });
@@ -268,13 +451,18 @@ export default function CommandCenter() {
       await syncNow();
       setProofUri('');
     } catch (error) {
-      console.error(error);
-      const failure = extractAuthFailure(error);
-      setMessage(failure.code === 'AUTH_UNKNOWN' ? 'Proof submission failed.' : failure.message);
+      console.error('[CommandCenter] submitQuest failed', error);
+      setMessage(formatActionFailure(error, 'Proof submission failed.'));
     } finally {
       setLoading(false);
     }
   }
+
+  const generationProfile = resolveGenerationProfile(activeQuest);
+  const generationLabel =
+    generationProfile?.source === 'openai'
+      ? `AI-generated${generationProfile.model ? ` via ${generationProfile.model}` : ''}`
+      : 'Deterministic fallback';
 
   if (status !== 'connected') {
     return (
@@ -298,6 +486,7 @@ export default function CommandCenter() {
                 <p className="text-sm uppercase tracking-[0.35em] text-glowyellow">Command Center</p>
                 <h1 className="mt-3 text-4xl font-black text-white">Forge Your Chain Legend</h1>
                 <p className="mt-2 text-slate-300">Active wallet: {address}</p>
+                <p className="mt-1 text-sm text-slate-400">Available balance: {balance} CELO</p>
                 <p className="mt-2 text-sm text-softyellow">
                   Auth session:{' '}
                   {authStatus === 'authenticated'
@@ -408,6 +597,39 @@ export default function CommandCenter() {
                   }
                   explorerBaseUrl={env.CELO_EXPLORER_BASE_URL}
                 />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="rounded-3xl border border-white/10 bg-navy/70 p-4 text-sm text-slate-200">
+                    <p className="uppercase tracking-[0.22em] text-softyellow">Quest Source</p>
+                    <p className="mt-2 font-semibold text-white">{generationLabel}</p>
+                    {generationProfile?.provider || generationProfile?.promptHash ? (
+                      <p className="mt-2 text-xs uppercase tracking-[0.18em] text-slate-400">
+                        {generationProfile?.provider ? `Provider ${generationProfile.provider}` : 'Provider unknown'}
+                        {generationProfile?.promptHash ? ` • Prompt ${generationProfile.promptHash.slice(0, 12)}` : ''}
+                      </p>
+                    ) : null}
+                    <p className="mt-2">
+                      {generationProfile?.source === 'openai'
+                        ? 'OpenAI shaped the live quest narrative, title, and lore within deterministic economic bounds.'
+                        : `OpenAI was unavailable or rejected, so QuestForge used its deterministic narrative fallback.${generationProfile?.fallbackReason ? ` ${generationProfile.fallbackReason}` : ''}`}
+                    </p>
+                  </div>
+                  <div className="rounded-3xl border border-white/10 bg-navy/70 p-4 text-sm text-slate-200">
+                    <p className="uppercase tracking-[0.22em] text-softyellow">Onchain Objective</p>
+                    <p className="mt-2 font-semibold text-white">{String(activeQuest.objective ?? activeQuest.questType ?? 'Quest objective pending')}</p>
+                    <p className="mt-2">
+                      Stake {activeQuest.stakeAmount ?? '?'} CELO, pursue the gameplay step, then submit the proof hash for verifier settlement and Treasury payout.
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-3xl border border-white/10 bg-navy/70 p-4 text-sm text-slate-200">
+                  <p className="uppercase tracking-[0.22em] text-softyellow">Lore Thread</p>
+                  <p className="mt-2">{String(activeQuest.lore ?? 'Lore is synchronizing from the quest orchestrator.')}</p>
+                  {Array.isArray(activeQuest.requiredTxTypes) && activeQuest.requiredTxTypes.length > 0 ? (
+                    <p className="mt-3 text-xs uppercase tracking-[0.18em] text-slate-400">
+                      Tx path: {activeQuest.requiredTxTypes.join(' -> ')}
+                    </p>
+                  ) : null}
+                </div>
                 <div className="rounded-3xl border border-white/10 bg-navy/70 p-4 text-sm text-slate-200">
                   <p className="uppercase tracking-[0.22em] text-softyellow">Treasury Settlement</p>
                   <p className="mt-2">

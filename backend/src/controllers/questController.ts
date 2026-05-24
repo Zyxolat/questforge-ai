@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Prisma, type QuestStatus } from '@prisma/client';
 import { aiQuestGenerationEngine } from '../services/aiQuestGenerationEngine';
+import { contracts } from '../services/contracts';
 import { normalizeWallet, prisma, upsertUser } from '../services/chain';
 import {
   checkDailyLimits,
@@ -64,6 +65,25 @@ function serializeQuest<
         }
       : null
   };
+}
+
+async function loadSerializedQuestById(questId: string) {
+  const quest = await prisma.quest.findUnique({
+    where: { id: questId }
+  });
+
+  if (!quest) {
+    return null;
+  }
+
+  const treasuryPayout = await prisma.treasuryPayout.findUnique({
+    where: { questId }
+  });
+
+  return serializeQuest({
+    ...quest,
+    treasuryPayout
+  });
 }
 
 export async function generateQuest(req: Request, res: Response) {
@@ -144,6 +164,7 @@ export async function generateQuest(req: Request, res: Response) {
         worldStateVersion: generated.quest.worldStateVersion,
         npc: generated.quest.npc,
         faction: generated.quest.faction,
+        generation: generated.quest.generation,
         expiresAt: generated.quest.expiresAt.toISOString(),
         remainingDailyCapacity: {
           quests: Math.max(0, QUEST_CONFIG.MAX_QUESTS_PER_DAY - (activitySnapshot?.questsAttempted || 0)),
@@ -211,6 +232,418 @@ export async function getDailyMissions(_req: Request, res: Response) {
   });
 
   res.json({ missions });
+}
+
+export async function registerOnchainQuest(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+  const { questId, chainQuestId, creationTxHash } = req.body as {
+    questId?: string;
+    chainQuestId?: string | number;
+    creationTxHash?: string;
+  };
+
+  if (!wallet || !questId || !chainQuestId || !creationTxHash) {
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_REGISTRATION_INVALID',
+        message: 'Wallet, questId, chainQuestId, and creationTxHash are required'
+      }
+    });
+  }
+
+  let parsedChainQuestId: bigint;
+  try {
+    parsedChainQuestId = BigInt(String(chainQuestId));
+  } catch {
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_CHAIN_ID_INVALID',
+        message: 'chainQuestId must be a valid integer'
+      }
+    });
+  }
+
+  const normalizedWallet = normalizeWallet(wallet);
+
+  try {
+    const quest = await prisma.quest.findUnique({
+      where: { id: questId }
+    });
+
+    if (!quest) {
+      return res.status(404).json({
+        error: {
+          code: 'QUEST_NOT_FOUND',
+          message: 'Quest not found'
+        }
+      });
+    }
+
+    if (quest.creator !== normalizedWallet) {
+      return res.status(403).json({
+        error: {
+          code: 'QUEST_NOT_OWNED',
+          message: 'Only the quest creator can register onchain quest data'
+        }
+      });
+    }
+
+    if (quest.chainQuestId && quest.chainQuestId !== parsedChainQuestId) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CHAIN_ID_CONFLICT',
+          message: 'Quest is already linked to a different onchain quest id'
+        },
+        details: [
+          `existing=${quest.chainQuestId.toString()}`,
+          `received=${parsedChainQuestId.toString()}`
+        ]
+      });
+    }
+
+    const receipt = await contracts.provider.getTransactionReceipt(creationTxHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CREATION_TX_UNCONFIRMED',
+          message: 'Quest creation transaction is not confirmed onchain yet'
+        }
+      });
+    }
+
+    const parsedQuestCreated = receipt.logs
+      .map((log) => {
+        try {
+          return contracts.forgeQuestManager.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((log) => log?.name === 'QuestCreated');
+
+    if (!parsedQuestCreated) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CREATION_EVENT_MISSING',
+          message: 'Quest creation transaction did not emit QuestCreated'
+        }
+      });
+    }
+
+    const eventQuestId = BigInt(parsedQuestCreated.args.questId.toString());
+    const eventCreator = normalizeWallet(String(parsedQuestCreated.args.creator));
+
+    if (eventQuestId !== parsedChainQuestId) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CHAIN_ID_MISMATCH',
+          message: 'QuestCreated event quest id did not match the provided chainQuestId'
+        },
+        details: [
+          `event=${eventQuestId.toString()}`,
+          `received=${parsedChainQuestId.toString()}`
+        ]
+      });
+    }
+
+    if (eventCreator !== normalizedWallet) {
+      return res.status(403).json({
+        error: {
+          code: 'QUEST_CREATOR_MISMATCH',
+          message: 'QuestCreated event creator did not match the authenticated wallet'
+        }
+      });
+    }
+
+    const block = await contracts.provider.getBlock(receipt.blockNumber);
+    const rewardReservedAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
+
+    const updatedQuest = await prisma.$transaction(async (tx) => {
+      const nextQuest = await tx.quest.update({
+        where: { id: questId },
+        data: {
+          chainQuestId: parsedChainQuestId,
+          status: 'AVAILABLE'
+        }
+      });
+
+      await tx.treasuryPayout.upsert({
+        where: { questId },
+        create: {
+          questId,
+          chainQuestId: parsedChainQuestId,
+          rewardAmount: quest.rewardAmount,
+          stakeAmount: 0,
+          totalAmount: quest.rewardAmount,
+          status: 'RESERVED',
+          reservationTx: creationTxHash,
+          rewardReservedAt
+        },
+        update: {
+          chainQuestId: parsedChainQuestId,
+          rewardAmount: quest.rewardAmount,
+          stakeAmount: 0,
+          totalAmount: quest.rewardAmount,
+          status: 'RESERVED',
+          reservationTx: creationTxHash,
+          rewardReservedAt
+        }
+      });
+
+      return nextQuest;
+    });
+
+    const treasuryPayout = await prisma.treasuryPayout.findUnique({
+      where: { questId }
+    });
+
+    logger.info('[QUEST] Onchain quest registration completed', {
+      wallet: normalizedWallet,
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      creationTxHash
+    });
+
+    return res.json({
+      success: true,
+      quest: serializeQuest({
+        ...updatedQuest,
+        treasuryPayout
+      })
+    });
+  } catch (error) {
+    logger.error('Quest onchain registration failed', error, {
+      wallet: normalizedWallet,
+      questId,
+      chainQuestId: String(chainQuestId),
+      creationTxHash
+    });
+
+    return res.status(500).json({
+      error: {
+        code: 'QUEST_REGISTRATION_FAILED',
+        message: error instanceof Error ? error.message : 'Failed to register onchain quest data'
+      }
+    });
+  }
+}
+
+export async function registerQuestStart(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+  const { questId, chainQuestId, startTxHash } = req.body as {
+    questId?: string;
+    chainQuestId?: string | number;
+    startTxHash?: string;
+  };
+
+  if (!wallet || !questId || !chainQuestId || !startTxHash) {
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_START_REGISTRATION_INVALID',
+        message: 'Wallet, questId, chainQuestId, and startTxHash are required'
+      }
+    });
+  }
+
+  let parsedChainQuestId: bigint;
+  try {
+    parsedChainQuestId = BigInt(String(chainQuestId));
+  } catch {
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_CHAIN_ID_INVALID',
+        message: 'chainQuestId must be a valid integer'
+      }
+    });
+  }
+
+  const normalizedWallet = normalizeWallet(wallet);
+
+  try {
+    const [user, quest] = await Promise.all([
+      prisma.user.findUnique({
+        where: { wallet: normalizedWallet }
+      }),
+      prisma.quest.findUnique({
+        where: { id: questId }
+      })
+    ]);
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'QUEST_PLAYER_NOT_FOUND',
+          message: 'Player not found'
+        }
+      });
+    }
+
+    if (!quest) {
+      return res.status(404).json({
+        error: {
+          code: 'QUEST_NOT_FOUND',
+          message: 'Quest not found'
+        }
+      });
+    }
+
+    if (quest.chainQuestId && quest.chainQuestId !== parsedChainQuestId) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CHAIN_ID_CONFLICT',
+          message: 'Quest is already linked to a different onchain quest id'
+        },
+        details: [
+          `existing=${quest.chainQuestId.toString()}`,
+          `received=${parsedChainQuestId.toString()}`
+        ]
+      });
+    }
+
+    const receipt = await contracts.provider.getTransactionReceipt(startTxHash);
+    if (!receipt || receipt.status !== 1) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_START_TX_UNCONFIRMED',
+          message: 'Quest start transaction is not confirmed onchain yet'
+        }
+      });
+    }
+
+    const parsedQuestStarted = receipt.logs
+      .map((log) => {
+        try {
+          return contracts.forgeQuestManager.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((log) => log?.name === 'QuestStarted');
+
+    if (!parsedQuestStarted) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_START_EVENT_MISSING',
+          message: 'Quest start transaction did not emit QuestStarted'
+        }
+      });
+    }
+
+    const eventQuestId = BigInt(parsedQuestStarted.args.questId.toString());
+    const eventPlayer = normalizeWallet(String(parsedQuestStarted.args.player));
+    const stakeAmount = Number(parsedQuestStarted.args.stakeAmount.toString()) / 1e18;
+
+    if (eventQuestId !== parsedChainQuestId) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_CHAIN_ID_MISMATCH',
+          message: 'QuestStarted event quest id did not match the provided chainQuestId'
+        },
+        details: [
+          `event=${eventQuestId.toString()}`,
+          `received=${parsedChainQuestId.toString()}`
+        ]
+      });
+    }
+
+    if (eventPlayer !== normalizedWallet) {
+      return res.status(403).json({
+        error: {
+          code: 'QUEST_PLAYER_MISMATCH',
+          message: 'QuestStarted event player did not match the authenticated wallet'
+        }
+      });
+    }
+
+    const onchainQuest = await contracts.forgeQuestManager.quests(parsedChainQuestId);
+    if (Number(onchainQuest.status) !== 1) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_ONCHAIN_STATUS_INVALID',
+          message: `Onchain quest status is ${onchainQuest.status.toString()}, not ACTIVE`
+        }
+      });
+    }
+
+    if (normalizeWallet(String(onchainQuest.player)) !== normalizedWallet) {
+      return res.status(409).json({
+        error: {
+          code: 'QUEST_ONCHAIN_PLAYER_INVALID',
+          message: 'Onchain quest player did not match the authenticated wallet'
+        }
+      });
+    }
+
+    const block = await contracts.provider.getBlock(receipt.blockNumber);
+    const startedAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
+
+    await prisma.$transaction(async (tx) => {
+      await tx.quest.update({
+        where: { id: questId },
+        data: {
+          chainQuestId: parsedChainQuestId,
+          status: 'ACTIVE',
+          playerId: user.id,
+          startedAt,
+          stakeTx: startTxHash,
+          stakeTxHash: startTxHash
+        }
+      });
+
+      await tx.treasuryPayout.upsert({
+        where: { questId },
+        create: {
+          questId,
+          userId: user.id,
+          chainQuestId: parsedChainQuestId,
+          playerWallet: normalizedWallet,
+          rewardAmount: quest.rewardAmount,
+          stakeAmount,
+          totalAmount: quest.rewardAmount + stakeAmount,
+          status: 'LOCKED'
+        },
+        update: {
+          userId: user.id,
+          chainQuestId: parsedChainQuestId,
+          playerWallet: normalizedWallet,
+          rewardAmount: quest.rewardAmount,
+          stakeAmount,
+          totalAmount: quest.rewardAmount + stakeAmount,
+          status: 'LOCKED'
+        }
+      });
+    });
+
+    const serializedQuest = await loadSerializedQuestById(questId);
+
+    logger.info('[QUEST] Quest start registration completed', {
+      wallet: normalizedWallet,
+      userId: user.id,
+      questId,
+      chainQuestId: parsedChainQuestId.toString(),
+      startTxHash,
+      stakeAmount
+    });
+
+    return res.json({
+      success: true,
+      quest: serializedQuest
+    });
+  } catch (error) {
+    logger.error('Quest start registration failed', error, {
+      wallet: normalizedWallet,
+      questId,
+      chainQuestId: String(chainQuestId),
+      startTxHash
+    });
+
+    return res.status(500).json({
+      error: {
+        code: 'QUEST_START_REGISTRATION_FAILED',
+        message: error instanceof Error ? error.message : 'Failed to register quest start'
+      }
+    });
+  }
 }
 
 export async function getQuestOrchestrationDiagnostics(_req: Request, res: Response) {

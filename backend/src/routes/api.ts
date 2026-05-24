@@ -5,6 +5,8 @@ import {
   getNPCDialogue,
   getActiveQuests,
   getQuestOrchestrationDiagnostics,
+  registerOnchainQuest,
+  registerQuestStart,
   submitProof
 } from '../controllers/questController';
 import { getPlayerStats, getProgression } from '../controllers/userController';
@@ -51,6 +53,8 @@ apiRouter.get('/auth/me', requireAuth, getAuthenticatedSession);
 apiRouter.post('/auth/logout', logoutSession);
 
 apiRouter.post('/quests/generate', requireAuth, questGenerationLimiter, generateQuest);
+apiRouter.post('/quests/register-onchain', requireAuth, registerOnchainQuest);
+apiRouter.post('/quests/register-start', requireAuth, registerQuestStart);
 apiRouter.post('/quests/submit-proof', requireAuth, proofSubmissionLimiter, submitProof);
 apiRouter.get('/quests/daily', getDailyMissions);
 apiRouter.get('/quests/active', requireAuth, getActiveQuestsLimiter, getActiveQuests);

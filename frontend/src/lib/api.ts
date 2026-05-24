@@ -557,6 +557,14 @@ export function generateQuest(chain = 'Celo') {
     });
 }
 
+export function registerOnchainQuest(questId: string, chainQuestId: string, creationTxHash: string) {
+  return api.post('/quests/register-onchain', { questId, chainQuestId, creationTxHash });
+}
+
+export function registerQuestStart(questId: string, chainQuestId: string, startTxHash: string) {
+  return api.post('/quests/register-start', { questId, chainQuestId, startTxHash });
+}
+
 export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {
   return api.post('/quests/submit-proof', { questId, proofUri, submissionTxHash });
 }
