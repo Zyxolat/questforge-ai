@@ -739,7 +739,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             browserProviderOverride ?? (ethereum ? new BrowserProvider(ethereum as WalletProviderShape) : null);
 
           if (!ethereum) {
-            throw new Error('No wallet provider available for add-chain request.', { cause: error });
+            const reason = error instanceof Error ? error.message : String(error);
+            const wrappedError = new Error(`No wallet provider available for add-chain request. ${reason}`) as Error & {
+              cause?: unknown;
+            };
+            wrappedError.cause = error;
+            throw wrappedError;
           }
 
           await ethereum?.request?.({
