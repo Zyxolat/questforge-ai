@@ -152,6 +152,10 @@ function validateUrl(name: string, value: string | null): boolean {
 
 function hasPlaceholderValue(value: string): boolean {
   const normalized = value.trim().toLowerCase();
+  if (/^\$\{\{.+\}\}$/.test(value.trim()) || /^\{\{.+\}\}$/.test(value.trim())) {
+    return true;
+  }
+
   return [
     'example.com',
     'change_me',
@@ -265,6 +269,31 @@ async function main() {
   optionalEnv('AUTH_STATEMENT');
   validatePositiveInteger('AUTH_NONCE_TTL_MINUTES', optionalEnv('AUTH_NONCE_TTL_MINUTES') || '5');
   validatePositiveInteger('AUTH_SESSION_TTL_HOURS', optionalEnv('AUTH_SESSION_TTL_HOURS') || '168');
+  const authCookieSecure = optionalEnv('AUTH_COOKIE_SECURE') || 'true';
+  const authCookieSameSite = (optionalEnv('AUTH_COOKIE_SAME_SITE') || 'none').toLowerCase();
+  const authDomain = optionalEnv('AUTH_DOMAIN');
+  const authUri = optionalEnv('AUTH_URI');
+
+  if (authCookieSecure !== 'true') {
+    recordResult('AUTH_COOKIE_SECURE', 'fail', 'Must be "true" for HTTPS auth cookies in production');
+  } else {
+    recordResult('AUTH_COOKIE_SECURE', 'pass', 'Secure auth cookies enabled');
+  }
+
+  if (authCookieSameSite !== 'none') {
+    recordResult('AUTH_COOKIE_SAME_SITE', 'fail', 'Must be "none" for cross-origin Vercel -> Railway auth cookies');
+  } else {
+    recordResult('AUTH_COOKIE_SAME_SITE', 'pass', 'Cross-origin cookie policy is correct');
+  }
+
+  if (authDomain) {
+    validateNotPlaceholder('AUTH_DOMAIN', authDomain);
+  }
+
+  if (authUri) {
+    validateUrl('AUTH_URI', authUri);
+    validateNotPlaceholder('AUTH_URI', authUri);
+  }
 
   // Rate Limiting
   console.log('\n⏱️  RATE LIMITING...\n');

@@ -135,9 +135,13 @@ async function bootstrap() {
   const { productionWebSocketBroadcaster } = await import('./services/productionWebSocketBroadcaster');
   const { rpcFailoverManager } = await import('./services/rpcFailoverManager');
   const { prisma } = await import('./services/chain');
+  const { assertAuthStorageReady } = await import('./services/auth');
   const { aiQuestGenerationEngine } = await import('./services/aiQuestGenerationEngine');
   const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
+
+  await prisma.$queryRaw`SELECT 1`;
+  await assertAuthStorageReady(prisma);
 
   const app = express();
   const httpServer = createServer(app);
@@ -348,6 +352,7 @@ async function bootstrap() {
     try {
       await runStartupStep('database', attempt, async () => {
         await prisma.$queryRaw`SELECT 1`;
+        await assertAuthStorageReady(prisma);
       }, { timeoutMs: 5000 });
 
       await runStartupStep('worldState', attempt, async () => {
@@ -469,6 +474,10 @@ async function bootstrap() {
           callback(null, true);
           return;
         }
+        logger.warn('[CORS] Rejected request origin', {
+          origin,
+          allowedOrigins: env.CORS_ORIGINS
+        });
         callback(new Error(`Origin ${origin} not allowed`));
       },
       credentials: true,
@@ -563,6 +572,28 @@ async function bootstrap() {
 
   app.get('/', (_req, res) => {
     res.json({ status: 'QuestForge AI backend online' });
+  });
+
+  app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    void next;
+    const message = error instanceof Error ? error.message : String(error);
+    const isCorsOriginError = /Origin .* not allowed/.test(message);
+
+    logger.error('[HTTP] Unhandled request error', error, {
+      method: req.method,
+      path: req.path,
+      origin: req.get('origin') ?? null
+    });
+
+    res.status(isCorsOriginError ? 403 : 500).json({
+      error: {
+        code: isCorsOriginError ? 'CORS_ORIGIN_NOT_ALLOWED' : 'INTERNAL_SERVER_ERROR',
+        message: isCorsOriginError
+          ? 'This frontend origin is not allowed by the backend CORS configuration.'
+          : 'Internal server error'
+      },
+      action: 'none'
+    });
   });
 
   httpServer.once('error', (error) => {

@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import { ethers } from 'ethers';
 import { env } from '../config/env';
 import { prisma, normalizeWallet } from './chain';
+import { logger } from './logger';
 
 type DatabaseClient = typeof prisma | Prisma.TransactionClient;
 type AuthAction = 'none' | 'refresh' | 'sign';
@@ -27,7 +28,8 @@ export type AuthErrorCode =
   | 'AUTH_REFRESH_TOKEN_INVALID'
   | 'AUTH_SESSION_EXPIRED'
   | 'AUTH_SESSION_REVOKED'
-  | 'AUTH_SESSION_INVALID';
+  | 'AUTH_SESSION_INVALID'
+  | 'AUTH_STORAGE_SCHEMA_INVALID';
 
 export class AuthError extends Error {
   status: number;
@@ -87,6 +89,11 @@ interface JwtAccessTokenPayload {
   exp: number;
 }
 
+type AuthSchemaColumnRow = {
+  tableName: string;
+  columnName: string;
+};
+
 export interface AuthenticatedUser {
   id: string;
   username: string | null;
@@ -140,6 +147,30 @@ function createNonce() {
 
 function createSessionToken() {
   return crypto.randomBytes(32).toString('base64url');
+}
+
+function isStorageSchemaError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /column .* does not exist/i.test(message) ||
+    /relation .* does not exist/i.test(message) ||
+    /no such column/i.test(message)
+  );
+}
+
+function wrapAuthStorageError(error: unknown, context: Record<string, unknown>) {
+  logger.error('[AUTH-SERVICE] Authentication storage operation failed', error, context);
+
+  if (isStorageSchemaError(error)) {
+    return new AuthError(
+      'AUTH_STORAGE_SCHEMA_INVALID',
+      'Authentication storage is not ready. Apply the latest database migrations.',
+      500,
+      'sign'
+    );
+  }
+
+  return error;
 }
 
 function hashToken(token: string) {
@@ -333,26 +364,48 @@ async function createPersistentSession(user: User, wallet: string) {
   const refreshToken = createSessionToken();
   const sessionExpiresAt = addHours(issuedAt, SESSION_TTL_HOURS);
 
-  const session = await prisma.$transaction(async (tx) => {
-    const sessionId = crypto.randomUUID();
+  try {
+    logger.debug('[AUTH-SERVICE] Creating persistent auth session', {
+      userId: user.id,
+      wallet: `${wallet.slice(0, 6)}...${wallet.slice(-4)}`,
+      issuedAt: issuedAt.toISOString(),
+      sessionExpiresAt: sessionExpiresAt.toISOString()
+    });
 
-    await tx.$executeRaw`
-      INSERT INTO "AuthSession" (id, "tokenHash", wallet, "createdAt", "expiresAt", "lastSeenAt", "userId")
-      VALUES (${sessionId}, ${hashToken(refreshToken)}, ${wallet}, ${issuedAt}, ${sessionExpiresAt}, ${issuedAt}, ${user.id})
-    `;
+    const session = await prisma.$transaction(async (tx) => {
+      const sessionId = crypto.randomUUID();
 
-    const created = await loadSessionRowById(sessionId, tx);
-    return mapSessionRow(ensureActiveSessionRow(created));
-  });
+      await tx.$executeRaw`
+        INSERT INTO "AuthSession" (id, "tokenHash", wallet, "createdAt", "expiresAt", "lastSeenAt", "userId")
+        VALUES (${sessionId}, ${hashToken(refreshToken)}, ${wallet}, ${issuedAt}, ${sessionExpiresAt}, ${issuedAt}, ${user.id})
+      `;
 
-  const { accessToken, accessTokenExpiresAt } = createAccessToken(session, issuedAt);
+      const created = await loadSessionRowById(sessionId, tx);
+      return mapSessionRow(ensureActiveSessionRow(created));
+    });
 
-  return {
-    accessToken,
-    accessTokenExpiresAt,
-    refreshToken,
-    session
-  };
+    const { accessToken, accessTokenExpiresAt } = createAccessToken(session, issuedAt);
+
+    logger.info('[AUTH-SERVICE] Persistent auth session created', {
+      sessionId: session.id,
+      userId: session.userId,
+      wallet: `${session.wallet.slice(0, 6)}...${session.wallet.slice(-4)}`,
+      accessTokenExpiresAt: accessTokenExpiresAt.toISOString()
+    });
+
+    return {
+      accessToken,
+      accessTokenExpiresAt,
+      refreshToken,
+      session
+    };
+  } catch (error) {
+    throw wrapAuthStorageError(error, {
+      stage: 'createPersistentSession',
+      userId: user.id,
+      wallet
+    });
+  }
 }
 
 export function assertValidWallet(wallet: string) {
@@ -394,6 +447,15 @@ export async function issueWalletChallenge(context: WalletChallengeContext) {
   const normalizedWallet = normalizeWallet(wallet);
   const now = new Date();
 
+  console.debug('[AUTH-SERVICE] Issuing wallet challenge', {
+    providedWallet: context.wallet,
+    validatedWallet: wallet,
+    normalizedWallet,
+    chainId: context.chainId,
+    domain: context.domain,
+    uri: context.uri
+  });
+
   await prisma.$executeRaw`
     DELETE FROM "AuthChallenge"
     WHERE wallet = ${normalizedWallet}
@@ -416,12 +478,21 @@ export async function issueWalletChallenge(context: WalletChallengeContext) {
     existingChallenge.domain === context.domain &&
     existingChallenge.uri === context.uri
   ) {
+    console.debug('[AUTH-SERVICE] Reusing existing valid challenge', {
+      normalizedWallet,
+      nonce: `${existingChallenge.nonce.slice(0, 8)}...`
+    });
+
     return {
       nonce: existingChallenge.nonce,
       message: existingChallenge.message,
       expiresAt: existingChallenge.expiresAt
     };
   }
+
+  console.debug('[AUTH-SERVICE] Invalidating existing challenges', {
+    normalizedWallet
+  });
 
   await prisma.$executeRaw`
     DELETE FROM "AuthChallenge"
@@ -442,11 +513,25 @@ export async function issueWalletChallenge(context: WalletChallengeContext) {
     expiresAt
   });
 
+  console.debug('[AUTH-SERVICE] Built SIWE message', {
+    messageLength: message.length,
+    messageStart: message.slice(0, 50),
+    nonce: `${nonce.slice(0, 8)}...`,
+    expiresAt: expiresAt.toISOString()
+  });
+
   const [challenge] = await prisma.$queryRaw<AuthChallengeRow[]>`
     INSERT INTO "AuthChallenge" (id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "createdAt")
     VALUES (${crypto.randomUUID()}, ${normalizedWallet}, ${nonce}, ${message}, ${context.chainId}, ${context.domain}, ${context.uri}, ${expiresAt}, ${issuedAt})
     RETURNING id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "consumedAt", "createdAt"
   `;
+
+  console.info('[AUTH-SERVICE] Challenge issued', {
+    normalizedWallet: `${normalizedWallet.slice(0, 6)}...${normalizedWallet.slice(-4)}`,
+    challengeId: challenge.id,
+    nonce: `${challenge.nonce.slice(0, 8)}...`,
+    ttlMinutes: NONCE_TTL_MINUTES
+  });
 
   return {
     nonce: challenge.nonce,
@@ -463,6 +548,15 @@ export async function verifyWalletChallenge(params: {
 }) {
   const wallet = assertValidWallet(params.wallet);
   const normalizedWallet = normalizeWallet(wallet);
+
+  console.debug('[AUTH-SERVICE] Verifying wallet challenge', {
+    providedWallet: params.wallet,
+    validatedWallet: wallet,
+    normalizedWallet,
+    nonce: `${params.nonce.slice(0, 8)}...`,
+    chainId: params.chainId
+  });
+
   const [challenge] = await prisma.$queryRaw<AuthChallengeRow[]>`
     SELECT id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "consumedAt", "createdAt"
     FROM "AuthChallenge"
@@ -472,52 +566,121 @@ export async function verifyWalletChallenge(params: {
   `;
 
   if (!challenge) {
+    console.warn('[AUTH-SERVICE] Challenge not found', {
+      normalizedWallet,
+      nonce: `${params.nonce.slice(0, 8)}...`
+    });
     throw new AuthError('AUTH_CHALLENGE_NOT_FOUND', 'Sign-in challenge was not found', 401, 'sign');
   }
 
   if (challenge.consumedAt) {
+    console.warn('[AUTH-SERVICE] Challenge already consumed', {
+      normalizedWallet,
+      consumedAt: challenge.consumedAt.toISOString()
+    });
     throw new AuthError('AUTH_CHALLENGE_CONSUMED', 'Sign-in challenge has already been used', 409, 'sign');
   }
 
   if (challenge.expiresAt.getTime() <= Date.now()) {
+    console.warn('[AUTH-SERVICE] Challenge expired', {
+      normalizedWallet,
+      expiresAt: challenge.expiresAt.toISOString(),
+      now: new Date().toISOString()
+    });
     throw new AuthError('AUTH_CHALLENGE_EXPIRED', 'Sign-in challenge expired', 401, 'sign');
   }
 
   if (typeof params.chainId === 'number' && params.chainId !== challenge.chainId) {
+    console.warn('[AUTH-SERVICE] Challenge chain mismatch', {
+      providedChainId: params.chainId,
+      challengeChainId: challenge.chainId
+    });
     throw new AuthError('AUTH_CHAIN_MISMATCH', 'Wallet challenge chain does not match the active network', 401, 'sign');
   }
 
   let recoveredAddress: string;
   try {
+    console.debug('[AUTH-SERVICE] Recovering signer from signature', {
+      messageLength: challenge.message.length,
+      signatureLength: params.signature.length
+    });
+
     recoveredAddress = ethers.verifyMessage(challenge.message, params.signature);
-  } catch {
+
+    console.debug('[AUTH-SERVICE] Signature recovery successful', {
+      recoveredAddress,
+      recoveredNormalized: normalizeWallet(recoveredAddress),
+      expectedNormalized: normalizedWallet,
+      match: normalizeWallet(recoveredAddress) === normalizedWallet
+    });
+  } catch (error) {
+    console.error('[AUTH-SERVICE] Signature recovery failed', {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      messageStart: challenge.message.slice(0, 50)
+    });
     throw new AuthError('AUTH_SIGNATURE_INVALID', 'Wallet signature is invalid', 401, 'sign');
   }
 
-  if (normalizeWallet(recoveredAddress) !== normalizedWallet) {
+  const recoveredNormalized = normalizeWallet(recoveredAddress);
+  if (recoveredNormalized !== normalizedWallet) {
+    console.warn('[AUTH-SERVICE] Recovered address mismatch', {
+      expectedWallet: normalizedWallet,
+      recoveredWallet: recoveredAddress,
+      recoveredNormalized
+    });
     throw new AuthError('AUTH_SIGNATURE_INVALID', 'Wallet signature does not match the requested account', 401, 'sign');
   }
 
+  console.debug('[AUTH-SERVICE] Challenge validation complete, creating session', {
+    normalizedWallet,
+    challengeId: challenge.id
+  });
+
   const result = await prisma.$transaction(async (tx) => {
-    const consumedRows = await tx.$queryRaw<Array<{ id: string }>>`
-      UPDATE "AuthChallenge"
-      SET "consumedAt" = ${new Date()}
-      WHERE id = ${challenge.id}
-        AND "consumedAt" IS NULL
-      RETURNING id
-    `;
+    try {
+      const consumedRows = await tx.$queryRaw<Array<{ id: string }>>`
+        UPDATE "AuthChallenge"
+        SET "consumedAt" = ${new Date()}
+        WHERE id = ${challenge.id}
+          AND "consumedAt" IS NULL
+        RETURNING id
+      `;
 
-    if (consumedRows.length !== 1) {
-      throw new AuthError('AUTH_CHALLENGE_CONSUMED', 'Sign-in challenge has already been used', 409, 'sign');
+      if (consumedRows.length !== 1) {
+        console.warn('[AUTH-SERVICE] Challenge consumed by concurrent request', {
+          challengeId: challenge.id
+        });
+        throw new AuthError('AUTH_CHALLENGE_CONSUMED', 'Sign-in challenge has already been used', 409, 'sign');
+      }
+
+      console.debug('[AUTH-SERVICE] Creating or retrieving user', {
+        normalizedWallet
+      });
+
+      const user = await tx.user.upsert({
+        where: { wallet: normalizedWallet },
+        update: {},
+        create: { wallet: normalizedWallet }
+      });
+
+      console.debug('[AUTH-SERVICE] User created/retrieved', {
+        userId: user.id,
+        wallet: user.wallet
+      });
+
+      return user;
+    } catch (error) {
+      throw wrapAuthStorageError(error, {
+        stage: 'verifyWalletChallenge.transaction',
+        challengeId: challenge.id,
+        wallet: normalizedWallet
+      });
     }
+  });
 
-    const user = await tx.user.upsert({
-      where: { wallet: normalizedWallet },
-      update: {},
-      create: { wallet: normalizedWallet }
-    });
-
-    return user;
+  console.info('[AUTH-SERVICE] Challenge verification complete, issuing session', {
+    userId: result.id,
+    wallet: `${normalizedWallet.slice(0, 6)}...${normalizedWallet.slice(-4)}`
   });
 
   return createPersistentSession(result, normalizedWallet);
@@ -658,4 +821,43 @@ export function toAuthErrorResponse(error: AuthError) {
     },
     action: error.action
   };
+}
+
+export async function assertAuthStorageReady(db: DatabaseClient = prisma) {
+  const requiredColumns = new Map<string, string[]>([
+    ['User', ['id', 'wallet', 'updatedAt']],
+    ['AuthChallenge', ['id', 'wallet', 'nonce', 'message', 'chainId', 'domain', 'uri', 'expiresAt', 'consumedAt', 'createdAt']],
+    ['AuthSession', ['id', 'tokenHash', 'wallet', 'createdAt', 'expiresAt', 'revokedAt', 'lastSeenAt', 'userId']]
+  ]);
+
+  const tableNames = [...requiredColumns.keys()];
+
+  const rows = await db.$queryRaw<AuthSchemaColumnRow[]>`
+    SELECT table_name AS "tableName", column_name AS "columnName"
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name IN (${Prisma.join(tableNames)})
+  `;
+
+  const present = new Map<string, Set<string>>();
+  for (const row of rows) {
+    const columns = present.get(row.tableName) ?? new Set<string>();
+    columns.add(row.columnName);
+    present.set(row.tableName, columns);
+  }
+
+  const missing = tableNames.flatMap((tableName) => {
+    const columns = present.get(tableName) ?? new Set<string>();
+    return (requiredColumns.get(tableName) ?? [])
+      .filter((columnName) => !columns.has(columnName))
+      .map((columnName) => `${tableName}.${columnName}`);
+  });
+
+  if (missing.length > 0) {
+    throw new Error(`Authentication storage schema is missing required columns: ${missing.join(', ')}`);
+  }
+
+  logger.info('[AUTH-SERVICE] Authentication storage schema verified', {
+    tables: tableNames
+  });
 }

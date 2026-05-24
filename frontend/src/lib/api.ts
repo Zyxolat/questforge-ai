@@ -215,6 +215,19 @@ function toAuthFailure(error: unknown, fallbackAction: AuthFailure['action'] = '
           action?: AuthFailure['action'];
         }
       | undefined;
+    const htmlLikeResponse = isHtmlLikeResponse(error.response?.data);
+
+    if (htmlLikeResponse) {
+      return {
+        status: error.response?.status ?? 500,
+        code: 'AUTH_API_INVALID_RESPONSE',
+        message:
+          error.response?.status === 403
+            ? 'Authentication request was blocked before JSON reached the browser. Check backend CORS origins for this frontend domain.'
+            : 'Authentication backend returned HTML instead of JSON. Check Railway logs and auth middleware.',
+        action: fallbackAction
+      };
+    }
 
     if (
       error.response?.status === 404 &&
@@ -309,22 +322,53 @@ export function applyVerifiedAuthSession(session: AuthSessionPayload) {
 
 export async function restoreAuthSession(options?: { notifyFailure?: boolean }) {
   if (refreshPromise) {
+    console.debug('[API] Refresh already in progress, returning existing promise');
     return refreshPromise;
   }
+
+  console.debug('[API] Starting session refresh');
 
   refreshPromise = refreshClient
     .post<AuthSessionPayload>('/auth/refresh')
     .then((response) => {
+      console.debug('[API] Refresh response received', {
+        status: response.status,
+        headers: { contentType: response.headers['content-type'] },
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : []
+      });
+
       const payload = assertAuthSessionPayload(response.data);
       applyAuthSession(payload);
+
+      console.info('[API] Session refreshed successfully', {
+        sessionId: payload.session.id,
+        wallet: `${payload.session.wallet.slice(0, 6)}...${payload.session.wallet.slice(-4)}`,
+        userId: payload.user.id
+      });
+
       return payload;
     })
     .catch((error) => {
+      console.error('[API] Session refresh failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined
+      });
+
       const failure = toAuthFailure(error, 'sign');
       applyAuthSession(null, false);
+
+      console.debug('[API] Calling onAuthFailure callback', {
+        code: failure.code,
+        status: failure.status,
+        notifyFailure: options?.notifyFailure ?? true
+      });
+
       if (options?.notifyFailure !== false) {
         authHandlers.onAuthFailure?.(failure);
       }
+
       throw new AuthApiError(failure);
     })
     .finally(() => {
@@ -363,17 +407,75 @@ api.interceptors.response.use(
 );
 
 export function requestAuthNonce(wallet: string, chainId: number) {
-  return refreshClient.post<{ nonce: string; message: string; expiresAt: string }>('/auth/nonce', { wallet, chainId }).then((response) => ({
-    ...response,
-    data: assertAuthNoncePayload(response.data)
-  }));
+  console.debug('[API] Requesting auth nonce', {
+    wallet: `${wallet.slice(0, 6)}...${wallet.slice(-4)}`,
+    chainId,
+    origin: typeof window !== 'undefined' ? window.location.origin : 'server'
+  });
+
+  return refreshClient
+    .post<{ nonce: string; message: string; expiresAt: string }>('/auth/nonce', { wallet, chainId })
+    .then((response) => {
+      console.debug('[API] Nonce response received', {
+        status: response.status,
+        headers: { contentType: response.headers['content-type'] },
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : []
+      });
+
+      return {
+        ...response,
+        data: assertAuthNoncePayload(response.data)
+      };
+    })
+    .catch((error) => {
+      console.error('[API] Nonce request failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        responseDataType: axios.isAxiosError(error) ? typeof error.response?.data : undefined
+      });
+      throw error;
+    });
 }
 
 export function verifyWalletSignature(wallet: string, nonce: string, signature: string, chainId: number) {
-  return refreshClient.post<AuthSessionPayload>('/auth/verify', { wallet, nonce, signature, chainId }).then((response) => ({
-    ...response,
-    data: assertAuthSessionPayload(response.data)
-  }));
+  console.debug('[API] Verifying wallet signature', {
+    wallet: `${wallet.slice(0, 6)}...${wallet.slice(-4)}`,
+    nonce: `${nonce.slice(0, 8)}...`,
+    signatureLength: signature.length,
+    chainId,
+    origin: typeof window !== 'undefined' ? window.location.origin : 'server'
+  });
+
+  return refreshClient
+    .post<AuthSessionPayload>('/auth/verify', { wallet, nonce, signature, chainId })
+    .then((response) => {
+      console.debug('[API] Verify response received', {
+        status: response.status,
+        headers: { contentType: response.headers['content-type'] },
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : [],
+        hasSession: response.data?.session ? true : false,
+        hasUser: response.data?.user ? true : false,
+        hasAccessToken: !!response.data?.accessToken
+      });
+
+      return {
+        ...response,
+        data: assertAuthSessionPayload(response.data)
+      };
+    })
+    .catch((error) => {
+      console.error('[API] Verify request failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        responseDataType: axios.isAxiosError(error) ? typeof error.response?.data : undefined,
+        responseData: axios.isAxiosError(error) ? JSON.stringify(error.response?.data).slice(0, 200) : undefined
+      });
+      throw error;
+    });
 }
 
 export function fetchAuthSession() {

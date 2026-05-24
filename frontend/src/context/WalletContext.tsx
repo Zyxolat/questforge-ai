@@ -139,9 +139,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const restorePromiseRef = useRef<Promise<RestoreOutcome> | null>(null);
   const authenticatePromiseRef = useRef<Promise<boolean> | null>(null);
   const activeAddressRef = useRef<string | null>(null);
+  const authStateRef = useRef<{ status: AuthStatus; message: string | null }>({
+    status: 'idle',
+    message: null
+  });
   const hasProvider = typeof window !== 'undefined' && Boolean((window as Window & { ethereum?: unknown }).ethereum);
 
-  function clearWalletState(nextStatus: WalletStatus = 'disconnected') {
+  function clearWalletState(nextStatus: WalletStatus = 'disconnected', reason = 'unspecified') {
+    console.debug('[WalletContext] Wallet state transition', {
+      fromStatus: status,
+      toStatus: nextStatus,
+      reason
+    });
+
     setAddress(null);
     setSigner(null);
     setProvider(null);
@@ -151,7 +161,19 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setStatus(nextStatus);
   }
 
-  function clearAuthState(nextStatus: AuthStatus = 'unauthenticated', message: string | null = null) {
+  function clearAuthState(nextStatus: AuthStatus = 'unauthenticated', message: string | null = null, reason = 'unspecified') {
+    console.debug('[AUTH] Auth state transition', {
+      fromStatus: authStateRef.current.status,
+      toStatus: nextStatus,
+      fromMessage: authStateRef.current.message,
+      toMessage: message,
+      reason
+    });
+
+    authStateRef.current = {
+      status: nextStatus,
+      message
+    };
     setAuthStatus(nextStatus);
     setAuthMessage(message);
   }
@@ -164,11 +186,37 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setAuthStatus('restoring');
     setAuthMessage(null);
 
+    console.debug('[AUTH] Restoring session for wallet', {
+      address: `${nextAddress.slice(0, 6)}...${nextAddress.slice(-4)}`
+    });
+
     const restoreTask = (async () => {
       try {
+        console.debug('[AUTH] Calling restoreAuthSession');
+
         const payload = await restoreAuthSession({ notifyFailure: false });
 
-        if (normalizeAddress(payload.session.wallet) !== normalizeAddress(nextAddress)) {
+        console.debug('[AUTH] Session restored successfully', {
+          sessionId: payload.session.id,
+          wallet: `${payload.session.wallet.slice(0, 6)}...${payload.session.wallet.slice(-4)}`,
+          userId: payload.user.id
+        });
+
+        const payloadWalletNorm = normalizeAddress(payload.session.wallet);
+        const nextAddressNorm = normalizeAddress(nextAddress);
+
+        console.debug('[AUTH] Comparing addresses', {
+          payloadWallet: payloadWalletNorm,
+          nextAddress: nextAddressNorm,
+          match: payloadWalletNorm === nextAddressNorm
+        });
+
+        if (payloadWalletNorm !== nextAddressNorm) {
+          console.warn('[AUTH] Session wallet mismatch', {
+            sessionWallet: payloadWalletNorm,
+            connectedWallet: nextAddressNorm
+          });
+
           await logoutAuthSession().catch(() => undefined);
           const failure: AuthFailure = {
             status: 409,
@@ -176,24 +224,38 @@ export function WalletProvider({ children }: { children: ReactNode }) {
             message: sessionExpiredMessage('AUTH_WALLET_MISMATCH'),
             action: 'sign'
           };
-          clearAuthState('expired', failure.message);
+          clearAuthState('expired', failure.message, 'restore-wallet-mismatch');
           return { restored: false as const, failure };
         }
 
-        clearAuthState('authenticated');
+        clearAuthState('authenticated', null, 'restore-success');
         return { restored: true as const };
       } catch (error) {
+        console.error('[AUTH] Session restore failed', {
+          errorName: error instanceof Error ? error.name : 'Unknown',
+          errorMessage: error instanceof Error ? error.message : String(error)
+        });
+
         const failure = extractAuthFailure(error);
+        console.debug('[AUTH] Failure extracted from restore error', {
+          code: failure.code,
+          status: failure.status,
+          message: failure.message
+        });
+
         if (failure.code === 'AUTH_REFRESH_TOKEN_MISSING') {
-          clearAuthState('unauthenticated');
+          console.debug('[AUTH] No refresh token available, setting unauthenticated');
+          clearAuthState('unauthenticated', null, 'restore-missing-refresh-token');
         } else if (
           failure.code === 'AUTH_SESSION_EXPIRED' ||
           failure.code === 'AUTH_SESSION_REVOKED' ||
           failure.code === 'AUTH_REFRESH_TOKEN_INVALID'
         ) {
-          clearAuthState('expired', sessionExpiredMessage(failure.code));
+          console.debug('[AUTH] Session expired/revoked, setting expired state');
+          clearAuthState('expired', sessionExpiredMessage(failure.code), 'restore-expired-session');
         } else {
-          clearAuthState('error', failure.message);
+          console.debug('[AUTH] Other auth error, setting error state');
+          clearAuthState('error', failure.message, 'restore-error');
         }
         return { restored: false as const, failure };
       } finally {
@@ -215,8 +277,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           void logoutAuthSession().catch(() => undefined);
         }
         activeAddressRef.current = null;
-        clearWalletState('disconnected');
-        clearAuthState('unauthenticated');
+        clearWalletState('disconnected', 'wallet-no-accounts');
+        clearAuthState('unauthenticated', null, 'wallet-no-accounts');
         return;
       }
 
@@ -248,7 +310,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       if (changedWallet) {
         await logoutAuthSession().catch(() => undefined);
-        clearAuthState('expired', sessionExpiredMessage('AUTH_WALLET_MISMATCH'));
+        clearAuthState('expired', sessionExpiredMessage('AUTH_WALLET_MISMATCH'), 'wallet-changed');
         return;
       }
 
@@ -267,8 +329,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       }
     } catch (error) {
       console.error(error);
-      clearWalletState('unsupported');
-      clearAuthState('error', 'Unable to read wallet connection state.');
+      clearWalletState('unsupported', 'wallet-sync-error');
+      clearAuthState('error', 'Unable to read wallet connection state.', 'wallet-sync-error');
     } finally {
       setWalletReady(true);
     }
@@ -287,48 +349,128 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const activeAddress = addressOverride ?? address;
     const activeChainId = chainIdOverride ?? chainId;
 
+    console.debug('[AUTH] authenticateWallet called', {
+      hasSigner: !!activeSigner,
+      hasAddress: !!activeAddress,
+      hasChainId: !!activeChainId,
+      address: activeAddress ? `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}` : null,
+      chainId: activeChainId
+    });
+
     if (!activeSigner || !activeAddress || !activeChainId) {
-      clearAuthState('unauthenticated', 'Connect your wallet before signing in.');
+      console.warn('[AUTH] authenticateWallet failed: missing credentials', {
+        hasSigner: !!activeSigner,
+        hasAddress: !!activeAddress,
+        hasChainId: !!activeChainId
+      });
+      clearAuthState('unauthenticated', 'Connect your wallet before signing in.', 'authenticate-missing-credentials');
       return false;
     }
 
     if (!isSupportedCeloChain(activeChainId)) {
-      clearAuthState('unauthenticated', formatSupportedNetworkMessage(activeChainId, network));
+      console.warn('[AUTH] authenticateWallet failed: unsupported chain', {
+        chainId: activeChainId
+      });
+      clearAuthState('unauthenticated', formatSupportedNetworkMessage(activeChainId, network), 'authenticate-unsupported-chain');
       return false;
     }
 
-    setAuthStatus('authenticating');
-    setAuthMessage(null);
+    clearAuthState('authenticating', null, 'authenticate-start');
 
     const authTask = (async () => {
       try {
+        console.debug('[AUTH] Requesting nonce', {
+          address: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
+          chainId: activeChainId
+        });
+
         const nonceResponse = await requestAuthNonce(activeAddress, activeChainId);
+
+        console.debug('[AUTH] Nonce received', {
+          nonce: `${nonceResponse.data.nonce.slice(0, 8)}...`,
+          messageLength: nonceResponse.data.message.length,
+          expiresAt: nonceResponse.data.expiresAt
+        });
+
+        console.debug('[AUTH] Requesting wallet signature', {
+          messageLength: nonceResponse.data.message.length
+        });
+
         const signature = await activeSigner.signMessage(nonceResponse.data.message);
-        const verifyResponse = await verifyWalletSignature(activeAddress, nonceResponse.data.nonce, signature, activeChainId);
+
+        console.debug('[AUTH] Signature received', {
+          signatureLength: signature.length,
+          signatureStart: signature.slice(0, 10)
+        });
+
+        console.debug('[AUTH] Verifying signature on backend', {
+          address: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
+          nonce: `${nonceResponse.data.nonce.slice(0, 8)}...`,
+          chainId: activeChainId
+        });
+
+        const verifyResponse = await verifyWalletSignature(
+          activeAddress,
+          nonceResponse.data.nonce,
+          signature,
+          activeChainId
+        );
+
+        console.debug('[AUTH] Verify response received', {
+          hasAccessToken: !!verifyResponse.data.accessToken,
+          sessionId: verifyResponse.data.session?.id,
+          wallet: verifyResponse.data.session?.wallet
+            ? `${verifyResponse.data.session.wallet.slice(0, 6)}...${verifyResponse.data.session.wallet.slice(-4)}`
+            : 'MISSING',
+          userId: verifyResponse.data.user?.id
+        });
 
         if (normalizeAddress(verifyResponse.data.session.wallet) !== normalizeAddress(activeAddress)) {
+          console.error('[AUTH] Verify response wallet mismatch', {
+            responseWallet: `${verifyResponse.data.session.wallet.slice(0, 6)}...${verifyResponse.data.session.wallet.slice(-4)}`,
+            expectedWallet: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`
+          });
           throw new Error('Authenticated session does not match the connected wallet');
         }
+
+        console.info('[AUTH] Wallet authentication successful', {
+          wallet: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
+          sessionId: verifyResponse.data.session.id
+        });
 
         applyVerifiedAuthSession(verifyResponse.data);
         clearAuthState('authenticated');
         return true;
       } catch (error) {
+        console.error('[AUTH] Wallet authentication failed', {
+          errorName: error instanceof Error ? error.name : 'Unknown',
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorCode: 'code' in (error as Record<string, unknown>) ? (error as { code: unknown }).code : undefined
+        });
+
         if (isSignatureRejection(error)) {
-          clearAuthState('unauthenticated', 'Signature request was cancelled.');
+          console.info('[AUTH] User rejected signature request');
+          clearAuthState('unauthenticated', 'Signature request was cancelled.', 'authenticate-signature-rejected');
           return false;
         }
 
         const failure = extractAuthFailure(error);
+        console.debug('[AUTH] Auth failure extracted', {
+          code: failure.code,
+          status: failure.status,
+          message: failure.message,
+          action: failure.action
+        });
+
         if (
           failure.code === 'AUTH_CHALLENGE_EXPIRED' ||
           failure.code === 'AUTH_CHALLENGE_CONSUMED' ||
           failure.code === 'AUTH_SIGNATURE_INVALID' ||
           failure.code === 'AUTH_CHAIN_MISMATCH'
         ) {
-          clearAuthState('expired', failure.message);
+          clearAuthState('expired', failure.message, 'authenticate-expired');
         } else {
-          clearAuthState('error', failure.message);
+          clearAuthState('error', failure.message, 'authenticate-error');
         }
         return false;
       } finally {
@@ -355,7 +497,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }
 
         if (normalizeAddress(session.session.wallet) === normalizeAddress(currentAddress)) {
-          clearAuthState('authenticated');
+          clearAuthState('authenticated', null, 'auth-event-session-changed');
         }
       },
       onAuthFailure: (failure) => {
@@ -364,7 +506,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         }
 
         if (failure.code === 'AUTH_REFRESH_TOKEN_MISSING') {
-          clearAuthState('unauthenticated');
+          clearAuthState('unauthenticated', null, 'auth-event-missing-refresh-token');
           return;
         }
 
@@ -373,11 +515,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           failure.code === 'AUTH_SESSION_REVOKED' ||
           failure.code === 'AUTH_REFRESH_TOKEN_INVALID'
         ) {
-          clearAuthState('expired', sessionExpiredMessage(failure.code));
+          clearAuthState('expired', sessionExpiredMessage(failure.code), 'auth-event-expired-session');
           return;
         }
 
-        clearAuthState('error', failure.message);
+        clearAuthState('error', failure.message, 'auth-event-error');
       }
     });
   }, []);
@@ -386,7 +528,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     if (!hasProvider) {
       setWalletReady(true);
       setStatus('unsupported');
-      clearAuthState('unauthenticated', 'Install a compatible wallet to continue.');
+      clearAuthState('unauthenticated', 'Install a compatible wallet to continue.', 'wallet-provider-missing');
       return;
     }
 
@@ -449,7 +591,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       if (isSignatureRejection(error)) {
         clearAuthState('unauthenticated', 'Wallet connection was cancelled.');
       } else {
-        clearAuthState('error', 'Wallet connection failed.');
+        clearAuthState('error', 'Wallet connection failed.', 'wallet-connect-error');
       }
     }
   }
@@ -457,8 +599,8 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   async function disconnectWallet() {
     await logoutAuthSession().catch(() => undefined);
     activeAddressRef.current = null;
-    clearWalletState('disconnected');
-    clearAuthState('unauthenticated');
+    clearWalletState('disconnected', 'wallet-disconnect');
+    clearAuthState('unauthenticated', null, 'wallet-disconnect');
     setWalletReady(true);
     setIsMiniPay(false);
   }
