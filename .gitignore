@@ -19,3 +19,4 @@ yarn-error.log*
 *.save
 .env
 .env.production
+contracts/cache/

@@ -33,7 +33,7 @@ interface WalletContextValue {
   signer: ethers.JsonRpcSigner | null;
   provider: BrowserProvider | null;
   connectWallet: () => Promise<void>;
-  authenticateWallet: () => Promise<void>;
+  authenticateWallet: () => Promise<boolean>;
   disconnectWallet: () => Promise<void>;
   switchCeloNetwork: () => Promise<void>;
 }
@@ -137,7 +137,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isMiniPay, setIsMiniPay] = useState(false);
 
   const restorePromiseRef = useRef<Promise<RestoreOutcome> | null>(null);
-  const authenticatePromiseRef = useRef<Promise<void> | null>(null);
+  const authenticatePromiseRef = useRef<Promise<boolean> | null>(null);
   const activeAddressRef = useRef<string | null>(null);
   const hasProvider = typeof window !== 'undefined' && Boolean((window as Window & { ethereum?: unknown }).ethereum);
 
@@ -205,7 +205,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     return restoreTask;
   }
 
-  async function syncWalletState(browserProvider: BrowserProvider, reason: 'init' | 'connect' | 'change' = 'init') {
+  async function syncWalletState(browserProvider: BrowserProvider, reason: 'init' | 'connect' | 'change' | 'switch' = 'init') {
     try {
       const ethereum = (window as Window & { ethereum?: WalletProviderShape }).ethereum;
       const accounts = (await withRpcRetry('eth_accounts', () => browserProvider.send('eth_accounts', []))) as string[];
@@ -254,7 +254,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
       const restoreOutcome = await restoreSessionForWallet(nextAddress);
       if (
-        reason === 'connect' &&
+        (reason === 'connect' || reason === 'switch') &&
         !restoreOutcome.restored &&
         restoreOutcome.failure.code === 'AUTH_REFRESH_TOKEN_MISSING' &&
         isSupportedCeloChain(diagnostics.normalizedChainId)
@@ -289,12 +289,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
     if (!activeSigner || !activeAddress || !activeChainId) {
       clearAuthState('unauthenticated', 'Connect your wallet before signing in.');
-      return;
+      return false;
     }
 
     if (!isSupportedCeloChain(activeChainId)) {
       clearAuthState('unauthenticated', formatSupportedNetworkMessage(activeChainId, network));
-      return;
+      return false;
     }
 
     setAuthStatus('authenticating');
@@ -312,10 +312,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
         applyVerifiedAuthSession(verifyResponse.data);
         clearAuthState('authenticated');
+        return true;
       } catch (error) {
         if (isSignatureRejection(error)) {
           clearAuthState('unauthenticated', 'Signature request was cancelled.');
-          return;
+          return false;
         }
 
         const failure = extractAuthFailure(error);
@@ -329,7 +330,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         } else {
           clearAuthState('error', failure.message);
         }
-        throw error;
+        return false;
       } finally {
         authenticatePromiseRef.current = null;
       }
@@ -474,7 +475,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         params: [{ chainId: targetChainHex }]
       });
       if (browserProvider) {
-        await syncWalletState(browserProvider, 'change');
+        await syncWalletState(browserProvider, 'switch');
       }
     } catch (error) {
       if (isAddChainRequired(error)) {
@@ -501,7 +502,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           });
 
           if (browserProvider) {
-            await syncWalletState(browserProvider, 'change');
+            await syncWalletState(browserProvider, 'switch');
           }
           return;
         } catch (addError) {

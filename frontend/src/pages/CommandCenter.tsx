@@ -92,7 +92,7 @@ export default function CommandCenter() {
     return 'RESERVED';
   }
 
-  function requireReadyAuth(actionLabel: string) {
+  async function requireReadyAuth(actionLabel: string) {
     if (!isAuthReady || authStatus === 'restoring') {
       setMessage('Restoring your secure session. Please wait a moment.');
       return false;
@@ -104,8 +104,12 @@ export default function CommandCenter() {
     }
 
     if (authStatus !== 'authenticated') {
-      setMessage(authMessage || `Sign your wallet challenge before ${actionLabel.toLowerCase()}.`);
-      return false;
+      setMessage(authMessage || `Requesting wallet signature before ${actionLabel.toLowerCase()}...`);
+      const authenticated = await authenticateWallet();
+      if (!authenticated) {
+        setMessage(authMessage || `Sign your wallet challenge before ${actionLabel.toLowerCase()}.`);
+        return false;
+      }
     }
 
     return true;
@@ -136,7 +140,7 @@ export default function CommandCenter() {
       setMessage('Connect your wallet first.');
       return;
     }
-    if (!requireReadyAuth('generating quests')) {
+    if (!(await requireReadyAuth('generating quests'))) {
       return;
     }
 
@@ -181,7 +185,7 @@ export default function CommandCenter() {
 
   async function handleStartQuest() {
     if (!address || !forgeQuestManager || !activeQuest) return;
-    if (!requireReadyAuth('starting quests')) {
+    if (!(await requireReadyAuth('starting quests'))) {
       return;
     }
 
@@ -220,7 +224,7 @@ export default function CommandCenter() {
       setMessage('Start the quest onchain before submitting proof.');
       return;
     }
-    if (!requireReadyAuth('submitting proof')) {
+    if (!(await requireReadyAuth('submitting proof'))) {
       return;
     }
 
