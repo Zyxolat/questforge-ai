@@ -11,6 +11,7 @@ import {
 import { buildQuestTemplate } from '../services/questTemplates';
 import { logger } from '../services/logger';
 import { npcRelationshipEngine } from '../services/npcRelationshipEngine';
+import { QuestGenerationError } from '../services/questGenerationErrors';
 import { questNarrativeEngine } from '../services/questNarrativeEngine';
 import { QuestValidationError } from '../services/questValidationEngine';
 import { realtimeEventPublisher } from '../services/realtimeEventPublisher';
@@ -70,8 +71,21 @@ export async function generateQuest(req: Request, res: Response) {
   const chain = req.body.chain || 'Celo';
 
   if (!wallet) {
-    return res.status(400).json({ error: 'Wallet is required' });
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_REQUEST_INVALID',
+        message: 'Wallet is required'
+      },
+      details: ['Authenticated wallet context was missing on the quest generation request.']
+    });
   }
+
+  logger.info('[QUEST] Generate quest request received', {
+    wallet,
+    userId: req.auth?.userId ?? null,
+    chain,
+    hasAccessToken: Boolean(req.get('authorization'))
+  });
 
   try {
     const user = await upsertUser(normalizeWallet(wallet));
@@ -79,7 +93,10 @@ export async function generateQuest(req: Request, res: Response) {
 
     if (!dailyLimits.canAttempt) {
       return res.status(429).json({
-        error: dailyLimits.reason,
+        error: {
+          code: 'QUEST_DAILY_LIMIT_REACHED',
+          message: dailyLimits.reason || 'Daily quest generation limit reached'
+        },
         remaining: dailyLimits.remaining
       });
     }
@@ -88,6 +105,14 @@ export async function generateQuest(req: Request, res: Response) {
 
     await incrementDailyActivity(user.id, { questsAttempted: 1 });
     const activitySnapshot = await getDailyActivity(user.id);
+
+    logger.info('[QUEST] Generate quest request succeeded', {
+      wallet,
+      userId: user.id,
+      questId: generated.quest.id,
+      orchestrationId: generated.quest.orchestrationId,
+      rewardAmount: generated.quest.rewardAmount
+    });
 
     res.json({
       quest: {
@@ -129,9 +154,32 @@ export async function generateQuest(req: Request, res: Response) {
       }
     });
   } catch (error) {
+    if (error instanceof QuestGenerationError) {
+      logger.warn('[QUEST] Generate quest request failed with structured service error', {
+        wallet,
+        code: error.code,
+        status: error.status,
+        details: error.details
+      });
+      return res.status(error.status).json({
+        error: {
+          code: error.code,
+          message: error.message
+        },
+        details: error.details
+      });
+    }
+
     if (error instanceof QuestValidationError) {
+      logger.warn('[QUEST] Generate quest request failed deterministic validation', {
+        wallet,
+        details: error.details
+      });
       return res.status(400).json({
-        error: error.message,
+        error: {
+          code: 'QUEST_VALIDATION_FAILED',
+          message: error.message
+        },
         details: error.details
       });
     }
@@ -139,7 +187,12 @@ export async function generateQuest(req: Request, res: Response) {
     logger.error('Quest generation failed', error, {
       wallet
     });
-    res.status(500).json({ error: 'Failed to generate quest' });
+    res.status(500).json({
+      error: {
+        code: 'QUEST_GENERATION_FAILED',
+        message: 'Quest generation failed unexpectedly'
+      }
+    });
   }
 }
 

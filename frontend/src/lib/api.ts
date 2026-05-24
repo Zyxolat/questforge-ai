@@ -46,6 +46,7 @@ export interface AuthFailure {
   code: string;
   message: string;
   action: 'none' | 'refresh' | 'sign';
+  details?: string[];
 }
 
 export class AuthApiError extends Error {
@@ -211,8 +212,9 @@ function toAuthFailure(error: unknown, fallbackAction: AuthFailure['action'] = '
 
     const responseData = error.response?.data as
       | {
-          error?: { code?: string; message?: string };
+          error?: { code?: string; message?: string } | string;
           action?: AuthFailure['action'];
+          details?: unknown;
         }
       | undefined;
     const htmlLikeResponse = isHtmlLikeResponse(error.response?.data);
@@ -246,9 +248,18 @@ function toAuthFailure(error: unknown, fallbackAction: AuthFailure['action'] = '
 
     return {
       status: error.response?.status ?? 500,
-      code: responseData?.error?.code || 'AUTH_UNKNOWN',
-      message: responseData?.error?.message || error.message || 'Authentication failed',
-      action: responseData?.action || fallbackAction
+      code:
+        typeof responseData?.error === 'object' && responseData.error
+          ? responseData.error.code || 'AUTH_UNKNOWN'
+          : 'AUTH_UNKNOWN',
+      message:
+        typeof responseData?.error === 'string'
+          ? responseData.error
+          : responseData?.error?.message || error.message || 'Authentication failed',
+      action: responseData?.action || fallbackAction,
+      details: Array.isArray(responseData?.details)
+        ? responseData.details.filter((detail): detail is string => typeof detail === 'string')
+        : undefined
     };
   }
 
@@ -517,8 +528,33 @@ export function fetchRealtimeSync(afterId: number) {
   return api.get('/realtime/sync', { params: { afterId } });
 }
 
-export function generateQuest() {
-  return api.post('/quests/generate');
+export function generateQuest(chain = 'Celo') {
+  console.debug('[API] Generating quest', {
+    chain,
+    hasAccessToken: Boolean(currentAccessToken)
+  });
+
+  return api
+    .post('/quests/generate', { chain })
+    .then((response) => {
+      console.debug('[API] Generate quest response received', {
+        status: response.status,
+        hasData: !!response.data,
+        dataKeys: response.data ? Object.keys(response.data) : [],
+        questId: response.data?.quest?.id,
+        orchestrationId: response.data?.quest?.orchestrationId
+      });
+      return response;
+    })
+    .catch((error) => {
+      console.error('[API] Generate quest request failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        responseData: axios.isAxiosError(error) ? JSON.stringify(error.response?.data).slice(0, 500) : undefined
+      });
+      throw error;
+    });
 }
 
 export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {

@@ -3,6 +3,7 @@ import { QUEST_CONFIG, getDailyActivity } from './antiAbuse';
 import { prisma } from './chain';
 import { contracts } from './contracts';
 import { logger } from './logger';
+import { QuestGenerationError } from './questGenerationErrors';
 
 type ActiveWorldModifier = {
   id: string;
@@ -18,6 +19,8 @@ export interface RewardCalculation {
   reasoning: string;
   worldMultiplier: number;
   treasuryCap: number;
+  availableRewardLiquidity: number;
+  treasuryHealthy: boolean;
   activeWorldModifiers: ActiveWorldModifier[];
 }
 
@@ -43,6 +46,20 @@ class AIRewardEngine {
         BASE_REWARD_FLOOR,
         QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO - (activity?.rewardsEarned ?? 0)
       );
+      const minimumRewardForStake = this.minimumRewardForStake(input.stakeAmount);
+
+      if (treasuryState.availableRewardLiquidity <= 0) {
+        throw new QuestGenerationError(
+          'QUEST_TREASURY_DEPLETED',
+          'Quest generation is temporarily unavailable because the reward treasury has no available liquidity.',
+          503,
+          [
+            `Treasury address: ${contracts.treasury.target?.toString() ?? 'unknown'}`,
+            `Available reward liquidity: ${treasuryState.availableRewardLiquidity.toFixed(4)} CELO`,
+            `Minimum reward required for difficulty ${input.difficulty}: ${baseReward.toFixed(4)} CELO`
+          ]
+        );
+      }
 
       let rewardAmount = baseReward * input.streakMultiplier * worldMultiplier;
       rewardAmount = this.roundCelo(
@@ -54,7 +71,21 @@ class AIRewardEngine {
         )
       );
 
-      rewardAmount = Math.max(rewardAmount, this.minimumRewardForStake(input.stakeAmount));
+      if (treasuryState.treasuryCap < minimumRewardForStake) {
+        throw new QuestGenerationError(
+          'QUEST_TREASURY_INSUFFICIENT_LIQUIDITY',
+          'Quest generation is temporarily unavailable because treasury liquidity is too low for a safe reward.',
+          503,
+          [
+            `Treasury address: ${contracts.treasury.target?.toString() ?? 'unknown'}`,
+            `Available reward liquidity: ${treasuryState.availableRewardLiquidity.toFixed(4)} CELO`,
+            `Treasury reward cap: ${treasuryState.treasuryCap.toFixed(4)} CELO`,
+            `Minimum safe reward for stake ${input.stakeAmount.toFixed(4)} CELO: ${minimumRewardForStake.toFixed(4)} CELO`
+          ]
+        );
+      }
+
+      rewardAmount = Math.max(rewardAmount, minimumRewardForStake);
 
       const xpReward = Math.max(
         150,
@@ -74,9 +105,15 @@ class AIRewardEngine {
         }),
         worldMultiplier,
         treasuryCap: treasuryState.treasuryCap,
+        availableRewardLiquidity: treasuryState.availableRewardLiquidity,
+        treasuryHealthy: treasuryState.treasuryHealthy,
         activeWorldModifiers
       };
     } catch (error) {
+      if (error instanceof QuestGenerationError) {
+        throw error;
+      }
+
       logger.warn('[REWARD] Falling back to deterministic reward profile', {
         userId: input.userId,
         error: error instanceof Error ? error.message : 'Unknown reward engine failure'
@@ -88,6 +125,8 @@ class AIRewardEngine {
         reasoning: 'Fallback deterministic reward profile applied',
         worldMultiplier: 1,
         treasuryCap: QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
+        availableRewardLiquidity: QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
+        treasuryHealthy: false,
         activeWorldModifiers: []
       };
     }
@@ -115,7 +154,7 @@ class AIRewardEngine {
     });
   }
 
-  private async loadTreasuryState(): Promise<{ treasuryCap: number; treasuryHealthy: boolean }> {
+  private async loadTreasuryState(): Promise<{ treasuryCap: number; availableRewardLiquidity: number; treasuryHealthy: boolean }> {
     try {
       const [availableLiquidityRaw, isSolvent] = await Promise.all([
         contracts.treasury.availableRewardLiquidity(),
@@ -132,6 +171,7 @@ class AIRewardEngine {
 
       return {
         treasuryCap,
+        availableRewardLiquidity: availableLiquidity,
         treasuryHealthy: Boolean(isSolvent)
       };
     } catch (error) {
@@ -141,6 +181,7 @@ class AIRewardEngine {
 
       return {
         treasuryCap: 0.1,
+        availableRewardLiquidity: 2,
         treasuryHealthy: false
       };
     }

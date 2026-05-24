@@ -147,8 +147,23 @@ export default function CommandCenter() {
     setLoading(true);
     setMessage('Summoning the Forge Master...');
     try {
-      const response = await generateQuest();
+      console.debug('[CommandCenter] Starting generate quest flow', {
+        wallet: address,
+        chainId,
+        network
+      });
+
+      const response = await generateQuest('Celo');
       const template = response.data.quest as GeneratedQuestTemplate;
+
+      console.debug('[CommandCenter] Quest template received', {
+        questId: template.id,
+        orchestrationId: template.orchestrationId,
+        rewardAmount: template.rewardAmount,
+        stakeAmount: template.stakeAmount,
+        xpReward: template.xpReward
+      });
+
       const tx = await forgeQuestManager.createQuest(
         template.title,
         template.metadataUri,
@@ -175,9 +190,17 @@ export default function CommandCenter() {
       setMessage('Quest forged onchain. Realtime state is tracking it now.');
       await syncNow();
     } catch (error) {
-      console.error(error);
+      console.error('[CommandCenter] Generate quest flow failed', error);
       const failure = extractAuthFailure(error);
-      setMessage(failure.code === 'AUTH_UNKNOWN' ? 'Failed to generate quest.' : failure.message);
+      console.debug('[CommandCenter] Generate quest failure extracted', {
+        code: failure.code,
+        status: failure.status,
+        message: failure.message,
+        details: failure.details
+      });
+
+      const detailText = failure.details?.length ? ` ${failure.details.join(' ')}` : '';
+      setMessage(`${failure.message}${detailText}`.trim());
     } finally {
       setLoading(false);
     }

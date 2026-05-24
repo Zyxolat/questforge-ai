@@ -5,9 +5,11 @@ import { aiMemoryGraph } from './aiMemoryGraph';
 import { calculateStreakMultiplier } from './antiAbuse';
 import { factionInfluenceEngine } from './factionInfluenceEngine';
 import { normalizeWallet, prisma } from './chain';
+import { logger } from './logger';
 import { npcRelationshipEngine } from './npcRelationshipEngine';
 import { playerNarrativeState } from './playerNarrativeState';
 import { questNarrativeEngine } from './questNarrativeEngine';
+import { QuestGenerationError } from './questGenerationErrors';
 import { questValidationEngine } from './questValidationEngine';
 import type { PlayerQuestProfile, QuestNpcDraft, ValidatedQuestOutput } from './questOrchestrationTypes';
 import { realtimeEventPublisher } from './realtimeEventPublisher';
@@ -47,6 +49,10 @@ class AIQuestGenerationEngine {
 
   async generateQuest(input: { wallet: string; chain: string }): Promise<QuestGenerationResult> {
     const wallet = normalizeWallet(input.wallet);
+    logger.info('[QUEST-GENERATION] Starting quest generation', {
+      wallet,
+      chain: input.chain
+    });
     await worldStateCoordinator.initialize();
 
     const user = await prisma.user.findUnique({
@@ -83,6 +89,35 @@ class AIQuestGenerationEngine {
       stakeAmount: difficultyProfile.recommendedStake,
       streakMultiplier
     });
+
+    logger.info('[QUEST-GENERATION] Difficulty and reward profiles computed', {
+      wallet,
+      userId: user.id,
+      difficulty: difficultyProfile.difficulty,
+      recommendedStake: difficultyProfile.recommendedStake,
+      rewardAmount: rewardProfile.rewardAmount,
+      rewardBounds: difficultyProfile.rewardBounds,
+      treasuryCap: rewardProfile.treasuryCap,
+      availableRewardLiquidity: rewardProfile.availableRewardLiquidity,
+      treasuryHealthy: rewardProfile.treasuryHealthy
+    });
+
+    if (
+      rewardProfile.rewardAmount < difficultyProfile.rewardBounds.min ||
+      rewardProfile.rewardAmount > difficultyProfile.rewardBounds.max
+    ) {
+      throw new QuestGenerationError(
+        'QUEST_REWARD_CONFIGURATION_INVALID',
+        'Quest generation produced an invalid reward configuration.',
+        500,
+        [
+          `Reward amount: ${rewardProfile.rewardAmount.toFixed(4)} CELO`,
+          `Allowed reward bounds: ${difficultyProfile.rewardBounds.min.toFixed(4)}-${difficultyProfile.rewardBounds.max.toFixed(4)} CELO`,
+          `Treasury cap: ${rewardProfile.treasuryCap.toFixed(4)} CELO`,
+          `Available reward liquidity: ${rewardProfile.availableRewardLiquidity.toFixed(4)} CELO`
+        ]
+      );
+    }
 
     const playerProfile = await this.buildPlayerProfile(user);
     const npc = await this.selectQuestNpc(user, worldState, playerProfile);
@@ -222,6 +257,15 @@ class AIQuestGenerationEngine {
     }
     this.diagnostics.lastGeneratedQuestId = persistedQuest.id;
     this.diagnostics.lastGeneratedAt = new Date().toISOString();
+
+    logger.info('[QUEST-GENERATION] Quest generated successfully', {
+      wallet,
+      userId: user.id,
+      questId: persistedQuest.id,
+      orchestrationId: validated.orchestrationId,
+      difficulty: validated.difficulty,
+      rewardAmount: validated.rewardAmount
+    });
 
     return {
       quest: {
