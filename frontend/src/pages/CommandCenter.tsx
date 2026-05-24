@@ -177,6 +177,40 @@ export default function CommandCenter() {
     return parsedLog.args.questId.toString();
   }
 
+  async function registerOnchainQuestWithRetry(
+    questId: string,
+    chainQuestId: string,
+    creationTxHash: string,
+    maxRetries = 3
+  ): Promise<QuestState | null> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.info(`[CommandCenter] Backend onchain quest registration attempt ${attempt}/${maxRetries}`);
+        const registrationResponse = await registerOnchainQuest(questId, chainQuestId, creationTxHash);
+        const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
+        if (registeredQuest) {
+          console.info('[CommandCenter] Backend onchain quest registration succeeded', { questId, chainQuestId });
+          return registeredQuest;
+        }
+        return null;
+      } catch (error) {
+        lastError = error;
+        console.warn(`[CommandCenter] Registration attempt ${attempt} failed`, error);
+
+        if (attempt < maxRetries) {
+          const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          console.info(`[CommandCenter] Retrying in ${delayMs}ms...`);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
+    console.error('[CommandCenter] Backend onchain quest registration failed after max retries', lastError);
+    throw lastError;
+  }
+
   async function handleGenerateQuest() {
     if (!address || !forgeQuestManager) {
       setMessage('Connect your wallet first.');
@@ -239,26 +273,28 @@ export default function CommandCenter() {
         }
       };
 
+      setMessage('Quest forged onchain. Syncing with backend...');
+
       try {
-        const registrationResponse = await registerOnchainQuest(String(template.id), chainQuestId, tx.hash);
-        const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
+        const registeredQuest = await registerOnchainQuestWithRetry(String(template.id), chainQuestId, tx.hash);
         if (registeredQuest) {
           persistedQuest = {
             ...persistedQuest,
             ...registeredQuest
           };
+          setMessage('Quest forged onchain and synced with backend. Ready to start!');
         }
       } catch (registrationError) {
-        console.error('[CommandCenter] Backend onchain quest registration failed', registrationError);
-        setMessage(`Quest forged onchain, but backend registration is still catching up. ${formatActionFailure(registrationError, 'Backend sync is delayed.')}`);
+        console.error('[CommandCenter] Backend onchain quest registration failed after retries', registrationError);
+        setMessage(
+          `Quest forged onchain, but backend sync is delayed. You can still start it, but it may retry syncing in the background. ${formatActionFailure(
+            registrationError,
+            'Wait a moment before starting.'
+          )}`
+        );
       }
 
       upsertQuest(persistedQuest);
-      setMessage((current) =>
-        typeof current === 'string' && current.startsWith('Quest forged onchain')
-          ? current
-          : 'Quest forged onchain. Realtime state is tracking it now.'
-      );
       await syncNow();
     } catch (error) {
       console.error('[CommandCenter] Generate quest flow failed', error);
@@ -275,11 +311,21 @@ export default function CommandCenter() {
     }
 
     setLoading(true);
-    setMessage('Submitting your stake to the Forge...');
+    setMessage('Checking quest status and syncing...');
 
     try {
       if (!activeQuest.chainQuestId) {
-        throw new Error('Quest is missing its onchain id. Wait for backend sync or regenerate the quest.');
+        setMessage('Quest is syncing with backend. Attempting to refresh...');
+        await syncNow();
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        if (!activeQuest.chainQuestId) {
+          throw new Error(
+            'Quest is still missing its onchain id after sync. Please wait a moment and try again, or regenerate the quest.'
+          );
+        }
+
+        setMessage('Quest sync complete. Proceeding to start...');
       }
 
       if (!provider) {
@@ -430,7 +476,17 @@ export default function CommandCenter() {
 
     try {
       if (!activeQuest.chainQuestId) {
-        throw new Error('Quest is missing its onchain id. Wait for backend sync before submitting proof.');
+        setMessage('Quest is syncing with backend. Attempting to refresh...');
+        await syncNow();
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+
+        if (!activeQuest.chainQuestId) {
+          throw new Error(
+            'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
+          );
+        }
+
+        setMessage('Quest sync complete. Proceeding with proof submission...');
       }
 
       const chainQuestId = BigInt(String(activeQuest.chainQuestId));
