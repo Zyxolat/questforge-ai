@@ -169,6 +169,10 @@ function parseOrigins(name: string, raw: string) {
   return values.map((value) => parseUrl(name, value).origin);
 }
 
+function dedupeOrigins(origins: string[]) {
+  return [...new Set(origins)];
+}
+
 function parseUrlList(name: string, raw: string) {
   return raw
     .split(',')
@@ -301,9 +305,25 @@ export function validateEnvironment(): EnvValidationResult {
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
-  const corsOrigins = captureRequired('CORS_ORIGIN', 'Application URLs', errors, (raw) =>
-    parseOrigins('CORS_ORIGIN', raw)
-  );
+  const corsOriginRaw = optionalEnv('CORS_ORIGIN') || optionalEnv('CORS_ORIGINS');
+  let corsOrigins: string[] | undefined;
+  if (corsOriginRaw) {
+    try {
+      corsOrigins = parseOrigins('CORS_ORIGIN', corsOriginRaw);
+    } catch (error) {
+      addIssue(errors, 'Application URLs', 'CORS_ORIGIN', error instanceof Error ? error.message : String(error));
+    }
+  } else if (frontendUrl) {
+    corsOrigins = [frontendUrl.origin];
+    addIssue(
+      warnings,
+      'Application URLs',
+      'CORS_ORIGIN',
+      'not set; defaulting to the FRONTEND_URL origin for credentialed requests'
+    );
+  } else {
+    addIssue(errors, 'Application URLs', 'CORS_ORIGIN', 'is required when FRONTEND_URL is unavailable');
+  }
   const databaseUrl = captureRequired('DATABASE_URL', 'Database', errors, (raw) =>
     parseDatabaseUrl('DATABASE_URL', raw)
   );
@@ -378,10 +398,45 @@ export function validateEnvironment(): EnvValidationResult {
   const authNonceTtlRaw = optionalEnv('AUTH_NONCE_TTL_MINUTES') || '5';
   const authSessionTtlRaw = optionalEnv('AUTH_SESSION_TTL_HOURS') || '168';
   const cookieSecureDefault = nodeEnv === 'production';
+  const cookieSameSiteDefault: SameSite = nodeEnv === 'production' ? 'none' : 'lax';
+
+  const resolvedCookieSecure = parseBoolean('AUTH_COOKIE_SECURE', optionalEnv('AUTH_COOKIE_SECURE'), cookieSecureDefault);
+  const resolvedCookieSameSite = parseSameSite(
+    'AUTH_COOKIE_SAME_SITE',
+    optionalEnv('AUTH_COOKIE_SAME_SITE'),
+    cookieSameSiteDefault
+  );
+
+  if (nodeEnv === 'production' && !resolvedCookieSecure) {
+    addIssue(errors, 'Authentication', 'AUTH_COOKIE_SECURE', 'must be true in production for HTTPS cookie delivery');
+  }
+
+  if (nodeEnv === 'production' && resolvedCookieSameSite !== 'none') {
+    addIssue(
+      errors,
+      'Authentication',
+      'AUTH_COOKIE_SAME_SITE',
+      'must be "none" in production when the frontend and backend are served from different origins'
+    );
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, errors, warnings };
+  }
 
   try {
     const resolvedJwtExpiresIn = jwtExpiresIn!;
     const resolvedAuthUri = authUri!;
+    const resolvedCorsOrigins = dedupeOrigins([frontendUrl!.origin, ...(corsOrigins || [])]);
+
+    if (corsOrigins && !corsOrigins.includes(frontendUrl!.origin)) {
+      addIssue(
+        warnings,
+        'Application URLs',
+        'CORS_ORIGIN',
+        `did not include FRONTEND_URL origin ${frontendUrl!.origin}; adding it automatically`
+      );
+    }
 
     return {
       ok: true,
@@ -392,7 +447,7 @@ export function validateEnvironment(): EnvValidationResult {
         OPENAI_API_KEY: optionalEnv('OPENAI_API_KEY') || '',
         FRONTEND_URL: frontendUrl!.toString(),
         FRONTEND_ORIGIN: frontendUrl!.origin,
-        CORS_ORIGINS: corsOrigins!,
+        CORS_ORIGINS: resolvedCorsOrigins,
         CELO_RPC_URL: celoRpcUrl!,
         CELO_RPC_FALLBACK_URLS: celoRpcFallbackUrls || [],
         CELO_CHAIN_ID: celoChainId!,
@@ -423,12 +478,8 @@ export function validateEnvironment(): EnvValidationResult {
         AUTH_COOKIE_NAME: optionalEnv('AUTH_COOKIE_NAME') || 'questforge_session',
         AUTH_COOKIE_DOMAIN: optionalEnv('AUTH_COOKIE_DOMAIN'),
         AUTH_COOKIE_PATH: optionalEnv('AUTH_COOKIE_PATH') || '/',
-        AUTH_COOKIE_SECURE: parseBoolean('AUTH_COOKIE_SECURE', optionalEnv('AUTH_COOKIE_SECURE'), cookieSecureDefault),
-        AUTH_COOKIE_SAME_SITE: parseSameSite(
-          'AUTH_COOKIE_SAME_SITE',
-          optionalEnv('AUTH_COOKIE_SAME_SITE'),
-          'lax'
-        ),
+        AUTH_COOKIE_SECURE: resolvedCookieSecure,
+        AUTH_COOKIE_SAME_SITE: resolvedCookieSameSite,
         JWT_SECRET: jwtSecret!,
         JWT_EXPIRES_IN: resolvedJwtExpiresIn,
         JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(resolvedJwtExpiresIn),

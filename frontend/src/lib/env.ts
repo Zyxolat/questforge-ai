@@ -11,7 +11,15 @@ function requireEnv(name: string, value: string | undefined) {
 
 function optionalEnv(value: string | undefined) {
   const normalized = value?.trim();
-  return normalized || undefined;
+  if (!normalized) {
+    return undefined;
+  }
+
+  // Treat deployment-template placeholders as unset at runtime.
+  if (/^\$\{\{.+\}\}$/.test(normalized) || /^\{\{.+\}\}$/.test(normalized)) {
+    return undefined;
+  }
+  return normalized;
 }
 
 function parseAbsoluteUrl(name: string, value: string) {
@@ -32,11 +40,18 @@ function parseAddress(name: string, value: string) {
 
 function parseApiBaseUrl(value: string | undefined) {
   const raw = optionalEnv(value);
-  const fallback = import.meta.env.DEV ? 'http://localhost:4000/api' : '/api';
-  const resolved = raw || fallback;
+  if (!raw && import.meta.env.PROD) {
+    throw new Error('VITE_API_BASE_URL is required in production and must point to the backend /api base URL');
+  }
+
+  const resolved = raw || 'http://localhost:4000/api';
 
   if (resolved.startsWith('/')) {
-    return resolved;
+    if (import.meta.env.DEV) {
+      return resolved;
+    }
+
+    throw new Error('VITE_API_BASE_URL must be an absolute backend /api URL in production, not a relative path like /api');
   }
 
   try {

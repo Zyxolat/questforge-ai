@@ -112,6 +112,31 @@ function loadEffectiveProductionEnv() {
   return mergedEnv;
 }
 
+function requireEnvValue(envMap: Record<string, string | undefined>, name: string) {
+  const value = envMap[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
+}
+
+function requirePrivateKey(envMap: Record<string, string | undefined>) {
+  const value = requireEnvValue(envMap, 'PRIVATE_KEY');
+
+  if (!/^0x[a-fA-F0-9]{64}$/.test(value)) {
+    throw new Error(
+      'PRIVATE_KEY must be a 32-byte hex string. Set it in contracts/.env.production, repo-root .env.production, or Railway/Vercel secrets before deploying.'
+    );
+  }
+
+  if (/^0x0{64}$/i.test(value)) {
+    throw new Error('PRIVATE_KEY must not be the all-zero private key.');
+  }
+
+  return value;
+}
+
 function writeFileAtomic(filePath: string, content: string) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -169,8 +194,10 @@ async function main() {
     // Step 1: Validate environment
     log('VALIDATION', 'start', 'Validating production environment...');
     
-    if (!fs.existsSync(envPath)) {
-      throw new Error(`.env.production not found at ${envPath}`);
+    if (!fs.existsSync(envPath) && !fs.existsSync(contractsEnvPath)) {
+      throw new Error(
+        `Production env file not found. Expected ${envPath} and/or ${contractsEnvPath} so Hardhat and the app can load production secrets.`
+      );
     }
 
     const effectiveEnv = loadEffectiveProductionEnv();
@@ -195,6 +222,12 @@ async function main() {
     
     if (missing.length > 0) {
       throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    }
+
+    requirePrivateKey(effectiveEnv);
+
+    if (effectiveEnv.CELO_CHAIN_ID?.trim() !== '42220') {
+      throw new Error(`CELO_CHAIN_ID must be 42220 for production deployments. Received: ${effectiveEnv.CELO_CHAIN_ID}`);
     }
     
     log('VALIDATION', 'success', 'Environment validation passed');

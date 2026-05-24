@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Request, Response, Router } from 'express';
 import {
   generateQuest,
   getDailyMissions,
@@ -29,9 +29,24 @@ import {
 
 export const apiRouter = Router();
 
+function authMethodNotAllowed(allowedMethod: 'POST') {
+  return (_req: Request, res: Response) => {
+    res.set('Allow', allowedMethod);
+    res.status(405).json({
+      error: {
+        code: 'AUTH_METHOD_NOT_ALLOWED',
+        message: `Use ${allowedMethod} for this authentication endpoint`
+      },
+      action: 'none'
+    });
+  };
+}
+
 apiRouter.post('/auth/nonce', authNonceLimiter, createAuthNonce);
 apiRouter.post('/auth/verify', authVerifyLimiter, verifyAuthSignature);
 apiRouter.post('/auth/refresh', authRefreshLimiter, refreshAuthenticatedSession);
+apiRouter.get('/auth/verify', authMethodNotAllowed('POST'));
+apiRouter.get('/auth/refresh', authMethodNotAllowed('POST'));
 apiRouter.get('/auth/me', requireAuth, getAuthenticatedSession);
 apiRouter.post('/auth/logout', logoutSession);
 

@@ -1,4 +1,4 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import axios, { AxiosError, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
 import { env } from './env';
 
 const API_BASE = env.API_BASE_URL;
@@ -74,7 +74,10 @@ type AuthEventHandlers = {
 const apiDefaults = {
   baseURL: API_BASE,
   timeout: 12000,
-  withCredentials: true
+  withCredentials: true,
+  headers: {
+    Accept: 'application/json'
+  }
 };
 
 const refreshClient = axios.create(apiDefaults);
@@ -90,6 +93,102 @@ function isAuthRoute(url: string | undefined) {
   return AUTH_ROUTE_SUFFIXES.some((suffix) => url.endsWith(suffix));
 }
 
+function isHtmlLikeResponse(data: unknown) {
+  return (
+    typeof data === 'string' &&
+    (/<html/i.test(data) || /<!doctype/i.test(data) || /page could not be found/i.test(data))
+  );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function throwInvalidApiResponse(message: string): never {
+  throw new AuthApiError({
+    status: 502,
+    code: 'AUTH_API_INVALID_RESPONSE',
+    message,
+    action: 'sign'
+  });
+}
+
+function getHeaderValue(headers: AxiosResponse['headers'], name: string) {
+  if (!headers) {
+    return '';
+  }
+
+  const value = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+  if (Array.isArray(value)) {
+    return value.join(', ');
+  }
+
+  return typeof value === 'string' ? value : '';
+}
+
+function assertJsonApiResponse<T>(response: AxiosResponse<T>) {
+  const contentType = getHeaderValue(response.headers, 'content-type').toLowerCase();
+  if (contentType.includes('text/html') || isHtmlLikeResponse(response.data)) {
+    throwInvalidApiResponse('Backend API not reachable or wrong base URL');
+  }
+
+  return response;
+}
+
+function assertAuthNoncePayload(data: unknown) {
+  if (!isRecord(data)) {
+    throwInvalidApiResponse('Backend API not reachable or wrong base URL.');
+  }
+
+  if (typeof data.nonce !== 'string' || typeof data.message !== 'string' || typeof data.expiresAt !== 'string') {
+    throwInvalidApiResponse('Authentication nonce response was invalid. Check backend routing and VITE_API_BASE_URL.');
+  }
+
+  return data as { nonce: string; message: string; expiresAt: string };
+}
+
+function assertAuthSessionPayload(data: unknown): AuthSessionPayload {
+  if (!isRecord(data)) {
+    throwInvalidApiResponse('Backend API not reachable or wrong base URL.');
+  }
+
+  const session = data.session;
+  const user = data.user;
+  if (
+    typeof data.accessToken !== 'string' ||
+    typeof data.accessTokenExpiresAt !== 'string' ||
+    !isRecord(session) ||
+    typeof session.id !== 'string' ||
+    typeof session.wallet !== 'string' ||
+    typeof session.expiresAt !== 'string' ||
+    !isRecord(user) ||
+    typeof user.id !== 'string' ||
+    typeof user.wallet !== 'string'
+  ) {
+    throwInvalidApiResponse('Authentication session response was invalid. Check backend routing and VITE_API_BASE_URL.');
+  }
+
+  return data as unknown as AuthSessionPayload;
+}
+
+function assertAuthSessionInfo(data: unknown): AuthSessionInfo {
+  if (!isRecord(data) || !isRecord(data.session) || !isRecord(data.user)) {
+    throwInvalidApiResponse('Authenticated session payload was invalid. Check backend routing and VITE_API_BASE_URL.');
+  }
+
+  if (
+    typeof data.session.id !== 'string' ||
+    typeof data.session.wallet !== 'string' ||
+    typeof data.session.expiresAt !== 'string' ||
+    typeof data.user.id !== 'string' ||
+    typeof data.user.wallet !== 'string'
+  ) {
+    throwInvalidApiResponse('Authenticated session payload was invalid. Check backend routing and VITE_API_BASE_URL.');
+  }
+
+  return data as unknown as AuthSessionInfo;
+}
+
 function toAuthFailure(error: unknown, fallbackAction: AuthFailure['action'] = 'sign'): AuthFailure {
   if (error instanceof AuthApiError) {
     return {
@@ -101,12 +200,36 @@ function toAuthFailure(error: unknown, fallbackAction: AuthFailure['action'] = '
   }
 
   if (axios.isAxiosError(error)) {
+    if (!error.response) {
+      return {
+        status: 502,
+        code: 'AUTH_API_UNREACHABLE',
+        message: 'Backend API not reachable or wrong base URL',
+        action: fallbackAction
+      };
+    }
+
     const responseData = error.response?.data as
       | {
           error?: { code?: string; message?: string };
           action?: AuthFailure['action'];
         }
       | undefined;
+
+    if (
+      error.response?.status === 404 &&
+      (!responseData?.error || isHtmlLikeResponse(error.response?.data))
+    ) {
+      const misconfiguredRelativeApi = API_BASE.startsWith('/');
+      return {
+        status: 404,
+        code: 'AUTH_API_NOT_FOUND',
+        message: misconfiguredRelativeApi
+          ? 'Authentication API was not found on this site. Set VITE_API_BASE_URL to your backend /api URL or configure a same-origin /api proxy.'
+          : 'Authentication API endpoint was not found. Check the backend deployment and VITE_API_BASE_URL.',
+        action: 'sign'
+      };
+    }
 
     return {
       status: error.response?.status ?? 500,
@@ -192,8 +315,9 @@ export async function restoreAuthSession(options?: { notifyFailure?: boolean }) 
   refreshPromise = refreshClient
     .post<AuthSessionPayload>('/auth/refresh')
     .then((response) => {
-      applyAuthSession(response.data);
-      return response.data;
+      const payload = assertAuthSessionPayload(response.data);
+      applyAuthSession(payload);
+      return payload;
     })
     .catch((error) => {
       const failure = toAuthFailure(error, 'sign');
@@ -210,6 +334,8 @@ export async function restoreAuthSession(options?: { notifyFailure?: boolean }) 
   return refreshPromise;
 }
 
+refreshClient.interceptors.response.use((response) => assertJsonApiResponse(response));
+
 api.interceptors.request.use((config) => {
   if (shouldUseAccessToken()) {
     config.headers = config.headers ?? {};
@@ -219,7 +345,7 @@ api.interceptors.request.use((config) => {
 });
 
 api.interceptors.response.use(
-  (response) => response,
+  (response) => assertJsonApiResponse(response),
   async (error: AxiosError) => {
     const config = (error.config || {}) as AuthAwareRequestConfig;
 
@@ -237,15 +363,24 @@ api.interceptors.response.use(
 );
 
 export function requestAuthNonce(wallet: string, chainId: number) {
-  return refreshClient.post<{ nonce: string; message: string; expiresAt: string }>('/auth/nonce', { wallet, chainId });
+  return refreshClient.post<{ nonce: string; message: string; expiresAt: string }>('/auth/nonce', { wallet, chainId }).then((response) => ({
+    ...response,
+    data: assertAuthNoncePayload(response.data)
+  }));
 }
 
 export function verifyWalletSignature(wallet: string, nonce: string, signature: string, chainId: number) {
-  return refreshClient.post<AuthSessionPayload>('/auth/verify', { wallet, nonce, signature, chainId });
+  return refreshClient.post<AuthSessionPayload>('/auth/verify', { wallet, nonce, signature, chainId }).then((response) => ({
+    ...response,
+    data: assertAuthSessionPayload(response.data)
+  }));
 }
 
 export function fetchAuthSession() {
-  return api.get<AuthSessionInfo>('/auth/me');
+  return api.get<AuthSessionInfo>('/auth/me').then((response) => ({
+    ...response,
+    data: assertAuthSessionInfo(response.data)
+  }));
 }
 
 export async function logoutAuthSession() {
