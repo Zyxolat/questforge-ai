@@ -40,6 +40,15 @@ function selectedNetworkName() {
   return (process.env.HARDHAT_NETWORK || cliNetwork || "").trim();
 }
 
+function parseLocalChainId() {
+  const raw = process.env.LOCAL_CHAIN_ID?.trim() || "31337";
+  const parsed = Number(raw);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`LOCAL_CHAIN_ID is invalid: ${raw}`);
+  }
+  return parsed;
+}
+
 function resolveCeloAccounts() {
   const raw = process.env.PRIVATE_KEY?.trim();
   const selectedNetwork = selectedNetworkName();
@@ -68,6 +77,8 @@ function resolveCeloAccounts() {
   }
 }
 
+const localChainId = parseLocalChainId();
+
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.20",
@@ -80,6 +91,13 @@ const config: HardhatUserConfig = {
     },
   },
   networks: {
+    hardhat: {
+      chainId: localChainId,
+    },
+    localhost: {
+      url: process.env.LOCAL_RPC_URL || "http://127.0.0.1:8545",
+      chainId: localChainId,
+    },
     celo: {
       url: process.env.CELO_RPC_URL || "https://forno.celo.org",
       accounts: resolveCeloAccounts(),

@@ -112,6 +112,9 @@ function readRequiredAlias(preferredName: string, aliases: string[], group: stri
 
 function optionalEnv(name: string) {
   const value = readEnv(name);
+  if (/^\$\{\{.+\}\}$/.test(value) || /^\{\{.+\}\}$/.test(value)) {
+    return undefined;
+  }
   return value || undefined;
 }
 

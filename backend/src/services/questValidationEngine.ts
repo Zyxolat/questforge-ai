@@ -275,7 +275,64 @@ class QuestValidationEngine {
   }
 
   private encodeMetadataUri(metadata: Record<string, unknown>) {
-    return `data:application/json;base64,${Buffer.from(JSON.stringify(metadata), 'utf8').toString('base64')}`;
+    const onchainMetadata = this.compactMetadataForOnchain(metadata);
+    return `data:application/json;base64,${Buffer.from(JSON.stringify(onchainMetadata), 'utf8').toString('base64')}`;
+  }
+
+  private compactMetadataForOnchain(metadata: Record<string, unknown>) {
+    const orchestration =
+      metadata.orchestration && typeof metadata.orchestration === 'object' && !Array.isArray(metadata.orchestration)
+        ? (metadata.orchestration as Record<string, unknown>)
+        : null;
+    const generation =
+      metadata.generation && typeof metadata.generation === 'object' && !Array.isArray(metadata.generation)
+        ? (metadata.generation as Record<string, unknown>)
+        : null;
+    const adaptive =
+      metadata.adaptive && typeof metadata.adaptive === 'object' && !Array.isArray(metadata.adaptive)
+        ? (metadata.adaptive as Record<string, unknown>)
+        : null;
+
+    return {
+      version: metadata.version,
+      orchestrationId: metadata.orchestrationId,
+      title: metadata.title,
+      description: metadata.description,
+      difficulty: metadata.difficulty,
+      questType: metadata.questType,
+      objective: metadata.objective,
+      lore: metadata.lore,
+      validationRules: metadata.validationRules,
+      chain: metadata.chain,
+      worldStateVersion: metadata.worldStateVersion,
+      requiredTxTypes: metadata.requiredTxTypes,
+      transactionCount: metadata.transactionCount,
+      generation: generation
+        ? {
+            source: generation.source,
+            provider: generation.provider,
+            model: generation.model,
+            promptHash: generation.promptHash,
+            fallbackReason: generation.fallbackReason ?? null
+          }
+        : undefined,
+      adaptive: adaptive
+        ? {
+            recommendedStake: adaptive.recommendedStake,
+            recommendedReward: adaptive.recommendedReward,
+            estimatedDurationSeconds: adaptive.estimatedDurationSeconds
+          }
+        : undefined,
+      orchestration: orchestration
+        ? {
+            riskLevel: orchestration.riskLevel,
+            txRequirements: orchestration.txRequirements,
+            faction: orchestration.faction,
+            npc: orchestration.npc,
+            validationWarnings: orchestration.validationWarnings
+          }
+        : undefined
+    } satisfies Record<string, unknown>;
   }
 
   private roundCelo(value: number) {
