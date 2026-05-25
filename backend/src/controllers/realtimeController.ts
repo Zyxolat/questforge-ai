@@ -30,6 +30,15 @@ function serializeMaybeBigInt(value: bigint | string | null | undefined) {
   return value ?? null;
 }
 
+function extractQuestOrchestrationId(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const orchestrationId = (metadata as { orchestrationId?: unknown }).orchestrationId;
+  return typeof orchestrationId === 'string' ? orchestrationId : null;
+}
+
 async function loadQuestFeed(userId: string, wallet: string) {
   const quests = await prisma.quest.findMany({
     where: {
@@ -68,6 +77,7 @@ async function loadQuestFeed(userId: string, wallet: string) {
 
   return quests.map((quest) => ({
     ...quest,
+    orchestrationId: extractQuestOrchestrationId(quest.metadata),
     chainQuestId: serializeMaybeBigInt(quest.chainQuestId),
     treasuryPayout: payoutsByQuestId.get(quest.id)
       ? {

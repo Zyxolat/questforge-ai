@@ -412,12 +412,22 @@ export default function CommandCenter() {
     }
 
     setMessage('Quest is syncing with backend. Refreshing quest feed and realtime state...');
-    await refreshQuestFeed();
-    latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+    for (let attempt = 1; attempt <= 3 && !latestQuest.chainQuestId; attempt += 1) {
+      await refreshQuestFeed();
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
 
-    if (!latestQuest.chainQuestId) {
+      if (latestQuest.chainQuestId) {
+        break;
+      }
+
       await syncNow();
-      await new Promise((resolve) => setTimeout(resolve, 750));
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+
+      if (latestQuest.chainQuestId) {
+        break;
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 750));
       latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
     }
 

@@ -208,6 +208,12 @@ function asObject(value: unknown) {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonObject) : undefined;
 }
 
+function questOrchestrationIdFromMetadata(metadata: unknown) {
+  const record = asObject(metadata);
+  const orchestrationId = record?.orchestrationId;
+  return typeof orchestrationId === 'string' ? orchestrationId : undefined;
+}
+
 function asObjectArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [] as JsonObject[];
@@ -336,7 +342,7 @@ export function normalizeQuestState(quest: QuestState) {
   return {
     ...quest,
     chainQuestId: asString(quest.chainQuestId),
-    orchestrationId: asString(quest.orchestrationId),
+    orchestrationId: asString(quest.orchestrationId) ?? questOrchestrationIdFromMetadata(quest.metadata),
     id: asString(quest.id),
     status: asString(quest.status),
     treasuryPayout: quest.treasuryPayout

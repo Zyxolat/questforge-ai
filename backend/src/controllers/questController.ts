@@ -49,14 +49,26 @@ function serializeMaybeBigInt(value: bigint | string | null | undefined) {
   return value ?? null;
 }
 
+function extractQuestOrchestrationId(metadata: unknown) {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return null;
+  }
+
+  const orchestrationId = (metadata as { orchestrationId?: unknown }).orchestrationId;
+  return typeof orchestrationId === 'string' ? orchestrationId : null;
+}
+
 function serializeQuest<
   T extends {
     chainQuestId?: bigint | null;
+    orchestrationId?: string | null;
+    metadata?: unknown;
     treasuryPayout?: { chainQuestId: bigint | string } | null;
   }
 >(quest: T) {
   return {
     ...quest,
+    orchestrationId: quest.orchestrationId ?? extractQuestOrchestrationId(quest.metadata),
     chainQuestId: serializeMaybeBigInt(quest.chainQuestId),
     treasuryPayout: quest.treasuryPayout
       ? {
