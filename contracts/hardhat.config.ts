@@ -49,8 +49,38 @@ function parseLocalChainId() {
   return parsed;
 }
 
+function readOptionalEnv(name: string) {
+  const raw = process.env[name]?.trim();
+  if (!raw) {
+    return undefined;
+  }
+
+  // Ignore unresolved template placeholders from deployment platforms.
+  if (/^\$\{\{.+\}\}$/.test(raw) || /^\$\{.+\}$/.test(raw)) {
+    return undefined;
+  }
+
+  return raw;
+}
+
+function normalizePrivateKey(raw: string, name: string) {
+  const normalized = raw.startsWith("0x") ? raw : `0x${raw}`;
+
+  if (!/^0x[a-fA-F0-9]{64}$/.test(normalized)) {
+    throw new Error(
+      `${name} must be a 32-byte hex string${raw.startsWith("0x") ? "" : " (with or without a 0x prefix)"}.`
+    );
+  }
+
+  if (/^0x0{64}$/i.test(normalized)) {
+    throw new Error(`${name} must not be the all-zero private key`);
+  }
+
+  return normalized;
+}
+
 function resolveCeloAccounts() {
-  const raw = process.env.PRIVATE_KEY?.trim();
+  const raw = readOptionalEnv("PRIVATE_KEY");
   const selectedNetwork = selectedNetworkName();
 
   if (!raw) {
@@ -64,10 +94,7 @@ function resolveCeloAccounts() {
   }
 
   try {
-    const privateKey = new Wallet(raw).privateKey;
-    if (/^0x0{64}$/i.test(privateKey)) {
-      throw new Error("must not be the all-zero private key");
-    }
+    const privateKey = new Wallet(normalizePrivateKey(raw, "PRIVATE_KEY")).privateKey;
     return [privateKey];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
