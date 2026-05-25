@@ -132,10 +132,35 @@ export async function requestWalletProvider<T = unknown>(
   params?: unknown[] | Record<string, unknown>
 ) {
   const request = ensureRequestMethod(provider);
-  return (await request({
+  console.debug('[walletProvider] Calling provider.request', {
     method,
-    ...(typeof params === 'undefined' ? {} : { params })
-  })) as T;
+    hasParams: !!params,
+    paramsType: Array.isArray(params) ? 'array' : typeof params,
+    provider: provider.isMiniPay ? 'MiniPay' : provider.isMetaMask ? 'MetaMask' : 'Injected'
+  });
+  
+  try {
+    const result = await request({
+      method,
+      ...(typeof params === 'undefined' ? {} : { params })
+    }) as T;
+    
+    console.debug('[walletProvider] provider.request succeeded', {
+      method,
+      resultType: typeof result,
+      hasResult: !!result
+    });
+    
+    return result;
+  } catch (error) {
+    console.error('[walletProvider] provider.request failed', {
+      method,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorCode: 'code' in (error as Record<string, unknown>) ? (error as { code: unknown }).code : undefined
+    });
+    throw error;
+  }
 }
 
 export async function requestWalletSignature(provider: WalletProviderShape, address: string, message: string) {
@@ -178,25 +203,100 @@ export function buildContractWriteRequest(input: ContractTransactionInput) {
 
 export async function estimateContractWriteGas(input: Omit<ContractTransactionInput, 'gasLimit'>) {
   const request = buildContractWriteRequest(input);
-  const gasEstimate = await requestWalletProvider<string>(input.provider, 'eth_estimateGas', [request]);
-  return BigInt(gasEstimate);
+  
+  console.debug('[walletProvider] Estimating gas for contract write', {
+    contractAddress: input.contractAddress,
+    functionName: input.functionName,
+    from: input.from
+  });
+
+  try {
+    const gasEstimate = await requestWalletProvider<string>(input.provider, 'eth_estimateGas', [request]);
+    const gasAmount = BigInt(gasEstimate);
+    
+    console.info('[walletProvider] Gas estimation successful', {
+      functionName: input.functionName,
+      gasEstimate: gasAmount.toString()
+    });
+    
+    return gasAmount;
+  } catch (error) {
+    console.error('[walletProvider] Gas estimation failed', {
+      functionName: input.functionName,
+      from: input.from,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 export async function sendContractWrite(input: ContractTransactionInput) {
   const request = buildContractWriteRequest(input);
-  const txHash = await requestWalletProvider<string>(input.provider, 'eth_sendTransaction', [request]);
+  
+  console.debug('[walletProvider] Building contract write request', {
+    contractAddress: input.contractAddress,
+    functionName: input.functionName,
+    from: input.from,
+    hasValue: !!input.value,
+    hasGasLimit: !!input.gasLimit,
+    dataLength: request.data.length
+  });
 
-  return {
-    txHash,
-    request
-  };
+  try {
+    const txHash = await requestWalletProvider<string>(input.provider, 'eth_sendTransaction', [request]);
+    
+    console.info('[walletProvider] sendContractWrite successful', {
+      functionName: input.functionName,
+      txHash,
+      from: input.from
+    });
+
+    return {
+      txHash,
+      request
+    };
+  } catch (error) {
+    console.error('[walletProvider] sendContractWrite failed', {
+      functionName: input.functionName,
+      from: input.from,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }
 
 export async function waitForTransactionReceipt(provider: BrowserProvider, txHash: string, timeoutMs = 120000) {
-  const receipt = await provider.waitForTransaction(txHash, 1, timeoutMs);
-  if (!receipt) {
-    throw new Error(`Transaction ${txHash} was not confirmed before the timeout expired.`);
-  }
+  console.debug('[walletProvider] Waiting for transaction receipt', {
+    txHash,
+    timeoutMs
+  });
 
-  return receipt;
+  try {
+    const receipt = await provider.waitForTransaction(txHash, 1, timeoutMs);
+    
+    if (!receipt) {
+      console.error('[walletProvider] Transaction receipt not received before timeout', {
+        txHash,
+        timeoutMs
+      });
+      throw new Error(`Transaction ${txHash ?? 'UNKNOWN'} was not confirmed before the timeout expired.`);
+    }
+
+    console.info('[walletProvider] Transaction receipt received', {
+      txHash,
+      blockNumber: receipt.blockNumber,
+      status: receipt.status
+    });
+
+    return receipt;
+  } catch (error) {
+    console.error('[walletProvider] waitForTransactionReceipt failed', {
+      txHash,
+      errorName: error instanceof Error ? error.name : 'Unknown',
+      errorMessage: error instanceof Error ? error.message : String(error)
+    });
+    throw error;
+  }
 }

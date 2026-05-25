@@ -221,7 +221,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     setAuthMessage(null);
 
     console.debug('[AUTH] Restoring session for wallet', {
-      address: `${nextAddress.slice(0, 6)}...${nextAddress.slice(-4)}`
+      address: `${(nextAddress ?? '').slice(0, 6)}...${(nextAddress ?? '').slice(-4)}`
     });
 
     const restoreTask = (async () => {
@@ -232,7 +232,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
         console.debug('[AUTH] Session restored successfully', {
           sessionId: payload.session.id,
-          wallet: `${payload.session.wallet.slice(0, 6)}...${payload.session.wallet.slice(-4)}`,
+          wallet: `${((payload.session?.wallet) ?? '').slice(0, 6)}...${((payload.session?.wallet) ?? '').slice(-4)}`,
           userId: payload.user.id
         });
 
@@ -415,7 +415,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       hasWalletProvider: !!activeWalletProvider,
       hasAddress: !!activeAddress,
       hasChainId: !!activeChainId,
-      address: activeAddress ? `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}` : null,
+      address: activeAddress ? `${(activeAddress ?? '').slice(0, 6)}...${(activeAddress ?? '').slice(-4)}` : null,
       chainId: activeChainId
     });
 
@@ -443,16 +443,16 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     const authTask = (async () => {
       try {
         console.debug('[AUTH] Requesting nonce', {
-          address: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
+          address: `${(activeAddress ?? '').slice(0, 6)}...${(activeAddress ?? '').slice(-4)}`,
           chainId: activeChainId
         });
 
         const nonceResponse = await requestAuthNonce(activeAddress, activeChainId);
 
         console.debug('[AUTH] Nonce received', {
-          nonce: `${nonceResponse.data.nonce.slice(0, 8)}...`,
-          messageLength: nonceResponse.data.message.length,
-          expiresAt: nonceResponse.data.expiresAt
+          nonce: `${((nonceResponse.data?.nonce) ?? '').slice(0, 8)}...`,
+          messageLength: (nonceResponse.data?.message ?? '').length,
+          expiresAt: nonceResponse.data?.expiresAt
         });
 
         console.debug('[AUTH] Requesting wallet signature', {
@@ -484,12 +484,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
         console.debug('[AUTH] Signature received', {
           signatureLength: signature.length,
-          signatureStart: signature.slice(0, 10)
+          signatureStart: (signature ?? '').slice(0, 10)
         });
 
         console.debug('[AUTH] Verifying signature on backend', {
-          address: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
-          nonce: `${nonceResponse.data.nonce.slice(0, 8)}...`,
+          address: `${(activeAddress ?? '').slice(0, 6)}...${(activeAddress ?? '').slice(-4)}`,
+          nonce: `${((nonceResponse.data?.nonce) ?? '').slice(0, 8)}...`,
           chainId: activeChainId
         });
 
@@ -504,21 +504,21 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           hasAccessToken: !!verifyResponse.data.accessToken,
           sessionId: verifyResponse.data.session?.id,
           wallet: verifyResponse.data.session?.wallet
-            ? `${verifyResponse.data.session.wallet.slice(0, 6)}...${verifyResponse.data.session.wallet.slice(-4)}`
+            ? `${(verifyResponse.data.session.wallet ?? '').slice(0, 6)}...${(verifyResponse.data.session.wallet ?? '').slice(-4)}`
             : 'MISSING',
           userId: verifyResponse.data.user?.id
         });
 
         if (normalizeAddress(verifyResponse.data.session.wallet) !== normalizeAddress(activeAddress)) {
           console.error('[AUTH] Verify response wallet mismatch', {
-            responseWallet: `${verifyResponse.data.session.wallet.slice(0, 6)}...${verifyResponse.data.session.wallet.slice(-4)}`,
-            expectedWallet: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`
+            responseWallet: `${((verifyResponse.data.session?.wallet) ?? '').slice(0, 6)}...${((verifyResponse.data.session?.wallet) ?? '').slice(-4)}`,
+            expectedWallet: `${(activeAddress ?? '').slice(0, 6)}...${(activeAddress ?? '').slice(-4)}`
           });
           throw new Error('Authenticated session does not match the connected wallet');
         }
 
         console.info('[AUTH] Wallet authentication successful', {
-          wallet: `${activeAddress.slice(0, 6)}...${activeAddress.slice(-4)}`,
+          wallet: `${(activeAddress ?? '').slice(0, 6)}...${(activeAddress ?? '').slice(-4)}`,
           sessionId: verifyResponse.data.session.id
         });
 

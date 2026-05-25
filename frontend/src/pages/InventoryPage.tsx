@@ -11,11 +11,11 @@ function formatMintedAt(value: string | Date | null | undefined) {
 }
 
 function inventoryTitle(item: InventoryItem) {
-  if (item.questHistory) {
-    return `Quest Relic ${item.questHistory.slice(0, 8)}`;
+  if (item.questHistory && typeof item.questHistory === 'string') {
+    return `Quest Relic ${(item.questHistory ?? '').slice(0, 8)}`;
   }
 
-  if (item.tokenId) {
+  if (item.tokenId && typeof item.tokenId === 'string') {
     return `Forge NFT #${item.tokenId}`;
   }
 

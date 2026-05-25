@@ -63,14 +63,14 @@ function resolveGenerationProfile(quest: QuestState | null): GenerationProfile |
 function formatActionFailure(error: unknown, fallbackLabel: string) {
   const txFailure = describeTransactionFailure(error);
   if (txFailure.kind !== 'unknown') {
-    const details = txFailure.details.slice(0, 2).join(' ');
+    const details = (Array.isArray(txFailure.details) ? txFailure.details : []).slice(0, 2).join(' ');
     return details ? `${txFailure.message} ${details}`.trim() : txFailure.message;
   }
 
   const authFailure = extractAuthFailure(error);
-  const detailText = authFailure.details?.length ? ` ${authFailure.details.join(' ')}` : '';
+  const detailText = (authFailure.details && Array.isArray(authFailure.details) && authFailure.details.length) ? ` ${authFailure.details.join(' ')}` : '';
   if (authFailure.code !== 'AUTH_UNKNOWN' || authFailure.message) {
-    return `${authFailure.message}${detailText}`.trim();
+    return `${(authFailure.message || '')}${detailText}`.trim();
   }
 
   return fallbackLabel;
@@ -87,6 +87,7 @@ export default function CommandCenter() {
     isCorrectNetwork,
     isMiniPay,
     walletProvider,
+    walletKind,
     status,
     authStatus,
     authMessage,
@@ -211,64 +212,189 @@ export default function CommandCenter() {
       gasLimit?: bigint;
     }
   ) {
-    if (!forgeQuestManager || !provider || !address) {
-      throw new Error('Wallet is not ready for onchain transactions.');
-    }
-
-    if (!isMiniPay) {
-      const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (...methodArgs: unknown[]) => Promise<ethers.ContractTransactionResponse>;
-      const tx = await transactionMethod(...args, {
-        ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
-        ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+    // Defensive checks for all required dependencies
+    if (!forgeQuestManager) {
+      console.error('[CommandCenter] submitForgeWrite: forgeQuestManager is null', {
+        functionName,
+        hasSigner: !!signer,
+        hasProvider: !!provider,
+        hasAddress: !!address,
+        isMiniPay,
+        hasWalletProvider: !!walletProvider
       });
-      const receipt = await tx.wait();
-      logReceiptDiagnostics(functionName, receipt);
-      return {
-        hash: tx.hash,
-        receipt
-      };
+      throw new Error('Contract interface is not ready. Ensure wallet is connected.');
     }
 
-    if (!walletProvider) {
-      throw new Error('MiniPay provider is unavailable. Reconnect your wallet and try again.');
+    if (!provider) {
+      console.error('[CommandCenter] submitForgeWrite: provider is null', {
+        functionName,
+        hasSigner: !!signer,
+        hasForgeContract: !!forgeQuestManager,
+        hasAddress: !!address,
+        isMiniPay,
+        hasWalletProvider: !!walletProvider
+      });
+      throw new Error('Wallet provider is not ready. Reconnect your wallet and try again.');
     }
 
-    const gasLimit =
-      options?.gasLimit ??
-      (await estimateContractWriteGas({
+    if (!address) {
+      console.error('[CommandCenter] submitForgeWrite: address is null', {
+        functionName,
+        hasSigner: !!signer,
+        hasProvider: !!provider,
+        hasForgeContract: !!forgeQuestManager,
+        isMiniPay,
+        hasWalletProvider: !!walletProvider
+      });
+      throw new Error('Wallet address is not available. Reconnect your wallet and try again.');
+    }
+
+    console.info('[CommandCenter] submitForgeWrite starting', {
+      functionName,
+      argsCount: args.length,
+      hasValue: typeof options?.value === 'bigint',
+      hasGasLimit: typeof options?.gasLimit === 'bigint',
+      isMiniPay,
+      walletAddress: `${address.slice(0, 6) ?? 'INVALID'}...${address.slice(-4) ?? 'INVALID'}`,
+      chainId,
+      network
+    });
+
+    try {
+      if (!isMiniPay) {
+        // MetaMask / Standard ethers.js flow
+        console.debug('[CommandCenter] Using standard ethers.js contract write (MetaMask/Standard)', {
+          functionName,
+          hasSigner: !!signer
+        });
+
+        if (!signer) {
+          console.error('[CommandCenter] Signer is null for standard flow', {
+            functionName,
+            status,
+            isAuthReady,
+            isMiniPay
+          });
+          throw new Error('Wallet signer is unavailable. Reconnect your wallet and try again.');
+        }
+
+        const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (...methodArgs: unknown[]) => Promise<ethers.ContractTransactionResponse>;
+        
+        if (typeof transactionMethod !== 'function') {
+          console.error('[CommandCenter] Transaction method not found on contract', {
+            functionName,
+            methodType: typeof transactionMethod,
+            contractMethods: Object.getOwnPropertyNames(Object.getPrototypeOf(forgeQuestManager))
+          });
+          throw new Error(`Transaction method ${functionName} not found on contract.`);
+        }
+
+        console.debug('[CommandCenter] Calling contract method', {
+          functionName,
+          argsCount: args.length,
+          hasValue: typeof options?.value === 'bigint'
+        });
+
+        const tx = await transactionMethod(...args, {
+          ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
+          ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+        });
+
+        console.info('[CommandCenter] Transaction sent, waiting for confirmation', {
+          functionName,
+          txHash: tx.hash
+        });
+
+        const receipt = await tx.wait();
+        logReceiptDiagnostics(functionName, receipt);
+        return {
+          hash: tx.hash,
+          receipt
+        };
+      }
+
+      // MiniPay flow
+      console.debug('[CommandCenter] Using MiniPay transaction write', {
+        functionName,
+        hasWalletProvider: !!walletProvider
+      });
+
+      if (!walletProvider) {
+        console.error('[CommandCenter] MiniPay wallet provider is null', {
+          functionName,
+          status,
+          isMiniPay,
+          walletKind
+        });
+        throw new Error('MiniPay provider is unavailable. Reconnect your wallet and try again.');
+      }
+
+      console.debug('[CommandCenter] Estimating gas for MiniPay', {
+        functionName,
+        from: address,
+        contractAddress: contractAddresses.forgeQuestManagerAddress
+      });
+
+      const gasLimit =
+        options?.gasLimit ??
+        (await estimateContractWriteGas({
+          provider: walletProvider,
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface,
+          functionName,
+          args,
+          from: address,
+          ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+        }));
+
+      console.info('[CommandCenter] Gas estimate successful for MiniPay', {
+        functionName,
+        gasLimit: gasLimit.toString()
+      });
+
+      console.debug('[CommandCenter] Sending transaction via MiniPay provider.request', {
+        functionName,
+        from: address,
+        contractAddress: contractAddresses.forgeQuestManagerAddress,
+        gasLimit: gasLimit.toString()
+      });
+
+      const { txHash, request } = await sendContractWrite({
         provider: walletProvider,
         contractAddress: contractAddresses.forgeQuestManagerAddress,
         contractInterface: forgeQuestManager.interface,
         functionName,
         args,
         from: address,
+        gasLimit,
         ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
-      }));
+      });
 
-    const { txHash, request } = await sendContractWrite({
-      provider: walletProvider,
-      contractAddress: contractAddresses.forgeQuestManagerAddress,
-      contractInterface: forgeQuestManager.interface,
-      functionName,
-      args,
-      from: address,
-      gasLimit,
-      ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
-    });
+      console.info('[CommandCenter] MiniPay transaction submitted successfully', {
+        functionName,
+        txHash,
+        hasRequest: !!request
+      });
 
-    console.info('[CommandCenter] MiniPay transaction submitted', {
-      functionName,
-      txHash,
-      request
-    });
+      const receipt = await waitForTransactionReceipt(provider, txHash);
+      logReceiptDiagnostics(functionName, receipt);
 
-    const receipt = await waitForTransactionReceipt(provider, txHash);
-    logReceiptDiagnostics(functionName, receipt);
-
-    return {
-      hash: txHash,
-      receipt
-    };
+      return {
+        hash: txHash,
+        receipt
+      };
+    } catch (error) {
+      console.error('[CommandCenter] submitForgeWrite failed', {
+        functionName,
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        isMiniPay,
+        hasWalletProvider: !!walletProvider,
+        hasSigner: !!signer,
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      throw error;
+    }
   }
 
   async function resolveQuestForChainAction(quest: QuestState, fallbackMessage: string) {

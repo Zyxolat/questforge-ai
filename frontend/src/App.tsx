@@ -52,7 +52,7 @@ function App() {
             onClick={() => setWalletModalOpen(true)}
             className="rounded-full border border-glowyellow/30 bg-glowyellow/10 px-4 py-2 text-sm font-semibold text-glowyellow transition hover:bg-glowyellow/15"
           >
-            {address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'Connect Wallet'}
+            {address && typeof address === 'string' ? `${(address ?? '').slice(0, 6)}...${(address ?? '').slice(-4)}` : 'Connect Wallet'}
           </button>
         </div>
       </header>
