@@ -1,4 +1,5 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { useEffect } from 'react';
 
 interface RewardAnimationProps {
   show: boolean;
@@ -6,6 +7,7 @@ interface RewardAnimationProps {
   tokenAmount?: string;
   nftRarity?: string;
   onComplete?: () => void;
+  durationMs?: number;
 }
 
 export default function RewardAnimation({
@@ -13,8 +15,21 @@ export default function RewardAnimation({
   xpAmount = 0,
   tokenAmount = '0',
   nftRarity = 'Rare',
-  onComplete
+  onComplete,
+  durationMs = 2600
 }: RewardAnimationProps) {
+  useEffect(() => {
+    if (!show || !onComplete) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      onComplete();
+    }, durationMs);
+
+    return () => window.clearTimeout(timer);
+  }, [durationMs, onComplete, show]);
+
   const containerVariants = {
     hidden: { opacity: 0 },
     visible: {
@@ -42,7 +57,6 @@ export default function RewardAnimation({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          onAnimationComplete={onComplete}
           className="fixed inset-0 z-40 flex items-center justify-center pointer-events-none"
         >
           {/* Confetti background */}

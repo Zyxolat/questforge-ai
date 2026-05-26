@@ -6,13 +6,15 @@ interface QuestCompletionModalProps {
   quest: QuestState | null;
   onClose: () => void;
   onGenerateNew?: () => void;
+  onViewInventory?: () => void;
 }
 
 export default function QuestCompletionModal({
   isOpen,
   quest,
   onClose,
-  onGenerateNew
+  onGenerateNew,
+  onViewInventory
 }: QuestCompletionModalProps) {
   if (!quest) return null;
 
@@ -42,7 +44,7 @@ export default function QuestCompletionModal({
             />
 
             {/* Main card */}
-            <div className="rounded-[2.5rem] border-3 border-emerald-400 bg-gradient-to-br from-navy via-deepnavy to-navy p-8 shadow-2xl overflow-hidden">
+            <div className="rounded-[2.5rem] border-3 border-emerald-400 bg-gradient-to-br from-navy via-deepnavy to-navy p-4 sm:p-6 md:p-8 shadow-2xl overflow-hidden">
               {/* Fireworks effect */}
               <div className="absolute inset-0 rounded-[2.5rem] overflow-hidden">
                 {[...Array(20)].map((_, i) => (
@@ -163,21 +165,21 @@ export default function QuestCompletionModal({
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
                   transition={{ delay: 0.6 }}
-                  className="flex gap-3 pt-4"
+                  className="flex flex-col gap-3 pt-4 sm:flex-row"
                 >
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={onClose}
-                    className="flex-1 rounded-xl border border-white/30 bg-white/10 px-6 py-3 font-bold uppercase tracking-[0.2em] text-white hover:bg-white/20 transition"
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
+                    onClick={onViewInventory ?? onClose}
+                    className="flex-1 rounded-xl border border-white/30 bg-white/10 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white hover:bg-white/20 transition min-h-[44px] sm:min-h-[48px]"
                   >
                     View Inventory
                   </motion.button>
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                     onClick={onGenerateNew}
-                    className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-3 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition"
+                    className="flex-1 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition min-h-[44px] sm:min-h-[48px]"
                   >
                     ⚔️ Next Quest
                   </motion.button>

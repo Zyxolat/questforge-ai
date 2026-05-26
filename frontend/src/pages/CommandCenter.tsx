@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ethers } from 'ethers';
 import QuestFlowTracker from '../components/QuestFlowTracker';
 import ActiveQuestPanel from '../components/ActiveQuestPanel';
@@ -11,53 +12,216 @@ import RewardAnimation from '../components/RewardAnimation';
 import LoadingScreen from '../components/LoadingScreen';
 import { QuestState, useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
-import { extractAuthFailure, fetchDailyMissions, generateQuest, registerOnchainQuest, registerQuestStart, submitProofForVerification } from '../lib/api';
+import {
+  extractAuthFailure,
+  fetchDailyMissions,
+  generateQuest,
+  registerOnchainQuest,
+  registerQuestStart,
+  submitProofForVerification
+} from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
 import { parseReceiptEvent } from '../lib/questTransactions';
 import { describeTransactionFailure, formatCeloAmount } from '../lib/transactionDiagnostics';
-import { estimateContractWriteGas, sendContractWrite, waitForTransactionReceipt } from '../lib/walletProvider';
+import {
+  estimateContractWriteGas,
+  sendContractWrite,
+  waitForTransactionReceipt
+} from '../lib/walletProvider';
 
 type DailyMission = { id: string; title: string; description: string; reward: string };
-type GeneratedQuestTemplate = QuestState & { title: string; metadataUri: string; stakeAmount: string | number; rewardAmount: string | number; xpReward: string | number; durationSeconds: string | number };
+type GeneratedQuestTemplate = QuestState & {
+  title: string;
+  metadataUri: string;
+  stakeAmount: string | number;
+  rewardAmount: string | number;
+  xpReward: string | number;
+  durationSeconds: string | number;
+};
+type GenerationProfile = {
+  source?: string;
+  provider?: string;
+  model?: string | null;
+  promptHash?: string | null;
+  fallbackReason?: string | null;
+};
 type TxStatusType = 'pending' | 'success' | 'error' | 'confirmed';
+type QuestFlowStage =
+  | 'PENDING'
+  | 'GENERATED'
+  | 'ACCEPTED'
+  | 'ACTIVE'
+  | 'SUBMITTED'
+  | 'VERIFIED'
+  | 'REWARDED'
+  | 'COMPLETED';
 
 function questMatcher(quest: QuestState | null) {
-  return { id: quest?.id ?? undefined, chainQuestId: quest?.chainQuestId ?? undefined, orchestrationId: quest?.orchestrationId ?? undefined };
+  return {
+    id: quest?.id ?? undefined,
+    chainQuestId: quest?.chainQuestId ?? undefined,
+    orchestrationId: quest?.orchestrationId ?? undefined
+  };
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function resolveGenerationProfile(quest: QuestState | null): GenerationProfile | null {
+  const direct = asRecord(quest?.generation);
+  if (direct) {
+    return direct as GenerationProfile;
+  }
+
+  const metadata = asRecord(quest?.metadata);
+  const generation = metadata ? asRecord(metadata.generation) : null;
+  return generation as GenerationProfile | null;
+}
+
+function resolveQuestRarityLabel(difficulty: number | string | undefined) {
+  const tier = Number(difficulty);
+  if (tier === 5) return 'Legendary';
+  if (tier === 4) return 'Epic';
+  if (tier === 3) return 'Rare';
+  if (tier === 2) return 'Uncommon';
+  return 'Common';
+}
+
+function normalizeProofReference(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const txHashMatch = trimmed.match(/0x[a-fA-F0-9]{64}/);
+  if (txHashMatch) {
+    return txHashMatch[0];
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const pathHash = url.pathname.match(/0x[a-fA-F0-9]{64}/);
+    return pathHash ? pathHash[0] : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatActionFailure(error: unknown, fallbackLabel: string) {
   const txFailure = describeTransactionFailure(error);
   if (txFailure.kind !== 'unknown') {
-    const details = (Array.isArray(txFailure.details) ? txFailure.details : []).slice(0, 2).join(' ');
+    const details = (Array.isArray(txFailure.details) ? txFailure.details : [])
+      .slice(0, 2)
+      .join(' ');
     return details ? `${txFailure.message} ${details}`.trim() : txFailure.message;
   }
+
   const authFailure = extractAuthFailure(error);
-  const detailText = (authFailure.details && Array.isArray(authFailure.details) && authFailure.details.length) ? ` ${authFailure.details.join(' ')}` : '';
+  const detailText =
+    authFailure.details && Array.isArray(authFailure.details) && authFailure.details.length
+      ? ` ${authFailure.details.join(' ')}`
+      : '';
+
   if (authFailure.code !== 'AUTH_UNKNOWN' || authFailure.message) {
-    return `${(authFailure.message || '')}${detailText}`.trim();
+    return `${authFailure.message || ''}${detailText}`.trim();
   }
+
   return fallbackLabel;
 }
 
+function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest') {
+  if (functionName === 'createQuest') return 'Forge quest';
+  if (functionName === 'startQuest') return 'Start quest';
+  return 'Submit proof';
+}
+
 export default function CommandCenter() {
-  const { address, balance, signer, provider, network, isCorrectNetwork, isMiniPay, walletProvider, status, authStatus, authMessage, isAuthReady, connectWallet, authenticateWallet, switchCeloNetwork } = useWallet();
-  const { activeQuest, player, syncNow, refreshQuestFeed, upsertQuest, patchQuest, getQuest } = useRealtimeState();
+  const navigate = useNavigate();
+  const {
+    address,
+    balance,
+    signer,
+    provider,
+    network,
+    isCorrectNetwork,
+    isMiniPay,
+    walletProvider,
+    walletKind,
+    status,
+    authStatus,
+    authMessage,
+    isAuthReady,
+    connectWallet,
+    authenticateWallet,
+    disconnectWallet,
+    switchCeloNetwork
+  } = useWallet();
+  const {
+    activeQuest,
+    connectionStatus,
+    hydrationStatus,
+    isRealtimeReady,
+    player,
+    syncNow,
+    refreshQuestFeed,
+    upsertQuest,
+    patchQuest,
+    getQuest
+  } = useRealtimeState();
   const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
   const [proofUri, setProofUri] = useState('');
+  const [proofError, setProofError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [revealQuestModal, setRevealQuestModal] = useState(false);
   const [completionModal, setCompletionModal] = useState(false);
   const [showRewardAnimation, setShowRewardAnimation] = useState(false);
   const [rewardData, setRewardData] = useState({ xp: 0, token: '0', nft: 'Rare' });
-  const [txStatus, setTxStatus] = useState<{ type: TxStatusType; hash?: string; label?: string; message?: string } | null>(null);
+  const [txStatus, setTxStatus] = useState<{
+    type: TxStatusType;
+    hash?: string;
+    label?: string;
+    message?: string;
+  } | null>(null);
   const [lastGeneratedQuest, setLastGeneratedQuest] = useState<QuestState | null>(null);
+  const [celebrationQuestId, setCelebrationQuestId] = useState<string | null>(null);
+  const [completedQuestIds, setCompletedQuestIds] = useState<string[]>([]);
+  const proofPanelRef = useRef<HTMLDivElement | null>(null);
 
   const forgeQuestManager = useMemo(() => {
     if (!signer) return null;
-    return getContract(contractAddresses.forgeQuestManagerAddress, contractABIs.forgeQuestManagerAbi, signer);
+    return getContract(
+      contractAddresses.forgeQuestManagerAddress,
+      contractABIs.forgeQuestManagerAbi,
+      signer
+    );
   }, [signer]);
+
+  const normalizedProof = useMemo(() => normalizeProofReference(proofUri), [proofUri]);
+  const currentQuestForDisplay = activeQuest ?? lastGeneratedQuest;
+  const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
+
+  const proofHelperText = useMemo(() => {
+    if (!activeQuest) {
+      return null;
+    }
+
+    const txTypes = Array.isArray(activeQuest.requiredTxTypes)
+      ? activeQuest.requiredTxTypes.filter(
+          (value): value is string => typeof value === 'string' && value.length > 0
+        )
+      : [];
+
+    if (txTypes.length > 0) {
+      return `Expected proof comes from: ${txTypes.join(' -> ')}.`;
+    }
+
+    return 'Paste the transaction that best proves the objective was completed.';
+  }, [activeQuest]);
 
   useEffect(() => {
     async function loadDailyMissionsOnce() {
@@ -68,92 +232,250 @@ export default function CommandCenter() {
         console.error(error);
       }
     }
+
     void loadDailyMissionsOnce();
   }, []);
 
-  // Watch for quest completion
   useEffect(() => {
-    if (activeQuest?.status === 'VERIFIED' && !showRewardAnimation) {
-      setRewardData({
-        xp: Number(activeQuest.xpReward) || 0,
-        token: String(activeQuest.rewardAmount || '0'),
-        nft: activeQuest.difficulty === 5 ? 'Legendary' : activeQuest.difficulty === 4 ? 'Epic' : activeQuest.difficulty === 3 ? 'Rare' : activeQuest.difficulty === 2 ? 'Uncommon' : 'Common'
-      });
-      setShowRewardAnimation(true);
-      // Show completion modal after animation completes
-      setTimeout(() => {
-        setCompletionModal(true);
-      }, 3000);
+    const questId = activeQuest?.id;
+    if (
+      activeQuest?.status !== 'VERIFIED' ||
+      !questId ||
+      completedQuestIds.includes(questId) ||
+      celebrationQuestId === questId
+    ) {
+      return;
     }
-  }, [activeQuest?.status]);
 
-  const getFlowStep = (): 'PENDING' | 'GENERATED' | 'ACCEPTED' | 'ACTIVE' | 'SUBMITTED' | 'VERIFIED' | 'COMPLETED' => {
+    setRewardData({
+      xp: Number(activeQuest.xpReward) || 0,
+      token: String(activeQuest.rewardAmount || '0'),
+      nft: resolveQuestRarityLabel(activeQuest.difficulty)
+    });
+    setCelebrationQuestId(questId);
+    setShowRewardAnimation(true);
+
+    const timer = window.setTimeout(() => {
+      setCompletionModal(true);
+    }, 2200);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    activeQuest?.difficulty,
+    activeQuest?.id,
+    activeQuest?.rewardAmount,
+    activeQuest?.status,
+    activeQuest?.xpReward,
+    celebrationQuestId,
+    completedQuestIds
+  ]);
+
+  function markQuestCompleted(questId?: string) {
+    if (!questId) {
+      return;
+    }
+
+    setCompletedQuestIds((current) =>
+      current.includes(questId) ? current : [...current, questId]
+    );
+  }
+
+  function handleCompletionClose() {
+    markQuestCompleted(activeQuest?.id);
+    setCompletionModal(false);
+  }
+
+  function handleViewInventory() {
+    markQuestCompleted(activeQuest?.id);
+    setCompletionModal(false);
+    navigate('/inventory');
+  }
+
+  function handleProofChange(value: string) {
+    setProofUri(value);
+    if (proofError) {
+      setProofError(null);
+    }
+  }
+
+  function focusProofSubmission() {
+    setMessage(
+      'Complete the objective, then paste the proof transaction below to trigger AI verification.'
+    );
+    proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function getFlowStep(): QuestFlowStage {
     if (!activeQuest) return 'PENDING';
-    if (activeQuest.status === 'VERIFIED') return 'COMPLETED';
+    if (
+      activeQuest.status === 'VERIFIED' &&
+      activeQuest.id &&
+      completedQuestIds.includes(activeQuest.id)
+    ) {
+      return 'COMPLETED';
+    }
+    if (activeQuest.status === 'VERIFIED' && (completionModal || showRewardAnimation)) {
+      return 'REWARDED';
+    }
+    if (activeQuest.status === 'VERIFIED') return 'VERIFIED';
     if (activeQuest.status === 'SUBMITTED') return 'SUBMITTED';
     if (activeQuest.status === 'ACTIVE') return 'ACTIVE';
     if (activeQuest.status === 'AVAILABLE' && activeQuest.chainQuestId) return 'ACCEPTED';
     if (activeQuest.status === 'AVAILABLE') return 'GENERATED';
     return 'PENDING';
-  };
+  }
 
-  async function submitForgeWrite(functionName: 'createQuest' | 'startQuest' | 'submitQuest', args: unknown[], options?: { value?: bigint; gasLimit?: bigint }) {
+  function flowStatusLabel() {
+    if (status !== 'connected') return 'Wallet disconnected';
+    if (!isCorrectNetwork) return 'Wrong network';
+    if (authStatus !== 'authenticated') return 'Awaiting secure sign-in';
+    if (!isRealtimeReady) return `Realtime ${hydrationStatus}`;
+    if (activeQuest?.status === 'SUBMITTED') return 'Verification pending';
+    if (activeQuest?.status === 'VERIFIED') return 'Reward settlement complete';
+    if (activeQuest?.status === 'ACTIVE') return 'Quest live';
+    if (activeQuest?.status === 'AVAILABLE') return 'Ready to begin';
+    return 'Forge ready';
+  }
+
+  async function submitForgeWrite(
+    functionName: 'createQuest' | 'startQuest' | 'submitQuest',
+    args: unknown[],
+    options?: { value?: bigint; gasLimit?: bigint }
+  ) {
     if (!forgeQuestManager) throw new Error('Contract interface is not ready');
     if (!provider) throw new Error('Wallet provider is not ready');
     if (!address) throw new Error('Wallet address is not available');
 
+    const txLabel = formatTxLabel(functionName);
+
     try {
       if (!isMiniPay) {
         if (!signer) throw new Error('Wallet signer is unavailable');
-        const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (...methodArgs: unknown[]) => Promise<ethers.ContractTransactionResponse>;
-        if (typeof transactionMethod !== 'function') throw new Error(`Transaction method ${functionName} not found`);
-        const tx = await transactionMethod(...args, { ...(typeof options?.value === 'bigint' ? { value: options.value } : {}), ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {}) });
-        setTxStatus({ type: 'pending', hash: tx.hash, label: `${functionName} pending`, message: 'Waiting for confirmation...' });
+
+        const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (
+          ...methodArgs: unknown[]
+        ) => Promise<ethers.ContractTransactionResponse>;
+
+        if (typeof transactionMethod !== 'function') {
+          throw new Error(`Transaction method ${functionName} not found`);
+        }
+
+        const tx = await transactionMethod(...args, {
+          ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
+          ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+        });
+
+        setTxStatus({
+          type: 'pending',
+          hash: tx.hash,
+          label: `${txLabel} pending`,
+          message: 'Approve the wallet prompt and wait for Celo confirmation.'
+        });
+
         const receipt = await tx.wait();
-        setTxStatus({ type: 'confirmed', hash: tx.hash, label: `${functionName} confirmed`, message: 'Transaction confirmed!' });
+        setTxStatus({
+          type: 'confirmed',
+          hash: tx.hash,
+          label: `${txLabel} confirmed`,
+          message: 'The chain step settled successfully.'
+        });
         return { hash: tx.hash, receipt };
-      } else {
-        if (!walletProvider) throw new Error('MiniPay provider is unavailable');
-        const signerAddress = await signer?.getAddress();
-        const gasLimit = options?.gasLimit ?? (await estimateContractWriteGas({ provider: walletProvider, contractAddress: contractAddresses.forgeQuestManagerAddress, contractInterface: forgeQuestManager.interface, functionName, args, from: signerAddress || address, ...(typeof options?.value === 'bigint' ? { value: options.value } : {}) }));
-        const { txHash } = await sendContractWrite({ provider: walletProvider, contractAddress: contractAddresses.forgeQuestManagerAddress, contractInterface: forgeQuestManager.interface, functionName, args, from: address, gasLimit, ...(typeof options?.value === 'bigint' ? { value: options.value } : {}) });
-        setTxStatus({ type: 'pending', hash: txHash, label: `${functionName} submitted`, message: 'Awaiting blockchain confirmation...' });
-        const receipt = await waitForTransactionReceipt(provider, txHash);
-        setTxStatus({ type: 'confirmed', hash: txHash, label: `${functionName} confirmed`, message: 'Transaction confirmed!' });
-        return { hash: txHash, receipt };
       }
+
+      if (!walletProvider) throw new Error('MiniPay provider is unavailable');
+
+      const signerAddress = await signer?.getAddress();
+      const gasLimit =
+        options?.gasLimit ??
+        (await estimateContractWriteGas({
+          provider: walletProvider,
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface,
+          functionName,
+          args,
+          from: signerAddress || address,
+          ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+        }));
+      const { txHash } = await sendContractWrite({
+        provider: walletProvider,
+        contractAddress: contractAddresses.forgeQuestManagerAddress,
+        contractInterface: forgeQuestManager.interface,
+        functionName,
+        args,
+        from: address,
+        gasLimit,
+        ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+      });
+
+      setTxStatus({
+        type: 'pending',
+        hash: txHash,
+        label: `${txLabel} submitted`,
+        message: 'MiniPay submitted the transaction. Waiting for confirmation on Celo.'
+      });
+
+      const receipt = await waitForTransactionReceipt(provider, txHash);
+      setTxStatus({
+        type: 'confirmed',
+        hash: txHash,
+        label: `${txLabel} confirmed`,
+        message: 'Celo confirmed the transaction.'
+      });
+
+      return { hash: txHash, receipt };
     } catch (error) {
-      setTxStatus({ type: 'error', hash: undefined, label: 'Transaction failed', message: formatActionFailure(error, 'Transaction failed') });
+      setTxStatus({
+        type: 'error',
+        label: `${txLabel} failed`,
+        message: formatActionFailure(error, 'Transaction failed')
+      });
       throw error;
     }
   }
 
-  async function resolveQuestForChainAction(quest: QuestState, fallbackMessage: string) {
+  async function resolveQuestForChainAction(
+    quest: QuestState,
+    fallbackMessage: string
+  ) {
     let latestQuest = getQuest(questMatcher(quest)) ?? quest;
     if (latestQuest.chainQuestId) return latestQuest;
+
     setMessage('Quest is syncing with backend. Refreshing quest feed and realtime state...');
+
     for (let attempt = 1; attempt <= 3 && !latestQuest.chainQuestId; attempt += 1) {
       await refreshQuestFeed();
       latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
       if (latestQuest.chainQuestId) break;
+
       await syncNow();
       latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
       if (latestQuest.chainQuestId) break;
+
       await new Promise((resolve) => setTimeout(resolve, attempt * 750));
       latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
     }
+
     if (!latestQuest.chainQuestId) throw new Error(fallbackMessage);
     return latestQuest;
   }
 
-  async function registerOnchainQuestWithRetry(questId: string, chainQuestId: string, creationTxHash: string, maxRetries = 3): Promise<QuestState | null> {
+  async function registerOnchainQuestWithRetry(
+    questId: string,
+    chainQuestId: string,
+    creationTxHash: string,
+    maxRetries = 3
+  ): Promise<QuestState | null> {
     let lastError: unknown;
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
       try {
-        const registrationResponse = await registerOnchainQuest(questId, chainQuestId, creationTxHash);
+        const registrationResponse = await registerOnchainQuest(
+          questId,
+          chainQuestId,
+          creationTxHash
+        );
         const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
-        if (registeredQuest) return registeredQuest;
-        return null;
+        return registeredQuest ?? null;
       } catch (error) {
         lastError = error;
         if (attempt < maxRetries) {
@@ -162,6 +484,7 @@ export default function CommandCenter() {
         }
       }
     }
+
     throw lastError;
   }
 
@@ -173,8 +496,11 @@ export default function CommandCenter() {
     if (!(await requireReadyAuth('generating quests'))) return;
 
     setLoading(true);
-    setMessage('Summoning the Forge Master... The AI is crafting your quest...');
+    setMessage('Summoning the Forge Master. AI is crafting your quest and preparing the onchain record...');
     setTxStatus(null);
+    setProofError(null);
+    setProofUri('');
+
     try {
       const response = await generateQuest('Celo');
       const template = response.data.quest as GeneratedQuestTemplate;
@@ -188,21 +514,51 @@ export default function CommandCenter() {
         BigInt(template.durationSeconds)
       ] as const;
 
-      const { hash: creationTxHash, receipt } = await submitForgeWrite('createQuest', [...createQuestArgs]);
-      const parsedLog = parseReceiptEvent(receipt, { contractAddress: contractAddresses.forgeQuestManagerAddress, contractInterface: forgeQuestManager.interface }, 'QuestCreated');
+      const { hash: creationTxHash, receipt } = await submitForgeWrite(
+        'createQuest',
+        [...createQuestArgs]
+      );
+      const parsedLog = parseReceiptEvent(
+        receipt,
+        {
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface
+        },
+        'QuestCreated'
+      );
       const chainQuestId = parsedLog?.args?.questId?.toString();
-      if (!chainQuestId) throw new Error('Quest creation receipt did not include a quest id');
+      if (!chainQuestId) {
+        throw new Error('Quest creation receipt did not include a quest id');
+      }
 
-      let persistedQuest: QuestState = { ...template, chainQuestId, creator: address, status: 'AVAILABLE', treasuryPayout: { status: 'RESERVED' } };
+      let persistedQuest: QuestState = {
+        ...template,
+        chainQuestId,
+        creator: address,
+        status: 'AVAILABLE',
+        treasuryPayout: { status: 'RESERVED' }
+      };
 
-      setMessage('Quest forged onchain. Syncing with backend...');
+      setMessage('Quest forged onchain. Syncing cinematic state with the backend...');
+
       try {
-        const registeredQuest = await registerOnchainQuestWithRetry(String(template.id), chainQuestId, creationTxHash);
-        if (registeredQuest) persistedQuest = { ...persistedQuest, ...registeredQuest };
-        setMessage('✨ Quest generated! Click "Begin Quest" to accept and start the adventure.');
+        const registeredQuest = await registerOnchainQuestWithRetry(
+          String(template.id),
+          chainQuestId,
+          creationTxHash
+        );
+        if (registeredQuest) {
+          persistedQuest = { ...persistedQuest, ...registeredQuest };
+        }
+        setMessage('Quest forged successfully. Review the reveal and accept it to begin.');
       } catch (registrationError) {
-        console.error('[CommandCenter] Backend onchain quest registration failed after retries', registrationError);
-        setMessage(`Quest forged onchain! You can still begin it, but backend sync is delayed.`);
+        console.error(
+          '[CommandCenter] Backend onchain quest registration failed after retries',
+          registrationError
+        );
+        setMessage(
+          'Quest forged onchain, but backend sync is delayed. You can still review and begin it.'
+        );
       }
 
       setLastGeneratedQuest(persistedQuest);
@@ -217,16 +573,20 @@ export default function CommandCenter() {
     }
   }
 
-  async function handleStartQuest() {
-    if (!address || !forgeQuestManager || !activeQuest || !signer) return;
+  async function handleStartQuest(questOverride?: QuestState | null) {
+    const candidateQuest = questOverride ?? activeQuest;
+    if (!address || !forgeQuestManager || !candidateQuest || !signer) return;
     if (!(await requireReadyAuth('starting quests'))) return;
 
     setLoading(true);
-    setMessage('Accepting the quest and locking stake onchain...');
+    setMessage('Accepting the quest and locking your stake onchain...');
     setTxStatus(null);
 
     try {
-      const resolvedQuest = await resolveQuestForChainAction(activeQuest, 'Quest is still missing its onchain id after sync. Please wait a moment and try again.');
+      const resolvedQuest = await resolveQuestForChainAction(
+        candidateQuest,
+        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
+      );
       setMessage('Quest sync complete. Starting quest on Celo...');
 
       if (!provider) throw new Error('Wallet provider is unavailable');
@@ -234,41 +594,85 @@ export default function CommandCenter() {
       const signerAddress = await signer.getAddress();
       const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
       const onchainQuest = await forgeQuestManager.quests(chainQuestId);
-      if (Number(onchainQuest.status) !== 0) throw new Error(`Quest is no longer available`);
+      if (Number(onchainQuest.status) !== 0) {
+        throw new Error('Quest is no longer available.');
+      }
 
       const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
       const availableBalance = await provider.getBalance(signerAddress);
-      if (availableBalance < stakeValue) throw new Error(`Insufficient funds for the quest stake. Need ${formatCeloAmount(stakeValue)} CELO`);
+      if (availableBalance < stakeValue) {
+        throw new Error(
+          `Insufficient funds for the quest stake. Need ${formatCeloAmount(stakeValue)} CELO.`
+        );
+      }
 
       const gasEstimate =
         isMiniPay && walletProvider
-          ? await estimateContractWriteGas({ provider: walletProvider, contractAddress: contractAddresses.forgeQuestManagerAddress, contractInterface: forgeQuestManager.interface, functionName: 'startQuest', args: [chainQuestId], from: signerAddress, value: stakeValue })
-          : await forgeQuestManager.startQuest.estimateGas(chainQuestId, { value: stakeValue });
+          ? await estimateContractWriteGas({
+              provider: walletProvider,
+              contractAddress: contractAddresses.forgeQuestManagerAddress,
+              contractInterface: forgeQuestManager.interface,
+              functionName: 'startQuest',
+              args: [chainQuestId],
+              from: signerAddress,
+              value: stakeValue
+            })
+          : await forgeQuestManager.startQuest.estimateGas(chainQuestId, {
+              value: stakeValue
+            });
 
       const gasLimit = gasEstimate + gasEstimate / 5n;
       const feeData = await provider.getFeeData();
       const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
       const estimatedGasCost = gasEstimate * gasPrice;
 
-      if (availableBalance < stakeValue + estimatedGasCost) throw new Error(`Insufficient funds for stake plus gas`);
+      if (availableBalance < stakeValue + estimatedGasCost) {
+        throw new Error('Insufficient funds for the quest stake plus gas.');
+      }
 
-      const { hash: startTxHash } = await submitForgeWrite('startQuest', [chainQuestId], { value: stakeValue, gasLimit });
+      const { hash: startTxHash } = await submitForgeWrite(
+        'startQuest',
+        [chainQuestId],
+        { value: stakeValue, gasLimit }
+      );
 
-      let persistedQuest: QuestState = { ...resolvedQuest, status: 'ACTIVE', treasuryPayout: { ...(resolvedQuest.treasuryPayout || {}), status: 'LOCKED' } };
+      let persistedQuest: QuestState = {
+        ...resolvedQuest,
+        status: 'ACTIVE',
+        treasuryPayout: {
+          ...(resolvedQuest.treasuryPayout || {}),
+          status: 'LOCKED'
+        }
+      };
 
       if (resolvedQuest.id) {
         try {
-          const startRegistrationResponse = await registerQuestStart(String(resolvedQuest.id), chainQuestId.toString(), startTxHash);
+          const startRegistrationResponse = await registerQuestStart(
+            String(resolvedQuest.id),
+            chainQuestId.toString(),
+            startTxHash
+          );
           const registeredQuest = (startRegistrationResponse.data as { quest?: QuestState }).quest;
-          if (registeredQuest) persistedQuest = { ...persistedQuest, ...registeredQuest };
+          if (registeredQuest) {
+            persistedQuest = { ...persistedQuest, ...registeredQuest };
+          }
         } catch (registrationError) {
-          console.error('[CommandCenter] Backend quest start registration failed', registrationError);
+          console.error(
+            '[CommandCenter] Backend quest start registration failed',
+            registrationError
+          );
         }
       }
 
       upsertQuest(persistedQuest);
-      setMessage('⚡ Quest started! Your stake is now locked. Complete the mission objectives and submit your proof.');
+      setRevealQuestModal(false);
+      setMessage(
+        'Quest started. Your stake is locked and the objective is live. Complete the task, then submit proof below.'
+      );
       await syncNow();
+      window.setTimeout(() => {
+        proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 250);
     } catch (error) {
       console.error('[CommandCenter] startQuest failed', error);
       setMessage(formatActionFailure(error, 'Start quest transaction failed.'));
@@ -278,32 +682,56 @@ export default function CommandCenter() {
   }
 
   async function handleSubmitProof() {
-    if (!address || !forgeQuestManager || !activeQuest || !proofUri) {
+    if (!address || !forgeQuestManager || !activeQuest) {
       setMessage('Provide proof and connect wallet to submit.');
       return;
     }
+
     if (activeQuest.status !== 'ACTIVE') {
       setMessage('Start the quest onchain before submitting proof.');
       return;
     }
+
+    if (!normalizedProof) {
+      setProofError('Paste a valid transaction hash or a Celoscan link that contains one.');
+      setMessage('Proof reference is invalid. Paste a full transaction hash or a Celoscan link.');
+      return;
+    }
+
     if (!(await requireReadyAuth('submitting proof'))) return;
 
     setLoading(true);
-    setMessage('Submitting proof to the Forge Master for verification...');
+    setProofError(null);
+    setMessage('Submitting proof to the Forge Master for deterministic verification...');
     setTxStatus(null);
 
     try {
-      const resolvedQuest = await resolveQuestForChainAction(activeQuest, 'Quest is still missing its onchain id after sync. Please wait a moment and try again.');
-      setMessage('Quest sync complete. Submitting proof...');
+      const resolvedQuest = await resolveQuestForChainAction(
+        activeQuest,
+        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
+      );
+      setMessage('Quest sync complete. Submitting proof onchain...');
 
       const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
-      const { hash: submissionTxHash } = await submitForgeWrite('submitQuest', [chainQuestId, proofUri]);
+      const { hash: submissionTxHash } = await submitForgeWrite('submitQuest', [
+        chainQuestId,
+        normalizedProof
+      ]);
 
-      patchQuest(questMatcher(resolvedQuest), { status: 'SUBMITTED' });
-      if (!resolvedQuest.id) throw new Error('Quest is missing a persistent id');
+      patchQuest(questMatcher(resolvedQuest), {
+        status: 'SUBMITTED',
+        proofTxHash: normalizedProof,
+        proofTx: submissionTxHash
+      });
 
-      await submitProofForVerification(resolvedQuest.id, proofUri, submissionTxHash);
-      setMessage('✓ Proof submitted! The AI Dungeon Master is verifying your quest completion. Rewards will stream in realtime.');
+      if (!resolvedQuest.id) {
+        throw new Error('Quest is missing a persistent id');
+      }
+
+      await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
+      setMessage(
+        'Proof submitted. The AI Dungeon Master is now verifying the result and streaming the outcome back to this screen.'
+      );
       await syncNow();
       setProofUri('');
     } catch (error) {
@@ -319,10 +747,12 @@ export default function CommandCenter() {
       setMessage('Restoring your secure session. Please wait a moment.');
       return false;
     }
+
     if (!isCorrectNetwork) {
       setMessage(`Switch to ${env.CELO_CHAIN_NAME} before ${actionLabel.toLowerCase()}.`);
       return false;
     }
+
     if (authStatus !== 'authenticated') {
       setMessage(authMessage || `Requesting wallet signature before ${actionLabel.toLowerCase()}...`);
       const authenticated = await authenticateWallet();
@@ -331,23 +761,35 @@ export default function CommandCenter() {
         return false;
       }
     }
+
     return true;
   }
 
   if (status !== 'connected') {
     return (
-      <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto flex min-h-[calc(100vh-96px)] items-center justify-center px-6 py-12">
+      <motion.main
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="mx-auto flex min-h-[calc(100vh-96px)] items-center justify-center px-6 py-12"
+      >
         <div className="w-full max-w-2xl rounded-3xl border-2 border-glowyellow bg-gradient-to-br from-navy via-deepnavy to-navy p-12 text-center shadow-2xl">
-          <motion.div animate={{ scale: [1, 1.05, 1] }} transition={{ duration: 2, repeat: Infinity }} className="text-6xl mb-6">
+          <motion.div
+            animate={{ scale: [1, 1.05, 1] }}
+            transition={{ duration: 2, repeat: Infinity }}
+            className="mb-6 text-6xl"
+          >
             ⚔️
           </motion.div>
           <h2 className="text-4xl font-black text-glowyellow">Enter the Forge</h2>
-          <p className="mt-4 text-lg text-slate-300">Connect your wallet to begin your AI-powered quest across the Celo blockchain.</p>
+          <p className="mt-4 text-lg text-slate-300">
+            Connect your wallet to begin an AI-powered quest that settles on Celo and rewards
+            real onchain progression.
+          </p>
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             onClick={connectWallet}
-            className="mt-8 rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-8 py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg hover:shadow-2xl transition"
+            className="mt-8 rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-8 py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg transition hover:shadow-2xl"
           >
             Connect Wallet
           </motion.button>
@@ -357,123 +799,231 @@ export default function CommandCenter() {
   }
 
   return (
-    <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12">
-      <QuestRevealModal isOpen={revealQuestModal} quest={lastGeneratedQuest} onClose={() => setRevealQuestModal(false)} onAccept={() => { setRevealQuestModal(false); handleStartQuest(); }} loading={loading} />
-      <QuestCompletionModal isOpen={completionModal} quest={activeQuest} onClose={() => setCompletionModal(false)} onGenerateNew={() => { setCompletionModal(false); handleGenerateQuest(); }} />
-      <RewardAnimation show={showRewardAnimation} xpAmount={rewardData.xp} tokenAmount={rewardData.token} nftRarity={rewardData.nft} onComplete={() => setShowRewardAnimation(false)} />
+    <motion.main
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="mx-auto max-w-7xl px-4 py-8 md:px-6 md:py-12"
+    >
+      <QuestRevealModal
+        isOpen={revealQuestModal}
+        quest={lastGeneratedQuest}
+        onClose={() => setRevealQuestModal(false)}
+        onAccept={() => void handleStartQuest(lastGeneratedQuest)}
+        loading={loading}
+      />
+      <QuestCompletionModal
+        isOpen={completionModal}
+        quest={activeQuest}
+        onClose={handleCompletionClose}
+        onViewInventory={handleViewInventory}
+        onGenerateNew={() => {
+          markQuestCompleted(activeQuest?.id);
+          setCompletionModal(false);
+          void handleGenerateQuest();
+        }}
+      />
+      <RewardAnimation
+        show={showRewardAnimation}
+        xpAmount={rewardData.xp}
+        tokenAmount={rewardData.token}
+        nftRarity={rewardData.nft}
+        onComplete={() => setShowRewardAnimation(false)}
+      />
 
       <div className="space-y-8">
-        {/* Wallet Status Section */}
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-[2.5rem] border-2 border-glowyellow/40 bg-gradient-to-br from-navy/60 to-deepnavy/40 p-6 md:p-8 shadow-xl backdrop-blur-xl">
-          <div className="grid gap-6 md:grid-cols-3">
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="rounded-[2.5rem] border-2 border-glowyellow/40 bg-gradient-to-br from-navy/60 to-deepnavy/40 p-6 shadow-xl backdrop-blur-xl md:p-8"
+        >
+          <div className="grid gap-6 md:grid-cols-4">
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Connected Wallet</p>
-              <p className="mt-2 font-mono text-sm text-white">{address?.slice(0, 10)}...{address?.slice(-8)}</p>
+              <p className="mt-2 font-mono text-sm text-white">
+                {address?.slice(0, 10)}...{address?.slice(-8)}
+              </p>
               <p className="mt-1 text-xs text-slate-400">Balance: {balance} CELO</p>
+              <p className="mt-1 text-xs text-slate-400">
+                Provider: {isMiniPay ? 'MiniPay' : walletKind ?? 'Injected wallet'}
+              </p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Network</p>
-              <p className="mt-2 text-sm text-white font-semibold">{network}</p>
+              <p className="mt-2 text-sm font-semibold text-white">{network}</p>
               <p className={`mt-1 text-xs ${isCorrectNetwork ? 'text-emerald-300' : 'text-amber-300'}`}>
-                {isCorrectNetwork ? '✓ Supported' : '⚠ Unsupported'}
+                {isCorrectNetwork ? '✓ Celo Mainnet ready' : '⚠ Switch to Celo Mainnet'}
               </p>
+              <p className="mt-1 text-xs text-slate-400">Auth: {flowStatusLabel()}</p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Player Stats</p>
               <div className="mt-2 flex gap-4 text-sm">
                 <div>
-                  <p className="text-glowyellow font-bold">{player?.xp || '0'}</p>
+                  <p className="font-bold text-glowyellow">{player?.xp || '0'}</p>
                   <p className="text-xs text-slate-400">XP</p>
                 </div>
                 <div>
-                  <p className="text-emerald-300 font-bold">Level {player?.level || '1'}</p>
+                  <p className="font-bold text-emerald-300">Level {player?.level || '1'}</p>
                   <p className="text-xs text-slate-400">Rank</p>
                 </div>
                 <div>
-                  <p className="text-purple-300 font-bold">{player?.questCount || '0'}</p>
+                  <p className="font-bold text-purple-300">{player?.questCount || '0'}</p>
                   <p className="text-xs text-slate-400">Quests</p>
                 </div>
               </div>
             </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Live Sync</p>
+              <p className="mt-2 text-sm font-semibold text-white">
+                Feed {hydrationStatus} • Socket {connectionStatus}
+              </p>
+              <p className="mt-1 text-xs text-slate-400">
+                {isRealtimeReady
+                  ? 'Quest state will restore after refresh.'
+                  : 'Realtime hydration is still catching up.'}
+              </p>
+            </div>
           </div>
 
-          {!isCorrectNetwork && (
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              onClick={switchCeloNetwork}
-              className="mt-4 w-full rounded-xl bg-amber-500/20 border border-amber-500 py-2 text-sm font-semibold text-amber-300 hover:bg-amber-500/30 transition"
-            >
-              ⚡ Switch to Celo Mainnet
-            </motion.button>
-          )}
+          <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+            {!isCorrectNetwork ? (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                onClick={() => void switchCeloNetwork()}
+                className="w-full rounded-xl border border-amber-500 bg-amber-500/20 py-3 text-sm font-semibold text-amber-300 transition hover:bg-amber-500/30 sm:w-auto sm:px-5"
+              >
+                ⚡ Switch to Celo Mainnet
+              </motion.button>
+            ) : null}
 
-          {authStatus !== 'authenticated' && (
+            {authStatus !== 'authenticated' ? (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                onClick={() => void authenticateWallet()}
+                disabled={authStatus === 'authenticating' || authStatus === 'restoring'}
+                className="w-full rounded-xl border border-glowyellow bg-glowyellow/20 py-3 text-sm font-semibold text-glowyellow transition disabled:opacity-50 hover:bg-glowyellow/30 sm:w-auto sm:px-5"
+              >
+                {authStatus === 'authenticating'
+                  ? '⟳ Signing...'
+                  : authStatus === 'restoring'
+                    ? '⟳ Restoring session...'
+                    : authStatus === 'expired'
+                      ? '🔐 Sign In Again'
+                      : '🔐 Secure Sign-In'}
+              </motion.button>
+            ) : (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                onClick={() => void disconnectWallet()}
+                className="w-full rounded-xl border border-white/20 bg-white/10 py-3 text-sm font-semibold text-white transition hover:bg-white/20 sm:w-auto sm:px-5"
+              >
+                Disconnect Wallet
+              </motion.button>
+            )}
+
             <motion.button
               whileHover={{ scale: 1.02 }}
-              onClick={authenticateWallet}
-              disabled={authStatus === 'authenticating' || authStatus === 'restoring'}
-              className="mt-4 w-full rounded-xl bg-glowyellow/20 border border-glowyellow py-2 text-sm font-semibold text-glowyellow hover:bg-glowyellow/30 transition disabled:opacity-50"
+              onClick={() => void syncNow()}
+              className="w-full rounded-xl border border-white/20 bg-white/10 py-3 text-sm font-semibold text-white transition hover:bg-white/20 sm:w-auto sm:px-5"
             >
-              {authStatus === 'authenticating' ? '⟳ Signing...' : authStatus === 'restoring' ? '⟳ Restoring...' : authStatus === 'expired' ? '🔐 Sign In Again' : '🔐 Secure Sign-In'}
+              Refresh Live State
             </motion.button>
-          )}
+          </div>
+
+          {authMessage ? (
+            <div className="mt-4 rounded-2xl border border-glowyellow/20 bg-glowyellow/10 p-4 text-sm text-glowyellow">
+              {authMessage}
+            </div>
+          ) : null}
         </motion.div>
 
-        {/* Transaction Status */}
-        {txStatus && <TransactionStatusCard status={txStatus.type as TxStatusType} txHash={txStatus.hash} label={txStatus.label} message={txStatus.message} onDismiss={() => setTxStatus(null)} />}
+        {txStatus ? (
+          <TransactionStatusCard
+            status={txStatus.type}
+            txHash={txStatus.hash}
+            label={txStatus.label}
+            message={txStatus.message}
+            onDismiss={() => setTxStatus(null)}
+          />
+        ) : null}
 
-        {/* Main Content Grid */}
         <div className="grid gap-8 lg:grid-cols-3">
-          {/* Left Column - Quest Flow */}
-          <div className="lg:col-span-2 space-y-8">
-            {/* Quest Flow Tracker */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl">
-              <QuestFlowTracker currentStep={getFlowStep()} />
+          <div className="space-y-8 lg:col-span-2">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl"
+            >
+              <QuestFlowTracker currentStep={getFlowStep()} statusLabel={flowStatusLabel()} />
             </motion.div>
 
-            {/* Active Quest Panel */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-[2rem]">
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem]"
+            >
               {loading && !activeQuest ? (
                 <LoadingScreen />
               ) : activeQuest ? (
                 <ActiveQuestPanel
                   quest={activeQuest}
-                  onStartQuest={activeQuest.status === 'AVAILABLE' ? handleStartQuest : undefined}
-                  onSubmitProof={activeQuest.status === 'ACTIVE' ? () => {} : undefined}
+                  onStartQuest={
+                    activeQuest.status === 'AVAILABLE' ? () => void handleStartQuest(activeQuest) : undefined
+                  }
+                  onSubmitProof={activeQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
                   loading={loading}
                   disabled={authStatus !== 'authenticated'}
                 />
               ) : (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-[2rem] border-2 border-dashed border-glowyellow/30 bg-gradient-to-br from-glowyellow/10 to-transparent p-12 text-center">
-                  <div className="text-5xl mb-4">✨</div>
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="rounded-[2rem] border-2 border-dashed border-glowyellow/30 bg-gradient-to-br from-glowyellow/10 to-transparent p-12 text-center"
+                >
+                  <div className="mb-4 text-5xl">✨</div>
                   <p className="text-xl font-bold text-white">Generate Your First Quest</p>
-                  <p className="mt-2 text-slate-300">Click the button below to summon an AI-crafted mission</p>
+                  <p className="mt-2 text-slate-300">
+                    One click summons an AI-crafted mission, writes it onchain, and stages it for
+                    live play.
+                  </p>
                 </motion.div>
               )}
             </motion.div>
 
-            {/* Proof Submission Panel */}
-            {activeQuest?.status === 'ACTIVE' && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
+            {activeQuest?.status === 'ACTIVE' ? (
+              <motion.div
+                ref={proofPanelRef}
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
                 <ProofSubmissionPanel
                   proofUri={proofUri}
-                  onProofChange={setProofUri}
-                  onSubmit={handleSubmitProof}
+                  onProofChange={handleProofChange}
+                  onSubmit={() => void handleSubmitProof()}
                   loading={loading}
                   disabled={authStatus !== 'authenticated'}
+                  error={proofError ?? undefined}
+                  normalizedProof={normalizedProof}
+                  helperText={proofHelperText}
                 />
               </motion.div>
-            )}
+            ) : null}
 
-            {/* Generate Quest Button */}
-            {!activeQuest || activeQuest.status === 'VERIFIED' ? (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-center">
+            {!activeQuest ||
+            activeQuest.status === 'VERIFIED' ||
+            activeQuest.status === 'FAILED' ||
+            activeQuest.status === 'CANCELLED' ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex justify-center"
+              >
                 <motion.button
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                  onClick={handleGenerateQuest}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
+                  onClick={() => void handleGenerateQuest()}
                   disabled={loading || authStatus !== 'authenticated'}
-                  className="rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-8 py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg hover:shadow-2xl transition disabled:opacity-50"
+                  className="rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-6 sm:px-8 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg transition disabled:opacity-50 hover:shadow-2xl min-h-[44px] sm:min-h-[48px]"
                 >
                   {loading ? '⟳ Generating...' : '⚔️ Generate New Quest'}
                 </motion.button>
@@ -481,15 +1031,23 @@ export default function CommandCenter() {
             ) : null}
           </div>
 
-          {/* Right Column - Sidebar */}
           <aside className="space-y-6">
-            {/* Daily Missions */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl">
-              <h3 className="text-sm uppercase tracking-[0.25em] text-glowyellow font-bold">Daily Challenges</h3>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl"
+            >
+              <h3 className="font-bold text-glowyellow text-sm uppercase tracking-[0.25em]">
+                Daily Challenges
+              </h3>
               <div className="mt-4 space-y-3">
                 {dailyMissions.length > 0 ? (
                   dailyMissions.map((mission) => (
-                    <motion.div key={mission.id} whileHover={{ scale: 1.02 }} className="rounded-xl border border-white/10 bg-navy/40 p-3 hover:border-glowyellow/50 transition">
+                    <motion.div
+                      key={mission.id}
+                      whileHover={{ scale: 1.02 }}
+                      className="rounded-xl border border-white/10 bg-navy/40 p-3 transition hover:border-glowyellow/50"
+                    >
                       <p className="text-sm font-semibold text-white">{mission.title}</p>
                       <p className="mt-1 text-xs text-slate-400">{mission.description}</p>
                       <p className="mt-2 text-xs font-bold text-glowyellow">{mission.reward}</p>
@@ -501,35 +1059,94 @@ export default function CommandCenter() {
               </div>
             </motion.div>
 
-            {/* Tips & Info */}
-            <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl">
-              <h3 className="text-sm uppercase tracking-[0.25em] text-softyellow font-bold">How It Works</h3>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl"
+            >
+              <h3 className="font-bold text-softyellow text-sm uppercase tracking-[0.25em]">
+                Live Quest Intel
+              </h3>
               <div className="mt-4 space-y-3 text-sm text-slate-300">
-                <div className="flex gap-3">
-                  <span className="text-lg">1️⃣</span>
-                  <p>AI generates a unique quest</p>
+                <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Realtime</p>
+                  <p className="mt-2 text-white">
+                    {isRealtimeReady
+                      ? 'Bootstrap loaded and live sync is active.'
+                      : 'Realtime bootstrap is still loading. Some quest transitions may appear with a short delay.'}
+                  </p>
                 </div>
-                <div className="flex gap-3">
-                  <span className="text-lg">2️⃣</span>
-                  <p>Accept the quest & stake CELO</p>
+                <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">AI Layer</p>
+                  <p className="mt-2 text-white">
+                    {generationProfile?.provider || generationProfile?.source || 'Adaptive quest engine'}
+                  </p>
+                  {generationProfile?.model ? (
+                    <p className="mt-1 text-xs text-slate-400">{generationProfile.model}</p>
+                  ) : null}
+                  {generationProfile?.fallbackReason ? (
+                    <p className="mt-2 text-xs text-amber-300">
+                      Fallback: {generationProfile.fallbackReason}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="flex gap-3">
-                  <span className="text-lg">3️⃣</span>
-                  <p>Complete the mission objectives</p>
-                </div>
-                <div className="flex gap-3">
-                  <span className="text-lg">4️⃣</span>
-                  <p>Submit proof & earn rewards</p>
+                <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Judge Narrative</p>
+                  <p className="mt-2 text-white">
+                    The flow shows AI quest generation, secure wallet auth, onchain execution,
+                    proof-driven verification, and NFT reward delivery in one loop.
+                  </p>
                 </div>
               </div>
             </motion.div>
 
-            {/* Status Messages */}
-            {message && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="rounded-xl border border-glowyellow/30 bg-glowyellow/10 p-4">
-                <p className="text-sm text-glowyellow">{message}</p>
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl"
+            >
+              <h3 className="font-bold text-softyellow text-sm uppercase tracking-[0.25em]">
+                How It Works
+              </h3>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div className="flex gap-3">
+                  <span className="text-lg">1️⃣</span>
+                  <p>AI generates a unique quest and the UI reveals it dramatically.</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-lg">2️⃣</span>
+                  <p>You accept the quest and stake CELO through a real blockchain transaction.</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-lg">3️⃣</span>
+                  <p>You complete the objective and submit proof using a transaction hash or explorer link.</p>
+                </div>
+                <div className="flex gap-3">
+                  <span className="text-lg">4️⃣</span>
+                  <p>The backend verifies the quest and streams rewards, XP, and NFT updates live.</p>
+                </div>
+              </div>
+            </motion.div>
+
+            {message ? (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className={`rounded-xl p-4 border ${
+                  message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') || message.toLowerCase().includes('invalid') || message.toLowerCase().includes('insufficient')
+                    ? 'border-red-500/50 bg-red-500/10'
+                    : 'border-glowyellow/30 bg-glowyellow/10'
+                }`}
+              >
+                <p className={`text-sm ${
+                  message.toLowerCase().includes('failed') || message.toLowerCase().includes('error') || message.toLowerCase().includes('invalid') || message.toLowerCase().includes('insufficient')
+                    ? 'text-red-300'
+                    : 'text-glowyellow'
+                }`}>
+                  {message}
+                </p>
               </motion.div>
-            )}
+            ) : null}
           </aside>
         </div>
       </div>

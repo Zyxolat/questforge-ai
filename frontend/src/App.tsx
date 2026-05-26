@@ -55,6 +55,17 @@ function App() {
             {address && typeof address === 'string' ? `${(address ?? '').slice(0, 6)}...${(address ?? '').slice(-4)}` : 'Connect Wallet'}
           </button>
         </div>
+        <div className="mx-auto flex max-w-7xl gap-4 overflow-x-auto px-6 pb-4 md:hidden">
+          {links.map((item) => (
+            <Link
+              key={item.to}
+              to={item.to}
+              className="whitespace-nowrap rounded-full border border-white/10 bg-white/5 px-4 py-2 text-xs uppercase tracking-[0.18em] text-white/80 transition hover:text-glowyellow"
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
       </header>
       <WalletModal open={walletModalOpen} onClose={() => setWalletModalOpen(false)} />
 

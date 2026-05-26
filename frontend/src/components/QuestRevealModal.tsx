@@ -28,6 +28,11 @@ export default function QuestRevealModal({
   };
 
   const color = getDifficultyColor(quest.difficulty);
+  const questGeneration = quest.generation && typeof quest.generation === 'object' ? quest.generation as Record<string, unknown> : null;
+  const questNpc = quest.npc && typeof quest.npc === 'object' ? quest.npc as Record<string, unknown> : null;
+  const requiredTxTypes = Array.isArray(quest.requiredTxTypes)
+    ? quest.requiredTxTypes.filter((value): value is string => typeof value === 'string' && value.length > 0)
+    : [];
   const colorClasses: Record<string, string> = {
     purple: 'from-purple-600 to-pink-600',
     orange: 'from-orange-600 to-red-600',
@@ -62,7 +67,7 @@ export default function QuestRevealModal({
             />
 
             {/* Main card */}
-            <motion.div className="rounded-[2.5rem] border-2 border-glowyellow bg-gradient-to-br from-navy via-deepnavy to-navy p-8 shadow-2xl">
+            <motion.div className="rounded-[2.5rem] border-2 border-glowyellow bg-gradient-to-br from-navy via-deepnavy to-navy p-4 sm:p-6 md:p-8 shadow-2xl">
               {/* Animated particles */}
               <div className="absolute inset-0 rounded-[2.5rem] overflow-hidden">
                 {[...Array(6)].map((_, i) => (
@@ -119,7 +124,7 @@ export default function QuestRevealModal({
                   transition={{ delay: 0.4 }}
                   className="flex justify-center"
                 >
-                  <div className={`rounded-full bg-gradient-to-r ${colorClasses[color]} px-6 py-2 text-sm font-bold uppercase tracking-[0.15em] text-white shadow-lg`}>
+                  <div className={`rounded-full bg-gradient-to-r ${colorClasses[color]} px-4 sm:px-6 py-2 text-xs sm:text-sm font-bold uppercase tracking-[0.15em] text-white shadow-lg`}>
                     Tier {quest.difficulty} Quest
                   </div>
                 </motion.div>
@@ -134,6 +139,16 @@ export default function QuestRevealModal({
                   {quest.description}
                 </motion.p>
 
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  transition={{ delay: 0.55 }}
+                  className="rounded-2xl border border-glowyellow/20 bg-glowyellow/10 p-4"
+                >
+                  <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Primary Objective</p>
+                  <p className="mt-2 text-base font-semibold text-white">{quest.objective || 'Complete the mission and return with proof.'}</p>
+                </motion.div>
+
                 {/* Lore */}
                 {quest.lore && (
                   <motion.div
@@ -146,11 +161,50 @@ export default function QuestRevealModal({
                   </motion.div>
                 )}
 
+                {(questNpc || questGeneration || requiredTxTypes.length > 0) && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.65 }}
+                    className="grid gap-4 sm:grid-cols-2"
+                  >
+                    {questNpc ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Narrated By</p>
+                        <p className="mt-2 text-lg font-semibold text-white">{String(questNpc.name ?? 'Forge Guide')}</p>
+                        {typeof questNpc.role === 'string' ? <p className="mt-1 text-sm text-slate-300">{questNpc.role}</p> : null}
+                      </div>
+                    ) : null}
+                    {questGeneration ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">AI Provenance</p>
+                        <p className="mt-2 text-lg font-semibold text-white">{String(questGeneration.provider ?? questGeneration.source ?? 'Adaptive engine')}</p>
+                        {typeof questGeneration.model === 'string' ? <p className="mt-1 text-sm text-slate-300">{questGeneration.model}</p> : null}
+                      </div>
+                    ) : null}
+                    {requiredTxTypes.length > 0 ? (
+                      <div className="rounded-2xl border border-white/10 bg-white/5 p-4 sm:col-span-2">
+                        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Expected Onchain Moves</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {requiredTxTypes.map((step) => (
+                            <span
+                              key={step}
+                              className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200"
+                            >
+                              {step.replace(/_/g, ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </motion.div>
+                )}
+
                 {/* Rewards grid */}
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: 0.7 }}
+                  transition={{ delay: 0.75 }}
                   className="grid gap-4 sm:grid-cols-3"
                 >
                   <div className="rounded-xl border border-glowyellow/30 bg-glowyellow/10 p-3 text-center">
@@ -173,7 +227,7 @@ export default function QuestRevealModal({
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: 0.8 }}
+                  transition={{ delay: 0.85 }}
                   className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-4"
                 >
                   <p className="text-center text-sm text-orange-200">
@@ -186,23 +240,23 @@ export default function QuestRevealModal({
                 <motion.div
                   initial={{ opacity: 0 }}
                   animate={{ opacity: 1 }}
-                  transition={{ delay: 0.9 }}
-                  className="flex gap-3 pt-4"
+                  transition={{ delay: 0.95 }}
+                  className="flex flex-col gap-3 pt-4 sm:flex-row"
                 >
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                     onClick={onClose}
-                    className="flex-1 rounded-xl border border-white/30 bg-white/10 px-6 py-3 font-bold uppercase tracking-[0.2em] text-white hover:bg-white/20 transition"
+                    className="flex-1 rounded-xl border border-white/30 bg-white/10 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white hover:bg-white/20 transition min-h-[44px] sm:min-h-[48px]"
                   >
                     Later
                   </motion.button>
                   <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
+                    whileHover={{ scale: 1.03 }}
+                    whileTap={{ scale: 0.97 }}
                     onClick={onAccept}
                     disabled={loading}
-                    className={`flex-1 rounded-xl bg-gradient-to-r ${colorClasses[color]} px-6 py-3 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition disabled:opacity-50`}
+                    className={`flex-1 rounded-xl bg-gradient-to-r ${colorClasses[color]} px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition disabled:opacity-50 min-h-[44px] sm:min-h-[48px]`}
                   >
                     {loading ? 'Accepting...' : 'Accept Quest'}
                   </motion.button>
