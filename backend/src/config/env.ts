@@ -467,7 +467,7 @@ export function validateEnvironment(): EnvValidationResult {
         VERIFIER_PRIVATE_KEY: verifierPrivateKey,
         VERIFICATION_WORKER_INTERVAL_MS: parsePositiveInt(
           'VERIFICATION_WORKER_INTERVAL_MS',
-          optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '5000'
+          optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '2000'
         ),
         VERIFICATION_BATCH_SIZE: parsePositiveInt(
           'VERIFICATION_BATCH_SIZE',

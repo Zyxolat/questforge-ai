@@ -57,6 +57,15 @@ type QuestFlowStage =
   | 'REWARDED'
   | 'COMPLETED';
 
+function isProofVerificationStatus(state: {
+  type: TxStatusType;
+  hash?: string;
+  label?: string;
+  message?: string;
+} | null) {
+  return Boolean(state?.label?.toLowerCase().includes('proof'));
+}
+
 function questMatcher(quest: QuestState | null) {
   return {
     id: quest?.id ?? undefined,
@@ -340,6 +349,74 @@ export default function CommandCenter() {
       setResumedQuestId(null);
     }
   }, [resumedQuest, resumedQuestId]);
+
+  useEffect(() => {
+    if (!interactiveQuest) {
+      return;
+    }
+
+    if (interactiveQuest.status === 'SUBMITTED') {
+      setTxStatus((current) =>
+        current && !isProofVerificationStatus(current)
+          ? current
+          : {
+              type: 'pending',
+              hash:
+                typeof interactiveQuest.proofTxHash === 'string'
+                  ? interactiveQuest.proofTxHash
+                  : typeof interactiveQuest.proofTx === 'string'
+                    ? interactiveQuest.proofTx
+                    : undefined,
+              label: 'Proof verification pending',
+              message: 'Deterministic verification is running. Final status should stream back within a few seconds.'
+            }
+      );
+      return;
+    }
+
+    if (interactiveQuest.status === 'VERIFIED') {
+      setTxStatus((current) =>
+        current && !isProofVerificationStatus(current)
+          ? current
+          : {
+              type: 'success',
+              hash:
+                typeof interactiveQuest.verificationTx === 'string'
+                  ? interactiveQuest.verificationTx
+                  : current?.hash,
+              label: 'Proof verified',
+              message: 'Deterministic verification passed. Reward settlement details are updating now.'
+            }
+      );
+      return;
+    }
+
+    if (interactiveQuest.status === 'FAILED') {
+      setTxStatus((current) =>
+        current && !isProofVerificationStatus(current)
+          ? current
+          : {
+              type: 'error',
+              hash:
+                typeof interactiveQuest.verificationTx === 'string'
+                  ? interactiveQuest.verificationTx
+                  : current?.hash,
+              label: 'Proof verification failed',
+              message:
+                typeof interactiveQuest.verificationReason === 'string' && interactiveQuest.verificationReason.trim().length > 0
+                  ? interactiveQuest.verificationReason
+                  : 'Deterministic verification rejected this proof.'
+            }
+      );
+    }
+  }, [
+    interactiveQuest,
+    interactiveQuest?.proofTx,
+    interactiveQuest?.proofTxHash,
+    interactiveQuest?.status,
+    interactiveQuest?.verificationReason,
+    interactiveQuest?.verificationTx
+  ]);
 
   useEffect(() => {
     const questId = interactiveQuest?.id;
@@ -868,8 +945,10 @@ export default function CommandCenter() {
 
       patchQuest(questMatcher(resolvedQuest), {
         status: 'SUBMITTED',
-        proofTxHash: normalizedProof,
-        proofTx: submissionTxHash
+        proofTx: normalizedProof,
+        proofTxHash: submissionTxHash,
+        verificationResult: 'pending',
+        verificationReason: 'Queued for deterministic verification'
       });
 
       if (!resolvedQuest.id) {
@@ -877,6 +956,12 @@ export default function CommandCenter() {
       }
 
       await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
+      setTxStatus({
+        type: 'pending',
+        hash: submissionTxHash,
+        label: 'Proof verification pending',
+        message: 'Deterministic verification is running. Results should stream back shortly.'
+      });
       setMessage(
         'Proof submitted. The AI Dungeon Master is now verifying the result and streaming the outcome back to this screen.'
       );

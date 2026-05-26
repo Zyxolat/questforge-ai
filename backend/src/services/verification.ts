@@ -48,6 +48,10 @@ const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 let workerTimer: NodeJS.Timeout | null = null;
 let workerActive = false;
 
+function elapsedMs(startedAtMs: number) {
+  return Date.now() - startedAtMs;
+}
+
 function ensureVerifierContract() {
   if (!contracts.forgeQuestManagerWrite) {
     throw new Error('Verifier signer is not configured');
@@ -452,19 +456,6 @@ async function syncSuccessfulSettlementArtifacts(input: {
 
   await syncUserProfileSnapshot(input.quest.playerId, input.quest.playerWallet);
 
-  await publishVerificationRealtimeEvent({
-    replayKey: `verification-success-claimed:${input.quest.id}:${input.verificationTxHash}`,
-    eventName: 'reward:claimed',
-    quest: input.quest,
-    payload: {
-      verificationTx: input.verificationTxHash,
-      data: {
-        success: true,
-        reason: input.verificationReason
-      }
-    }
-  });
-
   if (rewardReleased) {
     await publishVerificationRealtimeEvent({
       replayKey: `verification-success-released:${input.quest.id}:${input.verificationTxHash}`,
@@ -548,19 +539,6 @@ async function syncFailedSettlementArtifacts(input: {
       }
     });
   }
-
-  await publishVerificationRealtimeEvent({
-    replayKey: `verification-failure-claimed:${input.quest.id}:${input.verificationTxHash ?? 'rejected'}`,
-    eventName: 'reward:claimed',
-    quest: input.quest,
-    payload: {
-      verificationTx: input.verificationTxHash ?? null,
-      data: {
-        success: false,
-        reason: input.verificationReason
-      }
-    }
-  });
 
   if (input.verificationTxHash) {
     await publishVerificationRealtimeEvent({
@@ -665,8 +643,10 @@ async function verifyGameplayTransaction(input: {
   startedAt: Date | null;
   expiresAt: Date;
 }) {
-  const tx = await contracts.provider.getTransaction(input.proofTxHash);
-  const receipt = await contracts.provider.getTransactionReceipt(input.proofTxHash);
+  const [tx, receipt] = await Promise.all([
+    contracts.provider.getTransaction(input.proofTxHash),
+    contracts.provider.getTransactionReceipt(input.proofTxHash)
+  ]);
 
   if (!tx || !receipt || receipt.status !== 1) {
     throw new Error('Proof transaction is missing or failed onchain');
@@ -771,6 +751,20 @@ async function settleVerificationSuccess(quest: QuestVerificationRow, proofSubmi
     verificationTx: verificationTxHash
   });
 
+  await publishVerificationRealtimeEvent({
+    replayKey: `verification-success-claimed:${quest.id}:${verificationTxHash}`,
+    eventName: 'reward:claimed',
+    quest,
+    payload: {
+      verificationTx: verificationTxHash,
+      verificationReason,
+      data: {
+        success: true,
+        reason: verificationReason
+      }
+    }
+  });
+
   await incrementDailyActivity(quest.playerId, {
     questsCompleted: 1,
     xpEarned: xpReward,
@@ -821,6 +815,20 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
     verificationTx: verificationTxHash
   });
 
+  await publishVerificationRealtimeEvent({
+    replayKey: `verification-failure-claimed:${quest.id}:${verificationTxHash ?? 'rejected'}`,
+    eventName: 'reward:claimed',
+    quest,
+    payload: {
+      verificationTx: verificationTxHash ?? null,
+      verificationReason,
+      data: {
+        success: false,
+        reason: verificationReason
+      }
+    }
+  });
+
   await applyStreakDecay(quest.playerId);
   await setQuestCooldown(quest.playerId, 15, 'quest_failure');
   await syncFailedSettlementArtifacts({
@@ -833,6 +841,7 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
 }
 
 async function verifyQueuedProof(proofSubmissionId: string) {
+  const verificationStartedAtMs = Date.now();
   const proof = await findProofSubmissionById(proofSubmissionId);
   if (!proof) {
     return;
@@ -849,12 +858,49 @@ async function verifyQueuedProof(proofSubmissionId: string) {
     return;
   }
 
+  logger.info('Proof verification started', {
+    questId: quest.id,
+    chainQuestId: quest.chainQuestId.toString(),
+    wallet: quest.playerWallet,
+    proofSubmissionId: proof.id,
+    proofReceivedAt: proof.submittedAt.toISOString()
+  });
+
   try {
     const verification = readVerificationMetadata(quest.metadata);
     const proofTxHash = canonicalizeProofReference(proof.proofUri);
     const submissionTxHash = assertTransactionHash(quest.proofTxHash || '', 'submissionTxHash');
     const expectedProofHash = hashProofUri(proofTxHash);
-    const onchainQuest = await resolveOnchainQuest(quest.chainQuestId);
+
+    if (proofTxHash === submissionTxHash) {
+      throw new Error('Paste the gameplay transaction hash as proof, not the proof-submission transaction hash');
+    }
+
+    logger.info('Proof verification tx fetch started', {
+      questId: quest.id,
+      chainQuestId: quest.chainQuestId.toString(),
+      wallet: quest.playerWallet,
+      proofSubmissionId: proof.id,
+      proofTxHash,
+      submissionTxHash
+    });
+
+    const [onchainQuest] = await Promise.all([
+      resolveOnchainQuest(quest.chainQuestId),
+      verifySubmissionTransaction({
+        submissionTxHash,
+        chainQuestId: quest.chainQuestId,
+        wallet: quest.playerWallet,
+        proofHash: expectedProofHash
+      }),
+      verifyGameplayTransaction({
+        proofTxHash,
+        wallet: quest.playerWallet,
+        verification,
+        startedAt: quest.startedAt,
+        expiresAt: quest.expiresAt
+      })
+    ]);
 
     if (String(onchainQuest.player).toLowerCase() !== quest.playerWallet.toLowerCase()) {
       throw new Error('Onchain quest ownership does not match the authenticated player');
@@ -868,41 +914,36 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       throw new Error(`Onchain quest is not awaiting verification (status=${onchainQuest.status.toString()})`);
     }
 
-    await verifySubmissionTransaction({
-      submissionTxHash,
-      chainQuestId: quest.chainQuestId,
-      wallet: quest.playerWallet,
-      proofHash: expectedProofHash
-    });
-
-    if (proofTxHash === submissionTxHash) {
-      throw new Error('Paste the gameplay transaction hash as proof, not the proof-submission transaction hash');
-    }
-
-    await verifyGameplayTransaction({
-      proofTxHash,
-      wallet: quest.playerWallet,
-      verification,
-      startedAt: quest.startedAt,
-      expiresAt: quest.expiresAt
-    });
-
-    await settleVerificationSuccess(quest, proof.id, 'Deterministic onchain verification passed and treasury settlement executed');
-    logger.info('Proof verification approved', {
-      questId: quest.id,
-      chainQuestId: quest.chainQuestId.toString(),
-      wallet: quest.playerWallet,
-      proofSubmissionId: proof.id
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : 'Deterministic verification failed';
-    await settleVerificationFailure(quest, proof.id, reason);
-    logger.warn('Proof verification rejected', {
+    logger.info('Proof verification tx validated', {
       questId: quest.id,
       chainQuestId: quest.chainQuestId.toString(),
       wallet: quest.playerWallet,
       proofSubmissionId: proof.id,
-      reason
+      proofTxHash,
+      submissionTxHash,
+      validationDurationMs: elapsedMs(verificationStartedAtMs)
+    });
+
+    await settleVerificationSuccess(quest, proof.id, 'Deterministic onchain verification passed and treasury settlement executed');
+    logger.info('Proof verification completed', {
+      questId: quest.id,
+      chainQuestId: quest.chainQuestId.toString(),
+      wallet: quest.playerWallet,
+      proofSubmissionId: proof.id,
+      result: 'approved',
+      durationMs: elapsedMs(verificationStartedAtMs)
+    });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : 'Deterministic verification failed';
+    await settleVerificationFailure(quest, proof.id, reason);
+    logger.warn('Proof verification completed', {
+      questId: quest.id,
+      chainQuestId: quest.chainQuestId.toString(),
+      wallet: quest.playerWallet,
+      proofSubmissionId: proof.id,
+      result: 'rejected',
+      reason,
+      durationMs: elapsedMs(verificationStartedAtMs)
     });
   }
 }
@@ -916,11 +957,22 @@ export async function queueProofVerification(params: {
   const canonicalProofTxHash = canonicalizeProofReference(params.proofUri);
   const normalizedSubmissionTxHash = assertTransactionHash(params.submissionTxHash, 'submissionTxHash');
   const proofHash = hashProofUri(canonicalProofTxHash);
+  const receivedAt = new Date();
 
   const quest = await loadQuestForVerification(params.questId);
   if (!quest || quest.playerId !== params.userId) {
     throw new Error('Quest not found for authenticated player');
   }
+
+  logger.info('Proof verification received', {
+    questId: params.questId,
+    chainQuestId: quest.chainQuestId?.toString() ?? null,
+    userId: params.userId,
+    wallet: quest.playerWallet,
+    proofTxHash: canonicalProofTxHash,
+    submissionTxHash: normalizedSubmissionTxHash,
+    receivedAt: receivedAt.toISOString()
+  });
 
   const existingProof = await findProofSubmissionByHash(proofHash);
   let proofSubmissionId: string;
@@ -954,6 +1006,23 @@ export async function queueProofVerification(params: {
     status: 'SUBMITTED',
     proofTx: canonicalProofTxHash,
     proofTxHash: normalizedSubmissionTxHash
+  });
+
+  await publishVerificationRealtimeEvent({
+    replayKey: `verification-submitted:${params.questId}:${proofSubmissionId}:${normalizedSubmissionTxHash}`,
+    eventName: 'proof:submitted',
+    quest: {
+      ...quest,
+      proofTx: canonicalProofTxHash,
+      proofTxHash: normalizedSubmissionTxHash
+    },
+    payload: {
+      status: 'SUBMITTED',
+      proofTx: canonicalProofTxHash,
+      proofTxHash: normalizedSubmissionTxHash,
+      verificationResult: 'pending',
+      verificationReason: 'Queued for deterministic verification'
+    }
   });
 
   if (contracts.forgeQuestManagerWrite) {

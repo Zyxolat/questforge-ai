@@ -301,6 +301,13 @@ function verificationPatchForEvent(eventName: string, payload: JsonObject) {
     asString(payload.verificationReason) ??
     undefined;
 
+  if (eventName === 'proof:submitted') {
+    return {
+      verificationResult: 'pending',
+      verificationReason: reason
+    };
+  }
+
   if (eventName === 'reward:claimed') {
     return {
       verificationResult:
@@ -464,6 +471,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
   const socketRef = useRef<Socket | null>(null);
   const scopesRef = useRef<Scope[]>([]);
   const lastEventIdRef = useRef(0);
+  const hasSubmittedQuest = quests.some((quest) => quest.status === 'SUBMITTED');
 
   function clearState() {
     setHydrationStatus('idle');
@@ -598,6 +606,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
             {
               chainQuestId,
               status: questStatusForEvent(event.eventName, payload),
+              proofTx: asString(payload.proofTx),
+              proofTxHash: asString(payload.proofTxHash),
+              verificationTx: asString(payload.verificationTx),
               verificationResult: verificationPatch.verificationResult,
               verificationReason: verificationPatch.verificationReason,
               treasuryPayout:
@@ -875,12 +886,21 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    const intervalMs = hasSubmittedQuest ? 2500 : 10000;
     const timer = window.setInterval(() => {
       void syncNow();
-    }, 15000);
+    }, intervalMs);
 
     return () => window.clearInterval(timer);
-  }, [authStatus, connectionStatus]);
+  }, [authStatus, connectionStatus, hasSubmittedQuest]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || connectionStatus === 'connected' || !hasSubmittedQuest) {
+      return;
+    }
+
+    void syncNow();
+  }, [authStatus, connectionStatus, hasSubmittedQuest]);
 
   const value: RealtimeStateContextValue = {
     connectionStatus,

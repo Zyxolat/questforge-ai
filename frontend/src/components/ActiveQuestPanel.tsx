@@ -283,15 +283,19 @@ export default function ActiveQuestPanel({
           </motion.div>
         )}
 
-        {(quest.proofTxHash || quest.verificationTx || quest.treasuryPayout?.status) && (
+        {(quest.proofTx || quest.proofTxHash || quest.verificationTx || quest.treasuryPayout?.status) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 md:grid-cols-3"
+            className="grid gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 md:grid-cols-2 xl:grid-cols-4"
           >
             <div>
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Proof Tx</p>
-              <p className="mt-2 break-all text-xs font-mono text-white">{String(quest.proofTxHash ?? quest.proofTx ?? 'Pending')}</p>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Gameplay Proof Tx</p>
+              <p className="mt-2 break-all text-xs font-mono text-white">{String(quest.proofTx ?? 'Pending')}</p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Submission Tx</p>
+              <p className="mt-2 break-all text-xs font-mono text-white">{String(quest.proofTxHash ?? 'Pending')}</p>
             </div>
             <div>
               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Verification Tx</p>
