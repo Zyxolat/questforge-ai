@@ -410,6 +410,29 @@ export default function CommandCenter() {
     proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
 
+  function resumeRestoredQuest() {
+    if (!restoredQuest?.id) {
+      return;
+    }
+
+    setResumedQuestId(restoredQuest.id);
+
+    if (restoredQuest.status === 'ACTIVE') {
+      setMessage('Previous active quest resumed. Paste your proof reference below when you are ready.');
+      window.setTimeout(() => {
+        proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 120);
+      return;
+    }
+
+    if (restoredQuest.status === 'AVAILABLE') {
+      setMessage('Previous quest resumed. You can begin it onchain whenever you are ready.');
+      return;
+    }
+
+    setMessage('Previous quest resumed. Review its latest state below.');
+  }
+
   function getFlowStep(): QuestFlowStage {
     if (!interactiveQuest) {
       return 'PENDING';
@@ -1088,11 +1111,15 @@ export default function CommandCenter() {
                   <motion.button
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setResumedQuestId(restoredQuest.id ?? null)}
+                    onClick={resumeRestoredQuest}
                     disabled={!restoredQuest.id}
                     className="rounded-xl border border-amber-300 bg-amber-300/20 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/30 disabled:opacity-50"
                   >
-                    Resume Previous Quest
+                    {restoredQuest.status === 'ACTIVE'
+                      ? 'Resume and Submit Proof'
+                      : restoredQuest.status === 'AVAILABLE'
+                        ? 'Resume and Start Quest'
+                        : 'Resume Previous Quest'}
                   </motion.button>
                   <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
                     Status: {restoredQuest.status || 'Unknown'}
@@ -1118,7 +1145,7 @@ export default function CommandCenter() {
                   }
                   onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
                   loading={loading}
-                  disabled={authStatus !== 'authenticated'}
+                  disabled={false}
                 />
               ) : (
                 <motion.div
@@ -1147,7 +1174,14 @@ export default function CommandCenter() {
                   onProofChange={handleProofChange}
                   onSubmit={() => void handleSubmitProof()}
                   loading={loading}
-                  disabled={authStatus !== 'authenticated'}
+                  disabled={false}
+                  disabledReason={
+                    !isCorrectNetwork
+                      ? `Switch to ${env.CELO_CHAIN_NAME} before submitting proof.`
+                      : authStatus !== 'authenticated'
+                        ? 'Submitting will prompt secure sign-in before sending the transaction.'
+                        : null
+                  }
                   error={proofError ?? undefined}
                   normalizedProof={normalizedProof}
                   helperText={proofHelperText}
@@ -1168,7 +1202,7 @@ export default function CommandCenter() {
                   whileHover={{ scale: 1.03 }}
                   whileTap={{ scale: 0.97 }}
                   onClick={() => void handleGenerateQuest()}
-                  disabled={loading || authStatus !== 'authenticated'}
+                  disabled={loading}
                   className="rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-6 sm:px-8 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg transition disabled:opacity-50 hover:shadow-2xl min-h-[44px] sm:min-h-[48px]"
                 >
                   {loading ? '⟳ Generating...' : '⚔️ Generate New Quest'}
