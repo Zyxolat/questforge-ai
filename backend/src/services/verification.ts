@@ -350,6 +350,7 @@ async function syncSuccessfulSettlementArtifacts(input: {
   onchainQuest: Awaited<ReturnType<typeof resolveOnchainQuest>>;
   receipt: ethers.TransactionReceipt | null;
   verificationTxHash: string;
+  verificationReason: string;
 }) {
   const settledAt = await resolveReceiptTimestamp(input.receipt);
   const rewardReleased = findReceiptEvents(contracts.treasury, input.receipt, 'RewardReleased').at(-1);
@@ -458,7 +459,8 @@ async function syncSuccessfulSettlementArtifacts(input: {
     payload: {
       verificationTx: input.verificationTxHash,
       data: {
-        success: true
+        success: true,
+        reason: input.verificationReason
       }
     }
   });
@@ -506,6 +508,7 @@ async function syncFailedSettlementArtifacts(input: {
   onchainQuest: Awaited<ReturnType<typeof resolveOnchainQuest>>;
   receipt: ethers.TransactionReceipt | null;
   verificationTxHash?: string;
+  verificationReason: string;
 }) {
   const refundEvent = findReceiptEvents(contracts.treasury, input.receipt, 'RewardRefunded').at(-1);
   const settledAt = await resolveReceiptTimestamp(input.receipt);
@@ -553,7 +556,8 @@ async function syncFailedSettlementArtifacts(input: {
     payload: {
       verificationTx: input.verificationTxHash ?? null,
       data: {
-        success: false
+        success: false,
+        reason: input.verificationReason
       }
     }
   });
@@ -571,7 +575,8 @@ async function syncFailedSettlementArtifacts(input: {
           rewardAmount,
           stakeAmount,
           totalAmount
-        }
+        },
+        verificationReason: input.verificationReason
       }
     });
   }
@@ -777,7 +782,8 @@ async function settleVerificationSuccess(quest: QuestVerificationRow, proofSubmi
     quest,
     onchainQuest,
     receipt,
-    verificationTxHash
+    verificationTxHash,
+    verificationReason
   });
 }
 
@@ -821,7 +827,8 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
     quest,
     onchainQuest,
     receipt,
-    verificationTxHash
+    verificationTxHash,
+    verificationReason
   });
 }
 
@@ -867,6 +874,10 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       wallet: quest.playerWallet,
       proofHash: expectedProofHash
     });
+
+    if (proofTxHash === submissionTxHash) {
+      throw new Error('Paste the gameplay transaction hash as proof, not the proof-submission transaction hash');
+    }
 
     await verifyGameplayTransaction({
       proofTxHash,
@@ -945,7 +956,14 @@ export async function queueProofVerification(params: {
     proofTxHash: normalizedSubmissionTxHash
   });
 
-  void processPendingProofSubmissions(1);
+  if (contracts.forgeQuestManagerWrite) {
+    void processPendingProofSubmissions(1);
+  } else {
+    logger.warn('Proof queued but verifier signer is unavailable; leaving submission pending', {
+      questId: params.questId,
+      proofSubmissionId
+    });
+  }
 
   return {
     proofHash,
@@ -954,6 +972,11 @@ export async function queueProofVerification(params: {
 }
 
 export async function processPendingProofSubmissions(limit = env.VERIFICATION_BATCH_SIZE) {
+  if (!contracts.forgeQuestManagerWrite) {
+    logger.warn('Skipping proof verification batch because verifier signer is unavailable');
+    return;
+  }
+
   if (workerActive) {
     return;
   }

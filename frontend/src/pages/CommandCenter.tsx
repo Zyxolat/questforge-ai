@@ -99,13 +99,13 @@ function normalizeProofReference(value: string) {
 
   const txHashMatch = trimmed.match(/0x[a-fA-F0-9]{64}/);
   if (txHashMatch) {
-    return txHashMatch[0];
+    return txHashMatch[0].toLowerCase();
   }
 
   try {
     const url = new URL(trimmed);
     const pathHash = url.pathname.match(/0x[a-fA-F0-9]{64}/);
-    return pathHash ? pathHash[0] : null;
+    return pathHash ? pathHash[0].toLowerCase() : null;
   } catch {
     return null;
   }
@@ -408,6 +408,21 @@ export default function CommandCenter() {
       'Complete the objective, then paste the proof transaction below to trigger AI verification.'
     );
     proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function reviewFailureState() {
+    if (!interactiveQuest) {
+      return;
+    }
+
+    const failureReason =
+      typeof interactiveQuest.verificationReason === 'string' && interactiveQuest.verificationReason.trim().length > 0
+        ? interactiveQuest.verificationReason
+        : interactiveQuest.treasuryPayout?.status === 'REFUNDED'
+          ? 'The quest was refunded after deterministic verification rejected the proof.'
+          : 'The quest failed during proof verification or settlement. Review the proof hash and objective requirements, then generate a new quest when ready.';
+
+    setMessage(failureReason);
   }
 
   function resumeRestoredQuest() {
@@ -1144,6 +1159,11 @@ export default function CommandCenter() {
                       : undefined
                   }
                   onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
+                  onReviewFailure={
+                    interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED'
+                      ? reviewFailureState
+                      : undefined
+                  }
                   loading={loading}
                   disabled={false}
                 />

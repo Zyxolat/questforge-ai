@@ -22,6 +22,14 @@ type TreasuryPayoutRow = {
   refundTx: string | null;
 };
 
+type LatestProofState = {
+  questId: string;
+  verificationResult: string | null;
+  verificationReason: string | null;
+  submittedAt: Date;
+  verifiedAt: Date | null;
+};
+
 function serializeMaybeBigInt(value: bigint | string | null | undefined) {
   if (typeof value === 'bigint') {
     return value.toString();
@@ -52,6 +60,29 @@ async function loadQuestFeed(userId: string, wallet: string) {
   });
 
   const questIds = quests.map((quest) => quest.id);
+  const latestProofRows = questIds.length
+    ? await prisma.proofSubmission.findMany({
+        where: {
+          questId: {
+            in: questIds
+          }
+        },
+        orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+        select: {
+          questId: true,
+          verificationResult: true,
+          verificationReason: true,
+          submittedAt: true,
+          verifiedAt: true
+        }
+      })
+    : [];
+  const latestProofByQuestId = new Map<string, LatestProofState>();
+  latestProofRows.forEach((row) => {
+    if (!latestProofByQuestId.has(row.questId)) {
+      latestProofByQuestId.set(row.questId, row);
+    }
+  });
   const payouts = questIds.length
     ? await prisma.$queryRaw<TreasuryPayoutRow[]>(
         Prisma.sql`
@@ -79,6 +110,14 @@ async function loadQuestFeed(userId: string, wallet: string) {
     ...quest,
     orchestrationId: extractQuestOrchestrationId(quest.metadata),
     chainQuestId: serializeMaybeBigInt(quest.chainQuestId),
+    ...(latestProofByQuestId.get(quest.id)
+      ? {
+          verificationResult: latestProofByQuestId.get(quest.id)?.verificationResult ?? null,
+          verificationReason: latestProofByQuestId.get(quest.id)?.verificationReason ?? null,
+          lastProofSubmittedAt: latestProofByQuestId.get(quest.id)?.submittedAt ?? null,
+          lastProofVerifiedAt: latestProofByQuestId.get(quest.id)?.verifiedAt ?? null
+        }
+      : {}),
     treasuryPayout: payoutsByQuestId.get(quest.id)
       ? {
           ...payoutsByQuestId.get(quest.id)!,

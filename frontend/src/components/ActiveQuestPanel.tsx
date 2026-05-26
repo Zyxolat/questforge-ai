@@ -6,6 +6,7 @@ interface ActiveQuestPanelProps {
   quest: QuestState | null;
   onStartQuest?: () => void;
   onSubmitProof?: () => void;
+  onReviewFailure?: () => void;
   loading?: boolean;
   disabled?: boolean;
 }
@@ -14,6 +15,7 @@ export default function ActiveQuestPanel({
   quest,
   onStartQuest,
   onSubmitProof,
+  onReviewFailure,
   loading = false,
   disabled = false
 }: ActiveQuestPanelProps) {
@@ -67,6 +69,10 @@ export default function ActiveQuestPanel({
   const questNpc = quest.npc && typeof quest.npc === 'object' ? quest.npc as Record<string, unknown> : null;
   const questExpiresAt = typeof quest.expiresAt === 'string' ? new Date(quest.expiresAt) : null;
   const questStartedAt = typeof quest.startedAt === 'string' ? new Date(quest.startedAt) : null;
+  const verificationReason =
+    typeof quest.verificationReason === 'string' && quest.verificationReason.trim().length > 0
+      ? quest.verificationReason
+      : null;
   const durationSeconds = Number(quest.durationSeconds ?? quest.estimatedDurationSeconds ?? 0);
   const derivedDeadline =
     questExpiresAt && !Number.isNaN(questExpiresAt.getTime())
@@ -109,7 +115,7 @@ export default function ActiveQuestPanel({
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="relative overflow-hidden rounded-[2.5rem] border-2 border-glowyellow/50 bg-gradient-to-br from-navy/80 via-deepnavy/60 to-navy/40 p-8 shadow-2xl backdrop-blur-xl"
+      className="relative overflow-hidden rounded-[2.5rem] border-2 border-glowyellow/50 bg-gradient-to-br from-navy/80 via-deepnavy/60 to-navy/40 p-8 shadow-2xl backdrop-blur-xl xl:max-h-[78vh] xl:overflow-y-auto xl:pr-5"
     >
       {/* Animated background glow */}
       <motion.div
@@ -298,6 +304,20 @@ export default function ActiveQuestPanel({
           </motion.div>
         )}
 
+        {isFailed ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-4"
+          >
+            <p className="text-xs uppercase tracking-[0.2em] text-rose-200">Failure Details</p>
+            <p className="mt-2 text-sm text-white">
+              {verificationReason ||
+                'Deterministic verification rejected this proof or the quest settlement failed.'}
+            </p>
+          </motion.div>
+        ) : null}
+
         {/* Action buttons */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -350,13 +370,16 @@ export default function ActiveQuestPanel({
           )}
 
           {isFailed && (
-            <motion.div
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
               animate={{ opacity: [0.7, 1, 0.7] }}
               transition={{ duration: 1.4, repeat: Infinity }}
+              onClick={onReviewFailure}
               className="flex-1 rounded-2xl bg-gradient-to-r from-rose-500 to-red-600 px-6 py-4 text-center font-bold uppercase tracking-[0.2em] text-white shadow-lg"
             >
               Review Failure State
-            </motion.div>
+            </motion.button>
           )}
         </motion.div>
       </div>

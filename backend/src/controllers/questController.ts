@@ -41,6 +41,14 @@ type TreasuryPayoutRow = {
   updatedAt: Date;
 };
 
+type LatestProofState = {
+  questId: string;
+  verificationResult: string | null;
+  verificationReason: string | null;
+  submittedAt: Date;
+  verifiedAt: Date | null;
+};
+
 function serializeMaybeBigInt(value: bigint | string | null | undefined) {
   if (typeof value === 'bigint') {
     return value.toString();
@@ -96,6 +104,37 @@ async function loadSerializedQuestById(questId: string) {
     ...quest,
     treasuryPayout
   });
+}
+
+async function loadLatestProofStateByQuestIds(questIds: string[]) {
+  if (questIds.length === 0) {
+    return new Map<string, LatestProofState>();
+  }
+
+  const proofRows = await prisma.proofSubmission.findMany({
+    where: {
+      questId: {
+        in: questIds
+      }
+    },
+    orderBy: [{ submittedAt: 'desc' }, { createdAt: 'desc' }],
+    select: {
+      questId: true,
+      verificationResult: true,
+      verificationReason: true,
+      submittedAt: true,
+      verifiedAt: true
+    }
+  });
+
+  const latestByQuestId = new Map<string, LatestProofState>();
+  proofRows.forEach((row) => {
+    if (!latestByQuestId.has(row.questId)) {
+      latestByQuestId.set(row.questId, row);
+    }
+  });
+
+  return latestByQuestId;
 }
 
 function summarizeForgeQuestReceipt(receipt: Awaited<ReturnType<typeof contracts.provider.getTransactionReceipt>> | null) {
@@ -917,6 +956,7 @@ export async function getActiveQuests(req: Request, res: Response) {
     });
 
     const questIds = quests.map((quest) => quest.id);
+    const latestProofByQuestId = await loadLatestProofStateByQuestIds(questIds);
     const payouts = questIds.length
       ? await prisma.$queryRaw<TreasuryPayoutRow[]>(
           Prisma.sql`
@@ -950,7 +990,15 @@ export async function getActiveQuests(req: Request, res: Response) {
       quests: quests.map((quest) =>
         serializeQuest({
           ...quest,
-          treasuryPayout: payoutsByQuestId.get(quest.id) || null
+          treasuryPayout: payoutsByQuestId.get(quest.id) || null,
+          ...(latestProofByQuestId.get(quest.id)
+            ? {
+                verificationResult: latestProofByQuestId.get(quest.id)?.verificationResult ?? null,
+                verificationReason: latestProofByQuestId.get(quest.id)?.verificationReason ?? null,
+                lastProofSubmittedAt: latestProofByQuestId.get(quest.id)?.submittedAt ?? null,
+                lastProofVerifiedAt: latestProofByQuestId.get(quest.id)?.verifiedAt ?? null
+              }
+            : {})
         })
       ),
       total: quests.length

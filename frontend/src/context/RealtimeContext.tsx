@@ -294,6 +294,34 @@ function questStatusForEvent(eventName: string, payload: JsonObject) {
   return undefined;
 }
 
+function verificationPatchForEvent(eventName: string, payload: JsonObject) {
+  const nestedData = asObject(payload.data);
+  const reason =
+    asString(nestedData?.reason) ??
+    asString(payload.verificationReason) ??
+    undefined;
+
+  if (eventName === 'reward:claimed') {
+    return {
+      verificationResult:
+        nestedData?.success === true ? 'approved' : nestedData?.success === false ? 'rejected' : undefined,
+      verificationReason: reason
+    };
+  }
+
+  if (eventName === 'reward:refunded') {
+    return {
+      verificationResult: 'rejected',
+      verificationReason: reason
+    };
+  }
+
+  return {
+    verificationResult: undefined,
+    verificationReason: reason
+  };
+}
+
 function treasuryStatusForEvent(eventName: string) {
   if (eventName === 'reward:reserved') return 'RESERVED';
   if (eventName === 'stake:locked') return 'LOCKED';
@@ -564,11 +592,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       case 'nft:minted':
         if (questId || chainQuestId) {
           const treasuryStatus = treasuryStatusForEvent(event.eventName);
+          const verificationPatch = verificationPatchForEvent(event.eventName, payload);
           patchQuest(
             { id: questId, chainQuestId },
             {
               chainQuestId,
               status: questStatusForEvent(event.eventName, payload),
+              verificationResult: verificationPatch.verificationResult,
+              verificationReason: verificationPatch.verificationReason,
               treasuryPayout:
                 event.eventName.startsWith('reward:') || event.eventName === 'stake:locked'
                   ? {
