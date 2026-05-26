@@ -299,7 +299,7 @@ class EventWorkerService {
         const status = TREASURY_STATUS_BY_EVENT[event.eventType];
         if (status) {
           await prisma.treasuryPayout
-            .update({
+            .updateMany({
               where: { chainQuestId: event.chainQuestId },
               data: { status }
             })

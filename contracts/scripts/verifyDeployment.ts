@@ -55,6 +55,12 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function createErrorWithCause(message: string, cause: unknown) {
+  const wrappedError = new Error(message) as Error & { cause?: unknown };
+  wrappedError.cause = cause;
+  return wrappedError;
+}
+
 function loadDeploymentAddresses(networkName: string): DeploymentAddresses {
   const artifactPath = path.join(__dirname, '..', 'deployments', `${networkName}-addresses.json`);
   if (!fs.existsSync(artifactPath)) {
@@ -136,9 +142,10 @@ async function verifyTarget(target: VerificationTarget, retries: number, retryDe
       }
 
       if (attempt === retries) {
-        throw new Error(`Verification failed for ${target.name} after ${retries} attempts: ${message}`, {
-          cause: error
-        });
+        throw createErrorWithCause(
+          `Verification failed for ${target.name} after ${retries} attempts: ${message}`,
+          error
+        );
       }
 
       console.warn(

@@ -57,6 +57,14 @@ type QuestFlowStage =
   | 'REWARDED'
   | 'COMPLETED';
 
+type PendingProofRetry = {
+  questId: string;
+  proofTxHash: string;
+  submissionTxHash: string;
+};
+
+const PENDING_PROOF_RETRY_STORAGE_KEY = 'questforge:pending-proof-retry';
+
 function isProofVerificationStatus(state: {
   type: TxStatusType;
   hash?: string;
@@ -146,6 +154,45 @@ function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest
   if (functionName === 'createQuest') return 'Forge quest';
   if (functionName === 'startQuest') return 'Start quest';
   return 'Submit proof';
+}
+
+function loadPendingProofRetry() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_PROOF_RETRY_STORAGE_KEY);
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw) as Partial<PendingProofRetry>;
+    if (
+      typeof parsed.questId === 'string' &&
+      typeof parsed.proofTxHash === 'string' &&
+      typeof parsed.submissionTxHash === 'string'
+    ) {
+      return parsed as PendingProofRetry;
+    }
+  } catch {
+    // Ignore malformed session state.
+  }
+
+  return null;
+}
+
+function persistPendingProofRetry(value: PendingProofRetry | null) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (!value) {
+    window.sessionStorage.removeItem(PENDING_PROOF_RETRY_STORAGE_KEY);
+    return;
+  }
+
+  window.sessionStorage.setItem(PENDING_PROOF_RETRY_STORAGE_KEY, JSON.stringify(value));
 }
 
 const QUEST_DISPLAY_STATUS_RANK: Record<string, number> = {
@@ -241,6 +288,9 @@ export default function CommandCenter() {
   const [celebrationQuestId, setCelebrationQuestId] = useState<string | null>(null);
   const [completedQuestIds, setCompletedQuestIds] = useState<string[]>([]);
   const [sessionStartedAt, setSessionStartedAt] = useState(() => Date.now());
+  const [pendingProofRetry, setPendingProofRetry] = useState<PendingProofRetry | null>(() =>
+    loadPendingProofRetry()
+  );
   const proofPanelRef = useRef<HTMLDivElement | null>(null);
 
   const forgeQuestManager = useMemo(() => {
@@ -295,6 +345,8 @@ export default function CommandCenter() {
     interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest) ? null : activeQuest;
   const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
+  const canRetryProofQueue =
+    interactiveQuest?.status === 'SUBMITTED' && pendingProofRetry?.questId === interactiveQuest.id;
 
   const proofHelperText = useMemo(() => {
     if (!interactiveQuest) {
@@ -349,6 +401,27 @@ export default function CommandCenter() {
       setResumedQuestId(null);
     }
   }, [resumedQuest, resumedQuestId]);
+
+  useEffect(() => {
+    persistPendingProofRetry(pendingProofRetry);
+  }, [pendingProofRetry]);
+
+  useEffect(() => {
+    if (!interactiveQuest?.id) {
+      return;
+    }
+
+    if (interactiveQuest.status === 'VERIFIED' || interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED') {
+      if (pendingProofRetry?.questId === interactiveQuest.id) {
+        setPendingProofRetry(null);
+      }
+      return;
+    }
+
+    if (canRetryProofQueue && !proofUri && pendingProofRetry) {
+      setProofUri(pendingProofRetry.proofTxHash);
+    }
+  }, [canRetryProofQueue, interactiveQuest?.id, interactiveQuest?.status, pendingProofRetry, proofUri]);
 
   useEffect(() => {
     if (!interactiveQuest) {
@@ -912,7 +985,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status !== 'ACTIVE') {
+    if (interactiveQuest.status !== 'ACTIVE' && !canRetryProofQueue) {
       setMessage('Start the quest onchain before submitting proof.');
       return;
     }
@@ -927,35 +1000,53 @@ export default function CommandCenter() {
 
     setLoading(true);
     setProofError(null);
-    setMessage('Submitting proof to the Forge Master for deterministic verification...');
+    setMessage(
+      canRetryProofQueue
+        ? 'Retrying backend proof queue synchronization...'
+        : 'Submitting proof to the Forge Master for deterministic verification...'
+    );
     setTxStatus(null);
+    let queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(
         interactiveQuest,
         'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
       );
-      setMessage('Quest sync complete. Submitting proof onchain...');
-
-      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
-      const { hash: submissionTxHash } = await submitForgeWrite('submitQuest', [
-        chainQuestId,
-        normalizedProof
-      ]);
-
-      patchQuest(questMatcher(resolvedQuest), {
-        status: 'SUBMITTED',
-        proofTx: normalizedProof,
-        proofTxHash: submissionTxHash,
-        verificationResult: 'pending',
-        verificationReason: 'Queued for deterministic verification'
-      });
-
       if (!resolvedQuest.id) {
         throw new Error('Quest is missing a persistent id');
       }
 
+      let submissionTxHash = pendingProofRetry?.submissionTxHash;
+
+      if (!canRetryProofQueue) {
+        setMessage('Quest sync complete. Submitting proof onchain...');
+
+        const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+        const submission = await submitForgeWrite('submitQuest', [chainQuestId, normalizedProof]);
+        submissionTxHash = submission.hash;
+        queuedProofRetry = {
+          questId: resolvedQuest.id,
+          proofTxHash: normalizedProof,
+          submissionTxHash
+        };
+        setPendingProofRetry(queuedProofRetry);
+
+        patchQuest(questMatcher(resolvedQuest), {
+          status: 'SUBMITTED',
+          proofTx: normalizedProof,
+          proofTxHash: submissionTxHash,
+          verificationResult: 'pending',
+          verificationReason: 'Queued for deterministic verification'
+        });
+      }
+
+      if (!submissionTxHash) {
+        throw new Error('Proof submission transaction hash is missing for backend verification');
+      }
+
       await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
+      setPendingProofRetry(null);
       setTxStatus({
         type: 'pending',
         hash: submissionTxHash,
@@ -969,6 +1060,15 @@ export default function CommandCenter() {
       setProofUri('');
     } catch (error) {
       console.error('[CommandCenter] submitQuest failed', error);
+      if (!canRetryProofQueue && interactiveQuest.id && queuedProofRetry?.questId === interactiveQuest.id) {
+        patchQuest(questMatcher(interactiveQuest), {
+          status: 'SUBMITTED',
+          proofTx: queuedProofRetry.proofTxHash,
+          proofTxHash: queuedProofRetry.submissionTxHash,
+          verificationResult: 'pending',
+          verificationReason: 'Proof reached the chain, but backend sync still needs to succeed.'
+        });
+      }
       setMessage(formatActionFailure(error, 'Proof submission failed.'));
     } finally {
       setLoading(false);
@@ -1268,7 +1368,7 @@ export default function CommandCenter() {
               )}
             </motion.div>
 
-            {interactiveQuest?.status === 'ACTIVE' ? (
+            {interactiveQuest?.status === 'ACTIVE' || canRetryProofQueue ? (
               <motion.div
                 ref={proofPanelRef}
                 initial={{ opacity: 0, y: 20 }}

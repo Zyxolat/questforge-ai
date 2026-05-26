@@ -16,6 +16,7 @@ const CELO_DEPLOY_CONFIRMATIONS = 2;
 const DEFAULT_DEPLOY_CONFIRMATIONS = 1;
 const BYTECODE_CHECK_RETRIES = 8;
 const BYTECODE_CHECK_DELAY_MS = 1500;
+const DEFAULT_LOCAL_NATIVE_REWARD_POOL = '25';
 
 type DeployReceipt = {
   contractAddress?: string | null;
@@ -67,6 +68,19 @@ function requireNormalizedAddress(name: string) {
 function parseOptionalEther(name: string) {
   const raw = readOptionalEnv(name);
   return raw ? ethers.parseEther(raw) : null;
+}
+
+function resolveInitialNativeRewardPool(networkName: string) {
+  const configuredPool = parseOptionalEther('INITIAL_NATIVE_REWARD_POOL_CELO');
+  if (configuredPool !== null) {
+    return configuredPool;
+  }
+
+  if (networkName === 'celo') {
+    return null;
+  }
+
+  return ethers.parseEther(DEFAULT_LOCAL_NATIVE_REWARD_POOL);
 }
 
 function isTruthyEnv(value: string | undefined) {
@@ -291,7 +305,7 @@ async function main() {
       ? requireNormalizedAddress('VERIFIER_ADDRESS')
       : deployerAddress;
 
-  const initialNativeRewardPool = parseOptionalEther('INITIAL_NATIVE_REWARD_POOL_CELO');
+  const initialNativeRewardPool = resolveInitialNativeRewardPool(networkName);
 
   /* -------------------------
      DEPLOY CONTRACTS
@@ -348,6 +362,9 @@ async function main() {
   }
 
   if (initialNativeRewardPool && initialNativeRewardPool > 0n) {
+    console.log(
+      `💰 Funding treasury with ${ethers.formatEther(initialNativeRewardPool)} CELO for reward liquidity...`
+    );
     await waitForTx('FUND_TREASURY', () =>
       treasuryContract.fundNativeRewardPool({
         value: initialNativeRewardPool

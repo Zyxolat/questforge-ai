@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-05-24T21:42:26.073Z",
+  "generatedAt": "2026-05-26T17:43:58.669Z",
   "environment": "development",
   "network": "localhost",
   "chainId": 42220,
   "status": "success",
-  "readinessScore": 95,
+  "readinessScore": 100,
   "deploymentSummary": {
     "contracts": {
       "RewardNFT": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
@@ -34,7 +34,7 @@
   "validationResults": {
     "environment": "not_run",
     "contracts": "pass",
-    "treasury": "fail",
+    "treasury": "pass",
     "gameplay": "not_run",
     "security": "not_run"
   },
@@ -51,8 +51,8 @@
     },
     {
       "action": "Fund Treasury reward pool",
-      "status": "blocked",
-      "details": "Call fundNativeRewardPool or send CELO to the Treasury before opening quests."
+      "status": "completed",
+      "details": "Treasury funded with 25.0 CELO at deployment time."
     },
     {
       "action": "Run post-deploy validation",
@@ -60,10 +60,7 @@
       "details": "Run contracts/scripts/validateDeployment.ts against the deployed Celo contracts."
     }
   ],
-  "knownIssues": [
-    "Deployment environment metadata is incomplete.",
-    "Treasury native reward pool is empty. Fund the treasury before creating production quests."
-  ],
+  "knownIssues": ["Deployment environment metadata is incomplete."],
   "nextSteps": [
     "1. Copy the generated contract addresses into Railway environment variables.",
     "2. Restart the Railway backend so it picks up the deployed addresses.",

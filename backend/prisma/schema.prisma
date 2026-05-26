@@ -290,7 +290,7 @@ model TreasuryPayout {
   questId           String               @unique
   user              User?                @relation(fields: [userId], references: [id], onDelete: SetNull)
   userId            String?
-  chainQuestId      BigInt               @unique @db.BigInt
+  chainQuestId      BigInt               @db.BigInt
   playerWallet      String?
   rewardAmount      Float                @default(0)
   stakeAmount       Float                @default(0)

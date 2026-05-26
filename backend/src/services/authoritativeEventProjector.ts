@@ -383,7 +383,7 @@ async function upsertTreasuryPayout(
   }
 ) {
   return tx.treasuryPayout.upsert({
-    where: { chainQuestId: input.chainQuestId },
+    where: { questId: input.questId },
     create: {
       questId: input.questId,
       userId: input.userId ?? null,
