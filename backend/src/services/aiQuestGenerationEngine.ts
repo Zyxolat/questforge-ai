@@ -270,13 +270,23 @@ class AIQuestGenerationEngine {
     this.diagnostics.lastGenerationSource = validated.generation.source;
     this.diagnostics.lastPromptHash = validated.generation.promptHash;
 
-    logger.info('[QUEST-GENERATION] Quest generated successfully', {
+    logger.info('[QUEST-GENERATION] Quest generation complete with diagnostics', {
       wallet,
       userId: user.id,
       questId: persistedQuest.id,
       orchestrationId: validated.orchestrationId,
       difficulty: validated.difficulty,
-      rewardAmount: validated.rewardAmount
+      rewardAmount: validated.rewardAmount,
+      generationSource: validated.generation.source,
+      generationProvider: validated.generation.provider,
+      generationModel: validated.generation.model,
+      fallbackReason: validated.generation.fallbackReason,
+      totalGenerated: this.diagnostics.generatedCount,
+      openAICount: this.diagnostics.openAIGeneratedCount,
+      fallbackCount: this.diagnostics.fallbackGeneratedCount,
+      openAIRate: ((this.diagnostics.openAIGeneratedCount / this.diagnostics.generatedCount) * 100).toFixed(1) + '%',
+      escalated,
+      escalatedTotal: this.diagnostics.escalatedCount
     });
 
     return {

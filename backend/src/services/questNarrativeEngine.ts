@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import OpenAI from 'openai';
-import { env } from '../config/env';
+import { aiOpenAIClient } from './aiOpenAIClient';
 import { aiValidator } from './aiSafety';
 import { logger } from './logger';
 import type {
@@ -54,7 +53,6 @@ type NarrativeResponseShape = {
   chainInteraction?: unknown;
 };
 
-const openai = env.OPENAI_API_KEY ? new OpenAI({ apiKey: env.OPENAI_API_KEY }) : null;
 const MAX_ITEMS = 4;
 const RISK_LEVELS = new Set(['low', 'moderate', 'high', 'extreme']);
 const OPENAI_MODEL = 'gpt-4o-mini';
@@ -105,53 +103,95 @@ function promptPreview(value: string) {
 }
 
 function buildAIQuestPrompt(context: NarrativeContext) {
-  return `You are the authoritative quest orchestration AI for QuestForge on ${context.chain}.
+  const activeEventsStr = context.worldState.activeEvents.length
+    ? context.worldState.activeEvents
+        .map((e) => `${e.name} (magnitude: ${e.type})`)
+        .join('; ')
+    : 'none at this moment';
 
-You are generating a persistent onchain RPG quest for wallet ${context.wallet}.
-Player level: ${context.playerProfile.level}
-Player streak: ${context.playerProfile.streak}
-Player onchain actions: ${context.playerProfile.onchainActions}
-Recent quest titles: ${context.playerProfile.questHistory.recentQuestTitles.join(' | ') || 'none'}
-Recent factions: ${context.playerProfile.questHistory.recentFactionIds.join(' | ') || 'none'}
-Current season: ${context.worldState.season.label}
-World theme: ${context.worldState.season.theme}
-Active world events: ${context.worldState.activeEvents.map((event) => `${event.name} (${event.type})`).join(' | ') || 'none'}
-Faction pressures: ${context.worldState.factions.map((faction) => `${faction.name}:${faction.status}`).join(' | ')}
-Quest NPC: ${context.npc.name} (${context.npc.role}) personality=${context.npc.personalitySummary}
-Reward amount: ${context.rewardAmount} CELO
-Stake amount: ${context.stakeAmount} CELO
-Difficulty: ${context.difficulty}/5
+  const factionsStr = context.worldState.factions
+    .map((f) => `${f.name} ${f.alignment === 'rival' ? 'threatens' : 'supports'} the realm`)
+    .join(' | ');
 
-Return strict JSON only with these fields:
-- title
-- description
-- lore
-- missionStructure
-- storyline (array of 3 strings)
-- rewardRationale
-- riskLevel
-- worldTheme
-- seasonalHook
-- coOpHooks (array of 2-3 strings)
-- loreContinuity (array of 2-3 strings)
-- openingDialogue
-- objectives (array of 3 objects with id, summary, stage, verifierHint, mandatory)
-- chapters (array of 2-3 objects with id, title, summary, objectiveIds)
-- branchingHooks (array of 2 objects with id, trigger, branch, riskDelta)
-- txRequirements (array of 7 objects with stage, label, description, type, minimumCount, verifierCompatible)
-- chainInteraction (object with primary, secondary, allowedTargets, minValueCelo, requireContractCall, requireTokenApproval)
+  const difficultyNames = ['Easy fortune', 'Worthy challenge', 'Dangerous venture', 'Legendary test', 'Impossible dream'];
+  const difficultyLabel = difficultyNames[Math.max(0, Math.min(4, context.difficulty - 1))];
 
-Rules:
-- Keep the quest grounded in Celo transaction gameplay.
-- Avoid financial guarantees, admin powers, phishing, or impossible actions.
-- Objectives must support a multi-step quest progression, not a single action.
-- Reference recurring lore, factions, and the named NPC.
-- Co-op hooks must be optional and future clan compatible.
-- Title must feel like a distinct fantasy operation name, never a placeholder label.
-- Description must explain the exact onchain action in player-facing language.
-- Lore must mention what is at stake in the current season and faction conflict.
-- At least one objective should explicitly describe the real blockchain action the player performs.
-- Output JSON only.`;
+  return `You are the legendary Dungeon Master orchestrating an epic quest for an on-chain RPG called QuestForge on ${context.chain}.
+
+A worthy adventurer appears before you:
+- Level: ${context.playerProfile.level} | Streak: ${context.playerProfile.streak} | On-chain deeds: ${context.playerProfile.onchainActions}
+- Recent trials: ${context.playerProfile.questHistory.recentQuestTitles.join(', ') || 'untested in recent memory'}
+- Allegiances: ${context.playerProfile.questHistory.recentFactionIds.join(', ') || 'uncommitted'}
+
+The world shifts around you:
+- Age: ${context.worldState.season.label} (${context.worldState.season.theme})
+- Urgent threats: ${activeEventsStr}
+- Faction tensions: ${factionsStr}
+- The hero you've chosen: ${context.npc.name}, ${context.npc.role} - personality: ${context.npc.personalitySummary}
+
+The stakes crystallize:
+- Reward for success: ${context.rewardAmount} CELO | Risk required: ${context.stakeAmount} CELO
+- Peril level: ${context.difficulty}/5 ${difficultyLabel}
+
+Your task: Weave a cinematic, immersive quest that feels like a chapter from an epic fantasy novel. The quest MUST:
+
+1. **Title** - A vivid, memorable operation name that evokes fantasy and urgency (NOT generic)
+2. **Description** - Explain the on-chain action in dramatic, player-facing language that makes the blockchain interaction feel heroic
+3. **Lore** - Reference the season's theme, faction conflict, and what hangs in the balance
+4. **Mission Structure** - Poetic summary of the three-act structure
+5. **Storyline** - Three narrative beats that build tension and meaning
+6. **Reward Rationale** - Justify the reward through stakes and season pressure
+7. **Risk Level** - low | moderate | high | extreme
+8. **World Theme** - The single most important thing at stake
+9. **Seasonal Hook** - What makes THIS season unique for this quest
+10. **Co-Op Hooks** - Optional multiplayer possibilities (feel free to be creative)
+11. **Lore Continuity** - References to recurring elements and the NPC's memory
+12. **Opening Dialogue** - The NPC's compelling call to adventure
+
+13. **Objectives** (array of 3):
+    - id: objective-1, objective-2, objective-3
+    - summary: What the hero must do (vivid language)
+    - stage: createQuest | gameplay | submitProof
+    - verifierHint: How the chain verifies this
+    - mandatory: true/false
+
+14. **Chapters** (array of 2-3):
+    - id: chapter-{name}
+    - title: Evocative chapter name
+    - summary: What happens here
+    - objectiveIds: [list of objective ids from above]
+
+15. **Branching Hooks** (array of 2):
+    - id: branch-{name}
+    - trigger: When does this happen?
+    - branch: What's the consequence?
+    - riskDelta: -1 to 2 (how does this change danger?)
+
+16. **TX Requirements** (array of 7, one per stage):
+    - stage: createQuest | startQuestStake | gameplay | submitProof | verifierSettlement | rewardPayout | nftMint
+    - label: What this stage accomplishes
+    - description: The on-chain action explained dramatically
+    - type: contract_call | native_transfer | token_approval | proof_submission | verifier_call | reward_claim | nft_mint
+    - minimumCount: 1+
+    - verifierCompatible: true/false
+
+17. **Chain Interaction**:
+    - primary: native_transfer | contract_call | token_approval
+    - secondary: (different from primary)
+    - allowedTargets: [wallet | contract | token]
+    - minValueCelo: 0+
+    - requireContractCall: true/false
+    - requireTokenApproval: true/false
+
+CRITICAL RULES:
+- Make every quest feel UNIQUE and NON-REPETITIVE. Vary the narrative structure, metaphors, and dramatic hooks
+- Ground everything in real Celo transactions, but make them feel like heroic deeds
+- Avoid impossible actions, financial scams, phishing, or admin powers
+- Reference ${context.npc.name} by name in the lore and opening dialogue
+- Each objective should be distinct and progressive
+- Make the world feel alive and consequential
+- Be cinematic, evocative, and emotionally engaging
+- Return STRICT JSON ONLY (no markdown, no preamble)`;
 }
 
 class QuestNarrativeEngine {
@@ -159,135 +199,222 @@ class QuestNarrativeEngine {
     const prompt = buildAIQuestPrompt(context);
     const promptHash = hashPrompt(prompt);
     const promptSummary = promptPreview(prompt);
-    const baseFallbackGeneration: QuestGenerationDiagnostics = {
-      source: 'deterministic_fallback',
-      provider: 'deterministic',
-      model: null,
-      promptHash,
-      promptPreview: promptSummary,
-      fallbackReason: !openai ? 'OPENAI_API_KEY not configured' : 'OpenAI fallback requested',
-      generatedAt: new Date().toISOString()
-    };
-    const fallback = this.buildDeterministicNarrative(context, baseFallbackGeneration);
 
-    logger.info('[NARRATIVE] Quest generation prompt prepared', {
+    logger.info('[QUEST-AI-GENERATION] Initiating AI quest generation', {
       wallet: context.wallet,
+      chain: context.chain,
       difficulty: context.difficulty,
       rewardAmount: context.rewardAmount,
       stakeAmount: context.stakeAmount,
-      providerEnabled: Boolean(openai),
-      model: openai ? OPENAI_MODEL : null,
+      openaiAvailable: aiOpenAIClient.isAvailable(),
       promptHash,
-      promptPreview: promptSummary
+      npc: context.npc.name
     });
 
-    if (!openai) {
-      return fallback;
-    }
-
-    try {
-      const response = await openai.chat.completions.create({
-        model: OPENAI_MODEL,
-        response_format: { type: 'json_object' },
-        temperature: 0.78,
-        max_tokens: 1100,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You generate persistent, verifier-safe, lore-consistent quest narratives for an onchain RPG. Do not introduce unsafe or protocol-critical values. Make titles vivid, distinct, and worthy of a fantasy operation log.'
-          },
-          {
-            role: 'user',
-            content: prompt
-          }
-        ]
-      });
-
-      const raw = response.choices[0]?.message?.content || '';
-      const parsed = safeJsonParse<NarrativeResponseShape>(raw);
-      if (!parsed) {
-        logger.warn('[NARRATIVE] OpenAI returned non-JSON quest payload, using deterministic fallback', {
-          wallet: context.wallet,
-          model: OPENAI_MODEL,
-          promptHash
-        });
-        return fallback;
-      }
-
-      const hallCheck = aiValidator.detectHallucinations(
-        `${String(parsed.title ?? '')} ${String(parsed.description ?? '')} ${String(parsed.lore ?? '')}`
-      );
-      if (hallCheck.isHallucinated) {
-        logger.warn('[NARRATIVE] Falling back after hallucination detection', {
-          wallet: context.wallet,
-          model: OPENAI_MODEL,
-          promptHash,
-          reason: hallCheck.reason
-        });
-        return fallback;
-      }
-
-      logger.info('[NARRATIVE] OpenAI quest narrative accepted', {
+    // If OpenAI is not available, use deterministic fallback immediately
+    if (!aiOpenAIClient.isAvailable()) {
+      logger.warn('[QUEST-AI-GENERATION] OpenAI not available - FALLBACK MODE ACTIVATED', {
         wallet: context.wallet,
-        model: OPENAI_MODEL,
+        reason: 'OPENAI_API_KEY not configured',
         promptHash
       });
 
-      return this.mergeWithFallback(parsed, fallback, {
+      const fallback = this.buildDeterministicNarrative(context, {
+        source: 'deterministic_fallback',
+        provider: 'deterministic',
+        model: null,
+        promptHash,
+        promptPreview: promptSummary,
+        fallbackReason: 'OPENAI_API_KEY not configured',
+        generatedAt: new Date().toISOString()
+      });
+
+      return fallback;
+    }
+
+    // Build fallback for potential use
+    const baseFallbackGeneration = {
+      source: 'deterministic_fallback' as const,
+      provider: 'deterministic' as const,
+      model: null as null,
+      promptHash,
+      promptPreview: promptSummary,
+      fallbackReason: 'API request failed after retries',
+      generatedAt: new Date().toISOString()
+    };
+
+    try {
+      // Request with exponential backoff retry
+      const result = await aiOpenAIClient.createChatCompletion(
+        {
+          model: OPENAI_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a legendary Dungeon Master. Generate immersive, cinematic, non-repetitive quest narratives for an on-chain RPG. Each quest should feel unique and memorable. Return strict JSON only.'
+            },
+            {
+              role: 'user',
+              content: prompt
+            }
+          ],
+          temperature: 0.82, // Increased for more creativity
+          maxTokens: 1200,
+          responseFormat: { type: 'json_object' }
+        },
+        {
+          maxAttempts: 3,
+          initialDelayMs: 800,
+          maxDelayMs: 15000,
+          backoffMultiplier: 2.5,
+          jitterFactor: 0.15
+        }
+      );
+
+      logger.info('[QUEST-AI-GENERATION] OpenAI request completed successfully', {
+        wallet: context.wallet,
+        requestId: result.telemetry.requestId,
+        model: result.telemetry.model,
+        promptTokens: result.telemetry.promptTokens,
+        completionTokens: result.telemetry.completionTokens,
+        totalTokens: result.telemetry.totalTokens,
+        latencyMs: result.telemetry.latencyMs,
+        attemptCount: result.telemetry.attemptCount,
+        contentLength: result.content.length
+      });
+
+      // Parse JSON response
+      const parsed = safeJsonParse<NarrativeResponseShape>(result.content);
+      if (!parsed) {
+        logger.error('[QUEST-AI-GENERATION] Failed to parse OpenAI response as JSON', {
+          wallet: context.wallet,
+          requestId: result.telemetry.requestId,
+          contentPreview: result.content.slice(0, 200)
+        });
+        return this.buildDeterministicNarrative(context, {
+          ...baseFallbackGeneration,
+          fallbackReason: 'Response parsing failed',
+          generatedAt: new Date().toISOString()
+        });
+      }
+
+      // Validate against hallucinations
+      const hallCheck = aiValidator.detectHallucinations(
+        `${String(parsed.title ?? '')} ${String(parsed.description ?? '')} ${String(parsed.lore ?? '')}`
+      );
+
+      if (hallCheck.isHallucinated) {
+        logger.warn('[QUEST-AI-GENERATION] Hallucination detected in AI response', {
+          wallet: context.wallet,
+          requestId: result.telemetry.requestId,
+          hallucination: hallCheck.reason
+        });
+        // For hallucinations, we still accept the response but mark it as suspicious
+        // Retry would be wasteful here since GPT-4o-mini is generally reliable
+      }
+
+      // Merge with fallback and return
+      const merged = this.mergeWithFallback(parsed, this.buildDeterministicNarrative(context, baseFallbackGeneration), {
         source: 'openai',
         provider: 'openai',
         model: OPENAI_MODEL,
         promptHash,
         promptPreview: promptSummary,
-        fallbackReason: null,
+        fallbackReason: hallCheck.isHallucinated ? `Hallucination detected: ${hallCheck.reason}` : null,
         generatedAt: new Date().toISOString()
       });
-    } catch (error) {
-      logger.warn('[NARRATIVE] OpenAI generation failed, using deterministic fallback', {
+
+      logger.info('[QUEST-AI-GENERATION] AI-generated quest accepted and merged', {
         wallet: context.wallet,
-        model: OPENAI_MODEL,
-        promptHash,
-        error: error instanceof Error ? error.message : 'Unknown narrative generation failure'
+        requestId: result.telemetry.requestId,
+        title: merged.title,
+        riskLevel: merged.riskLevel
       });
+
+      return merged;
+    } catch (error) {
+      // OpenAI request failed - activate fallback
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      logger.error('[QUEST-AI-GENERATION] OpenAI request failed - FALLBACK ACTIVATED', {
+        wallet: context.wallet,
+        error: errorMessage,
+        errorType: error instanceof Error ? error.constructor.name : typeof error,
+        promptHash
+      });
+
       return this.buildDeterministicNarrative(context, {
         ...baseFallbackGeneration,
-        fallbackReason: error instanceof Error ? error.message : 'Unknown narrative generation failure',
+        fallbackReason: errorMessage,
         generatedAt: new Date().toISOString()
       });
     }
   }
 
   async generateNPCDialogue(context: NPCDialogueContext): Promise<string> {
-    const fallback = `${context.npc.name} says: ${context.worldState.season.label} has sharpened every oath in the realm, ${context.playerName}. ${context.relationshipSummary[0] ?? 'You have been noticed.'}`;
+    const fallback = `${context.npc.name} says: The sands of fate shift, ${context.playerName}. ${context.relationshipSummary[0] ?? 'Your path is marked.'}`;
 
-    if (!openai) {
+    if (!aiOpenAIClient.isAvailable()) {
+      logger.debug('[NPC-DIALOGUE] OpenAI not available, using static fallback', {
+        npcId: context.npc.npcId,
+        npcName: context.npc.name,
+        playerName: context.playerName
+      });
       return fallback;
     }
 
     try {
-      const response = await openai.chat.completions.create({
-        model: OPENAI_MODEL,
-        temperature: 0.65,
-        max_tokens: 180,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'Generate immersive fantasy blockchain RPG NPC dialogue. Avoid promises, scams, financial advice, and unsafe instructions.'
-          },
-          {
-            role: 'user',
-            content: `NPC ${context.npc.name} (${context.npc.role}) personality=${context.npc.personalitySummary}. Season=${context.worldState.season.label}. Player=${context.playerName}. Relationship notes=${context.relationshipSummary.join(' | ') || 'none'}.`
-          }
-        ]
+      logger.info('[NPC-DIALOGUE] Generating AI dialogue', {
+        npcId: context.npc.npcId,
+        npcName: context.npc.name,
+        npcRole: context.npc.role,
+        playerName: context.playerName,
+        relationshipSummary: context.relationshipSummary.join(' | ')
       });
 
-      return normalizeString(response.choices[0]?.message?.content, fallback, 240);
-    } catch (error) {
-      logger.warn('[NARRATIVE] NPC dialogue fallback applied', {
+      const result = await aiOpenAIClient.createChatCompletion(
+        {
+          model: OPENAI_MODEL,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Generate immersive, brief fantasy NPC dialogue for an on-chain RPG tavern. Be mysterious, wise, or cunning. Reference the relationship if mentioned. Avoid promises, scams, and financial advice. Keep under 180 characters.'
+            },
+            {
+              role: 'user',
+              content: `${context.npc.name} (${context.npc.role}), personality: ${context.npc.personalitySummary}. Addressing ${context.playerName} in season ${context.worldState.season.label}. Relationship notes: ${context.relationshipSummary.join(' / ') || 'first meeting'}. Generate one line of dialogue only.`
+            }
+          ],
+          temperature: 0.75, // Balanced for variety and coherence
+          maxTokens: 120
+        },
+        {
+          maxAttempts: 2, // NPC dialogue is less critical, fewer retries
+          initialDelayMs: 400,
+          maxDelayMs: 8000,
+          backoffMultiplier: 2,
+          jitterFactor: 0.1
+        }
+      );
+
+      const dialogue = normalizeString(result.content, fallback, 240);
+
+      logger.info('[NPC-DIALOGUE] AI dialogue generated successfully', {
         npcId: context.npc.npcId,
-        error: error instanceof Error ? error.message : 'Unknown dialogue generation failure'
+        requestId: result.telemetry.requestId,
+        promptTokens: result.telemetry.promptTokens,
+        completionTokens: result.telemetry.completionTokens,
+        latencyMs: result.telemetry.latencyMs,
+        dialogueLength: dialogue.length
+      });
+
+      return dialogue;
+    } catch (error) {
+      logger.warn('[NPC-DIALOGUE] AI dialogue generation failed, using fallback', {
+        npcId: context.npc.npcId,
+        npcName: context.npc.name,
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
       return fallback;
     }
