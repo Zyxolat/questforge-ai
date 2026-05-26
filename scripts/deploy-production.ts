@@ -33,7 +33,7 @@ type DeployedAddresses = {
 interface DeploymentLog {
   timestamp: string;
   step: string;
-  status: 'start' | 'success' | 'error';
+  status: 'start' | 'success' | 'error' | 'warning';
   message: string;
   details?: Record<string, unknown>;
 }
@@ -48,7 +48,7 @@ function createErrorWithCause(message: string, cause: unknown) {
 
 function log(
   step: string,
-  status: 'start' | 'success' | 'error',
+  status: 'start' | 'success' | 'error' | 'warning',
   message: string,
   details?: Record<string, unknown>
 ) {
@@ -61,8 +61,22 @@ function log(
   };
   deploymentLogs.push(entry);
   
-  const icon = status === 'start' ? '⏳' : status === 'success' ? '✓' : '❌';
-  const color = status === 'error' ? '\x1b[31m' : status === 'success' ? '\x1b[32m' : '\x1b[36m';
+  const icon =
+    status === 'start'
+      ? '⏳'
+      : status === 'success'
+        ? '✓'
+        : status === 'warning'
+          ? '⚠'
+          : '❌';
+  const color =
+    status === 'error'
+      ? '\x1b[31m'
+      : status === 'success'
+        ? '\x1b[32m'
+        : status === 'warning'
+          ? '\x1b[33m'
+          : '\x1b[36m';
   console.log(`${color}${icon} [${step}] ${message}\x1b[0m`);
 }
 
@@ -119,6 +133,11 @@ function requireEnvValue(envMap: Record<string, string | undefined>, name: strin
   }
 
   return value;
+}
+
+function optionalEnvValue(envMap: Record<string, string | undefined>, name: string) {
+  const value = envMap[name]?.trim();
+  return value || undefined;
 }
 
 function requirePrivateKey(envMap: Record<string, string | undefined>) {
@@ -279,6 +298,24 @@ async function main() {
     }
     log('VALIDATION', 'success', 'Deployed contracts validated');
 
+    const explorerApiKey = optionalEnvValue(effectiveEnv, 'CELOSCAN_API_KEY') || optionalEnvValue(effectiveEnv, 'ETHERSCAN_API_KEY');
+    if (explorerApiKey) {
+      log('VERIFICATION', 'start', 'Verifying deployed contracts on Celoscan...');
+      try {
+        process.chdir(path.join(projectRoot, 'contracts'));
+        exec('npm run verify:mainnet', 'Verify deployed contracts');
+        log('VERIFICATION', 'success', 'Deployed contracts verified on Celoscan');
+      } finally {
+        process.chdir(projectRoot);
+      }
+    } else {
+      log(
+        'VERIFICATION',
+        'warning',
+        'Skipping Celoscan verification because CELOSCAN_API_KEY/ETHERSCAN_API_KEY is not configured'
+      );
+    }
+
     // Step 6: Build backend
     log('BUILD', 'start', 'Building backend...');
     try {
@@ -344,7 +381,7 @@ async function main() {
     console.log('  3. Run gameplay validation: npm run test:gameplay');
     console.log('  4. Monitor backend logs after deployment');
     console.log('  5. Verify contracts on Celoscan');
-    console.log('  6. Run security validation: npm run test:security');
+    console.log('  6. Run security validation: npm run validate:security');
     console.log('\n');
 
   } catch (error) {

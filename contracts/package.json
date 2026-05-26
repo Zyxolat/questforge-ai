@@ -9,6 +9,7 @@
     "clean": "hardhat clean",
     "deploy": "hardhat run scripts/deploy.ts --network celo",
     "deploy:mainnet": "hardhat run scripts/deploy.ts --network celo",
+    "verify:mainnet": "hardhat run scripts/verifyDeployment.ts --network celo",
     "validate:mainnet": "hardhat run scripts/validateDeployment.ts --network celo",
     "security:test": "hardhat test --grep security",
     "coverage": "hardhat coverage"

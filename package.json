@@ -31,6 +31,7 @@
     "validate:minipay": "ts-node scripts/validate-minipay.ts",
     "validate:backend-runtime": "ts-node scripts/validate-backend-runtime.ts",
     "validate:frontend-runtime": "TS_NODE_PROJECT=frontend/tsconfig.json node --loader ts-node/esm scripts/validate-frontend-runtime.mjs",
+    "verify:contracts": "npm --prefix contracts run verify:mainnet",
     "validate:all": "npm run validate:production-env && npm run build:contracts && npm run test:contracts && npm run validate:treasury && npm run validate:gameplay && npm run validate:security && npm run validate:backend-runtime",
     "deploy:production": "ts-node scripts/deploy-production.ts",
     "generate:report": "ts-node scripts/generate-deployment-report.ts",

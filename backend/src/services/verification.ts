@@ -692,6 +692,8 @@ async function resolveOnchainQuest(chainQuestId: bigint) {
   return contracts.forgeQuestManager.quests(chainQuestId);
 }
 
+type OnchainQuest = Awaited<ReturnType<typeof resolveOnchainQuest>>;
+
 function computeVerificationHash(wallet: string, proofTxHash: string, playerNonce: bigint) {
   return ethers.solidityPackedKeccak256(['address', 'string', 'uint256'], [wallet, proofTxHash, playerNonce]);
 }
@@ -721,20 +723,16 @@ async function markProofResult(input: {
   });
 }
 
-async function settleVerificationSuccess(quest: QuestVerificationRow, proofSubmissionId: string, verificationReason: string) {
-  if (!quest.playerId || !quest.playerWallet || !quest.chainQuestId || !quest.proofTx) {
+async function settleVerificationSuccess(input: {
+  quest: QuestVerificationRow;
+  proofSubmissionId: string;
+  verificationReason: string;
+  onchainQuest: OnchainQuest;
+  expectedVerificationHash: string;
+}) {
+  const { quest, proofSubmissionId, verificationReason, onchainQuest, expectedVerificationHash } = input;
+  if (!quest.playerId || !quest.chainQuestId) {
     throw new Error('Quest player context is incomplete');
-  }
-
-  const onchainQuest = await resolveOnchainQuest(quest.chainQuestId);
-  const expectedVerificationHash = computeVerificationHash(
-    quest.playerWallet,
-    quest.proofTx,
-    BigInt(onchainQuest.playerNonce.toString())
-  );
-
-  if (String(onchainQuest.proofVerificationHash).toLowerCase() !== expectedVerificationHash.toLowerCase()) {
-    throw new Error('Onchain proof verification hash does not match the deterministic backend computation');
   }
 
   const verifierContract = ensureVerifierContract();
@@ -914,6 +912,16 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       throw new Error(`Onchain quest is not awaiting verification (status=${onchainQuest.status.toString()})`);
     }
 
+    const expectedVerificationHash = computeVerificationHash(
+      quest.playerWallet,
+      proofTxHash,
+      BigInt(onchainQuest.playerNonce.toString())
+    );
+
+    if (String(onchainQuest.proofVerificationHash).toLowerCase() !== expectedVerificationHash.toLowerCase()) {
+      throw new Error('Onchain proof verification hash does not match the deterministic backend computation');
+    }
+
     logger.info('Proof verification tx validated', {
       questId: quest.id,
       chainQuestId: quest.chainQuestId.toString(),
@@ -924,7 +932,13 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       validationDurationMs: elapsedMs(verificationStartedAtMs)
     });
 
-    await settleVerificationSuccess(quest, proof.id, 'Deterministic onchain verification passed and treasury settlement executed');
+    await settleVerificationSuccess({
+      quest,
+      proofSubmissionId: proof.id,
+      verificationReason: 'Deterministic onchain verification passed and treasury settlement executed',
+      onchainQuest,
+      expectedVerificationHash
+    });
     logger.info('Proof verification completed', {
       questId: quest.id,
       chainQuestId: quest.chainQuestId.toString(),
@@ -1026,7 +1040,7 @@ export async function queueProofVerification(params: {
   });
 
   if (contracts.forgeQuestManagerWrite) {
-    void processPendingProofSubmissions(1);
+    void processPendingProofSubmissions();
   } else {
     logger.warn('Proof queued but verifier signer is unavailable; leaving submission pending', {
       questId: params.questId,
@@ -1052,9 +1066,15 @@ export async function processPendingProofSubmissions(limit = env.VERIFICATION_BA
 
   workerActive = true;
   try {
-    const pending = await claimPendingProofs(limit);
-    for (const proof of pending) {
-      await verifyQueuedProof(proof.id);
+    while (true) {
+      const pending = await claimPendingProofs(limit);
+      if (pending.length === 0) {
+        break;
+      }
+
+      for (const proof of pending) {
+        await verifyQueuedProof(proof.id);
+      }
     }
   } finally {
     workerActive = false;

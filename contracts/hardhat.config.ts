@@ -26,6 +26,10 @@ const productionEnvPaths = [
   path.join(__dirname, ".env.production"),
 ];
 
+const CELO_MAINNET_CHAIN_ID = 42220;
+const CELOSCAN_API_URL = "https://api.celoscan.io/api";
+const CELOSCAN_BROWSER_URL = "https://celoscan.io";
+
 for (const envPath of baseEnvPaths) {
   loadEnvFile(envPath, false);
 }
@@ -105,6 +109,7 @@ function resolveCeloAccounts() {
 }
 
 const localChainId = parseLocalChainId();
+const celoscanApiKey = readOptionalEnv("CELOSCAN_API_KEY") || readOptionalEnv("ETHERSCAN_API_KEY");
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -128,8 +133,24 @@ const config: HardhatUserConfig = {
     celo: {
       url: process.env.CELO_RPC_URL || "https://forno.celo.org",
       accounts: resolveCeloAccounts(),
-      chainId: 42220,
+      chainId: CELO_MAINNET_CHAIN_ID,
     },
+  },
+  etherscan: {
+    apiKey: celoscanApiKey ? { celo: celoscanApiKey } : {},
+    customChains: [
+      {
+        network: "celo",
+        chainId: CELO_MAINNET_CHAIN_ID,
+        urls: {
+          apiURL: CELOSCAN_API_URL,
+          browserURL: CELOSCAN_BROWSER_URL,
+        },
+      },
+    ],
+  },
+  sourcify: {
+    enabled: true,
   },
   typechain: {
     outDir: "typechain-types",

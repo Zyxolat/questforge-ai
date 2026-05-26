@@ -310,8 +310,17 @@ async function main() {
   // Indexer Configuration
   console.log('\n🔄 INDEXER CONFIGURATION...\n');
   validatePositiveInteger('INDEXER_POLL_INTERVAL_MS', optionalEnv('INDEXER_POLL_INTERVAL_MS') || '10000');
-  validatePositiveInteger('VERIFICATION_WORKER_INTERVAL_MS', optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '5000');
+  validatePositiveInteger('VERIFICATION_WORKER_INTERVAL_MS', optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '2000');
   validatePositiveInteger('VERIFICATION_BATCH_SIZE', optionalEnv('VERIFICATION_BATCH_SIZE') || '10');
+
+  console.log('\n🔎 CONTRACT VERIFICATION (OPTIONAL)...\n');
+  optionalEnv('CELOSCAN_API_KEY');
+  optionalEnv('ETHERSCAN_API_KEY');
+  validatePositiveInteger('CONTRACT_VERIFICATION_RETRIES', optionalEnv('CONTRACT_VERIFICATION_RETRIES') || '10');
+  validatePositiveInteger(
+    'CONTRACT_VERIFICATION_RETRY_DELAY_MS',
+    optionalEnv('CONTRACT_VERIFICATION_RETRY_DELAY_MS') || '15000'
+  );
 
   // Circuit Breaker
   console.log('\n🚫 CIRCUIT BREAKER...\n');
