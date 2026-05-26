@@ -139,6 +139,45 @@ function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest
   return 'Submit proof';
 }
 
+const QUEST_DISPLAY_STATUS_RANK: Record<string, number> = {
+  ACTIVE: 6,
+  SUBMITTED: 5,
+  VERIFIED: 4,
+  AVAILABLE: 3,
+  FAILED: 2,
+  CANCELLED: 1
+};
+
+function questIdentity(quest: QuestState) {
+  return quest.id ?? quest.chainQuestId ?? quest.orchestrationId ?? quest.title ?? null;
+}
+
+function questTimestamp(quest: QuestState | null, field: 'createdAt' | 'updatedAt') {
+  const value = quest?.[field];
+  if (typeof value !== 'string') {
+    return 0;
+  }
+
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function pickDisplayQuest(candidates: QuestState[]) {
+  return [...candidates].sort((left, right) => {
+    const rightRank = QUEST_DISPLAY_STATUS_RANK[String(right.status ?? '')] ?? 0;
+    const leftRank = QUEST_DISPLAY_STATUS_RANK[String(left.status ?? '')] ?? 0;
+
+    if (rightRank !== leftRank) {
+      return rightRank - leftRank;
+    }
+
+    return (
+      questTimestamp(right, 'updatedAt') - questTimestamp(left, 'updatedAt') ||
+      questTimestamp(right, 'createdAt') - questTimestamp(left, 'createdAt')
+    );
+  })[0] ?? null;
+}
+
 export default function CommandCenter() {
   const navigate = useNavigate();
   const {
@@ -166,6 +205,7 @@ export default function CommandCenter() {
     hydrationStatus,
     isRealtimeReady,
     player,
+    quests,
     syncNow,
     refreshQuestFeed,
     upsertQuest,
@@ -188,8 +228,10 @@ export default function CommandCenter() {
     message?: string;
   } | null>(null);
   const [lastGeneratedQuest, setLastGeneratedQuest] = useState<QuestState | null>(null);
+  const [resumedQuestId, setResumedQuestId] = useState<string | null>(null);
   const [celebrationQuestId, setCelebrationQuestId] = useState<string | null>(null);
   const [completedQuestIds, setCompletedQuestIds] = useState<string[]>([]);
+  const [sessionStartedAt, setSessionStartedAt] = useState(() => Date.now());
   const proofPanelRef = useRef<HTMLDivElement | null>(null);
 
   const forgeQuestManager = useMemo(() => {
@@ -201,17 +243,57 @@ export default function CommandCenter() {
     );
   }, [signer]);
 
+  function isQuestFromCurrentSession(quest: QuestState | null): boolean {
+    if (!quest) return false;
+
+    if (lastGeneratedQuest?.id && quest.id === lastGeneratedQuest.id) {
+      return true;
+    }
+
+    const questCreatedMs = questTimestamp(quest, 'createdAt');
+    return questCreatedMs >= sessionStartedAt && questCreatedMs > 0;
+  }
+
   const normalizedProof = useMemo(() => normalizeProofReference(proofUri), [proofUri]);
-  const currentQuestForDisplay = activeQuest ?? lastGeneratedQuest;
+  const generatedQuest = lastGeneratedQuest
+    ? getQuest(questMatcher(lastGeneratedQuest)) ?? lastGeneratedQuest
+    : null;
+  const sessionQuest = useMemo(() => {
+    const candidates: QuestState[] = [];
+    const seen = new Set<string>();
+
+    [generatedQuest, ...quests].forEach((quest) => {
+      if (!quest || !isQuestFromCurrentSession(quest)) {
+        return;
+      }
+
+      const identity = questIdentity(quest);
+      if (!identity || seen.has(identity)) {
+        return;
+      }
+
+      seen.add(identity);
+      candidates.push(quest);
+    });
+
+    return pickDisplayQuest(candidates);
+  }, [generatedQuest, quests, sessionStartedAt, lastGeneratedQuest?.id]);
+  const resumedQuest = resumedQuestId
+    ? getQuest({ id: resumedQuestId }) ?? (activeQuest?.id === resumedQuestId ? activeQuest : null)
+    : null;
+  const interactiveQuest = sessionQuest ?? resumedQuest;
+  const restoredQuest =
+    interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest) ? null : activeQuest;
+  const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
 
   const proofHelperText = useMemo(() => {
-    if (!activeQuest) {
+    if (!interactiveQuest) {
       return null;
     }
 
-    const txTypes = Array.isArray(activeQuest.requiredTxTypes)
-      ? activeQuest.requiredTxTypes.filter(
+    const txTypes = Array.isArray(interactiveQuest.requiredTxTypes)
+      ? interactiveQuest.requiredTxTypes.filter(
           (value): value is string => typeof value === 'string' && value.length > 0
         )
       : [];
@@ -221,7 +303,7 @@ export default function CommandCenter() {
     }
 
     return 'Paste the transaction that best proves the objective was completed.';
-  }, [activeQuest]);
+  }, [interactiveQuest]);
 
   useEffect(() => {
     async function loadDailyMissionsOnce() {
@@ -236,10 +318,33 @@ export default function CommandCenter() {
     void loadDailyMissionsOnce();
   }, []);
 
+  // Reset session when wallet connects/disconnects
   useEffect(() => {
-    const questId = activeQuest?.id;
+    if (status === 'connected' && authStatus === 'authenticated') {
+      // Session started: reset timestamp to current moment
+      setSessionStartedAt(Date.now());
+      setMessage('Welcome back to the Forge. Your session is fresh and ready for new adventures.');
+    } else if (status === 'disconnected') {
+      // Wallet disconnected: clear quest state
+      setLastGeneratedQuest(null);
+      setResumedQuestId(null);
+      setCompletedQuestIds([]);
+      setCelebrationQuestId(null);
+      setMessage('');
+      setProofUri('');
+    }
+  }, [status, authStatus]);
+
+  useEffect(() => {
+    if (resumedQuestId && !resumedQuest) {
+      setResumedQuestId(null);
+    }
+  }, [resumedQuest, resumedQuestId]);
+
+  useEffect(() => {
+    const questId = interactiveQuest?.id;
     if (
-      activeQuest?.status !== 'VERIFIED' ||
+      interactiveQuest?.status !== 'VERIFIED' ||
       !questId ||
       completedQuestIds.includes(questId) ||
       celebrationQuestId === questId
@@ -248,9 +353,9 @@ export default function CommandCenter() {
     }
 
     setRewardData({
-      xp: Number(activeQuest.xpReward) || 0,
-      token: String(activeQuest.rewardAmount || '0'),
-      nft: resolveQuestRarityLabel(activeQuest.difficulty)
+      xp: Number(interactiveQuest.xpReward) || 0,
+      token: String(interactiveQuest.rewardAmount || '0'),
+      nft: resolveQuestRarityLabel(interactiveQuest.difficulty)
     });
     setCelebrationQuestId(questId);
     setShowRewardAnimation(true);
@@ -261,11 +366,11 @@ export default function CommandCenter() {
 
     return () => window.clearTimeout(timer);
   }, [
-    activeQuest?.difficulty,
-    activeQuest?.id,
-    activeQuest?.rewardAmount,
-    activeQuest?.status,
-    activeQuest?.xpReward,
+    interactiveQuest?.difficulty,
+    interactiveQuest?.id,
+    interactiveQuest?.rewardAmount,
+    interactiveQuest?.status,
+    interactiveQuest?.xpReward,
     celebrationQuestId,
     completedQuestIds
   ]);
@@ -281,12 +386,12 @@ export default function CommandCenter() {
   }
 
   function handleCompletionClose() {
-    markQuestCompleted(activeQuest?.id);
+    markQuestCompleted(interactiveQuest?.id);
     setCompletionModal(false);
   }
 
   function handleViewInventory() {
-    markQuestCompleted(activeQuest?.id);
+    markQuestCompleted(interactiveQuest?.id);
     setCompletionModal(false);
     navigate('/inventory');
   }
@@ -306,22 +411,25 @@ export default function CommandCenter() {
   }
 
   function getFlowStep(): QuestFlowStage {
-    if (!activeQuest) return 'PENDING';
+    if (!interactiveQuest) {
+      return 'PENDING';
+    }
+
     if (
-      activeQuest.status === 'VERIFIED' &&
-      activeQuest.id &&
-      completedQuestIds.includes(activeQuest.id)
+      interactiveQuest.status === 'VERIFIED' &&
+      interactiveQuest.id &&
+      completedQuestIds.includes(interactiveQuest.id)
     ) {
       return 'COMPLETED';
     }
-    if (activeQuest.status === 'VERIFIED' && (completionModal || showRewardAnimation)) {
+    if (interactiveQuest.status === 'VERIFIED' && (completionModal || showRewardAnimation)) {
       return 'REWARDED';
     }
-    if (activeQuest.status === 'VERIFIED') return 'VERIFIED';
-    if (activeQuest.status === 'SUBMITTED') return 'SUBMITTED';
-    if (activeQuest.status === 'ACTIVE') return 'ACTIVE';
-    if (activeQuest.status === 'AVAILABLE' && activeQuest.chainQuestId) return 'ACCEPTED';
-    if (activeQuest.status === 'AVAILABLE') return 'GENERATED';
+    if (interactiveQuest.status === 'VERIFIED') return 'VERIFIED';
+    if (interactiveQuest.status === 'SUBMITTED') return 'SUBMITTED';
+    if (interactiveQuest.status === 'ACTIVE') return 'ACTIVE';
+    if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId) return 'ACCEPTED';
+    if (interactiveQuest.status === 'AVAILABLE') return 'GENERATED';
     return 'PENDING';
   }
 
@@ -330,10 +438,11 @@ export default function CommandCenter() {
     if (!isCorrectNetwork) return 'Wrong network';
     if (authStatus !== 'authenticated') return 'Awaiting secure sign-in';
     if (!isRealtimeReady) return `Realtime ${hydrationStatus}`;
-    if (activeQuest?.status === 'SUBMITTED') return 'Verification pending';
-    if (activeQuest?.status === 'VERIFIED') return 'Reward settlement complete';
-    if (activeQuest?.status === 'ACTIVE') return 'Quest live';
-    if (activeQuest?.status === 'AVAILABLE') return 'Ready to begin';
+    if (interactiveQuest?.status === 'SUBMITTED') return 'Verification pending';
+    if (interactiveQuest?.status === 'VERIFIED') return 'Reward settlement complete';
+    if (interactiveQuest?.status === 'ACTIVE') return 'Quest live';
+    if (interactiveQuest?.status === 'AVAILABLE') return 'Ready to begin';
+    if (restoredQuest) return 'No new quest started yet';
     return 'Forge ready';
   }
 
@@ -500,6 +609,7 @@ export default function CommandCenter() {
     setTxStatus(null);
     setProofError(null);
     setProofUri('');
+    setResumedQuestId(null);
 
     try {
       const response = await generateQuest('Celo');
@@ -574,7 +684,7 @@ export default function CommandCenter() {
   }
 
   async function handleStartQuest(questOverride?: QuestState | null) {
-    const candidateQuest = questOverride ?? activeQuest;
+    const candidateQuest = questOverride ?? interactiveQuest;
     if (!address || !forgeQuestManager || !candidateQuest || !signer) return;
     if (!(await requireReadyAuth('starting quests'))) return;
 
@@ -682,12 +792,12 @@ export default function CommandCenter() {
   }
 
   async function handleSubmitProof() {
-    if (!address || !forgeQuestManager || !activeQuest) {
+    if (!address || !forgeQuestManager || !interactiveQuest) {
       setMessage('Provide proof and connect wallet to submit.');
       return;
     }
 
-    if (activeQuest.status !== 'ACTIVE') {
+    if (interactiveQuest.status !== 'ACTIVE') {
       setMessage('Start the quest onchain before submitting proof.');
       return;
     }
@@ -707,7 +817,7 @@ export default function CommandCenter() {
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(
-        activeQuest,
+        interactiveQuest,
         'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
       );
       setMessage('Quest sync complete. Submitting proof onchain...');
@@ -813,11 +923,11 @@ export default function CommandCenter() {
       />
       <QuestCompletionModal
         isOpen={completionModal}
-        quest={activeQuest}
+        quest={interactiveQuest}
         onClose={handleCompletionClose}
         onViewInventory={handleViewInventory}
         onGenerateNew={() => {
-          markQuestCompleted(activeQuest?.id);
+          markQuestCompleted(interactiveQuest?.id);
           setCompletionModal(false);
           void handleGenerateQuest();
         }}
@@ -957,20 +1067,56 @@ export default function CommandCenter() {
               <QuestFlowTracker currentStep={getFlowStep()} statusLabel={flowStatusLabel()} />
             </motion.div>
 
+            {!interactiveQuest && restoredQuest ? (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="rounded-[2rem] border border-amber-400/30 bg-amber-500/10 p-6 shadow-xl"
+              >
+                <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Restored Quest</p>
+                <p className="mt-3 text-xl font-bold text-white">
+                  {restoredQuest.title || 'Previous quest found'}
+                </p>
+                <p className="mt-2 text-sm text-slate-200">
+                  We found an older quest on this wallet, but connecting your wallet did not generate,
+                  accept, or pay for a new quest in this session.
+                </p>
+                <p className="mt-2 text-sm text-slate-300">
+                  Resume it only if you want to continue that earlier run.
+                </p>
+                <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => setResumedQuestId(restoredQuest.id ?? null)}
+                    disabled={!restoredQuest.id}
+                    className="rounded-xl border border-amber-300 bg-amber-300/20 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/30 disabled:opacity-50"
+                  >
+                    Resume Previous Quest
+                  </motion.button>
+                  <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+                    Status: {restoredQuest.status || 'Unknown'}
+                  </div>
+                </div>
+              </motion.div>
+            ) : null}
+
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               className="rounded-[2rem]"
             >
-              {loading && !activeQuest ? (
+              {loading && !interactiveQuest ? (
                 <LoadingScreen />
-              ) : activeQuest ? (
+              ) : interactiveQuest ? (
                 <ActiveQuestPanel
-                  quest={activeQuest}
+                  quest={interactiveQuest}
                   onStartQuest={
-                    activeQuest.status === 'AVAILABLE' ? () => void handleStartQuest(activeQuest) : undefined
+                    interactiveQuest.status === 'AVAILABLE'
+                      ? () => void handleStartQuest(interactiveQuest)
+                      : undefined
                   }
-                  onSubmitProof={activeQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
+                  onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
                   loading={loading}
                   disabled={authStatus !== 'authenticated'}
                 />
@@ -990,7 +1136,7 @@ export default function CommandCenter() {
               )}
             </motion.div>
 
-            {activeQuest?.status === 'ACTIVE' ? (
+            {interactiveQuest?.status === 'ACTIVE' ? (
               <motion.div
                 ref={proofPanelRef}
                 initial={{ opacity: 0, y: 20 }}
@@ -1009,10 +1155,10 @@ export default function CommandCenter() {
               </motion.div>
             ) : null}
 
-            {!activeQuest ||
-            activeQuest.status === 'VERIFIED' ||
-            activeQuest.status === 'FAILED' ||
-            activeQuest.status === 'CANCELLED' ? (
+            {!interactiveQuest ||
+            interactiveQuest.status === 'VERIFIED' ||
+            interactiveQuest.status === 'FAILED' ||
+            interactiveQuest.status === 'CANCELLED' ? (
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
