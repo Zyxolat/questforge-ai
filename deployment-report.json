@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-26T17:43:58.669Z",
+  "generatedAt": "2026-05-27T02:12:32.856Z",
   "environment": "development",
   "network": "localhost",
   "chainId": 42220,
@@ -60,7 +60,9 @@
       "details": "Run contracts/scripts/validateDeployment.ts against the deployed Celo contracts."
     }
   ],
-  "knownIssues": ["Deployment environment metadata is incomplete."],
+  "knownIssues": [
+    "Deployment environment metadata is incomplete."
+  ],
   "nextSteps": [
     "1. Copy the generated contract addresses into Railway environment variables.",
     "2. Restart the Railway backend so it picks up the deployed addresses.",

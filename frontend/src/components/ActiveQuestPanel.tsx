@@ -67,6 +67,8 @@ export default function ActiveQuestPanel({
 
   const questGeneration = quest.generation && typeof quest.generation === 'object' ? quest.generation as Record<string, unknown> : null;
   const questNpc = quest.npc && typeof quest.npc === 'object' ? quest.npc as Record<string, unknown> : null;
+  const missionChapters = Array.isArray(quest.missionChapters) ? quest.missionChapters : [];
+  const storyline = Array.isArray(quest.storyline) ? quest.storyline : [];
   const questExpiresAt = typeof quest.expiresAt === 'string' ? new Date(quest.expiresAt) : null;
   const questStartedAt = typeof quest.startedAt === 'string' ? new Date(quest.startedAt) : null;
   const verificationReason =
@@ -192,6 +194,18 @@ export default function ActiveQuestPanel({
           </motion.div>
         )}
 
+        {quest.missionStructure ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.22 }}
+            className="rounded-2xl border border-white/10 bg-white/5 p-4"
+          >
+            <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Mission Structure</p>
+            <p className="mt-2 text-sm text-slate-200">{quest.missionStructure}</p>
+          </motion.div>
+        ) : null}
+
         {/* Objectives */}
         <motion.div
           initial={{ opacity: 0 }}
@@ -236,10 +250,50 @@ export default function ActiveQuestPanel({
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">AI Provenance</p>
                 <p className="mt-2 text-lg font-semibold text-white">{String(questGeneration.provider ?? questGeneration.source ?? 'Adaptive engine')}</p>
                 {typeof questGeneration.model === 'string' ? <p className="mt-1 text-sm text-slate-300">{questGeneration.model}</p> : null}
+                {typeof questGeneration.latencyMs === 'number' || typeof questGeneration.totalTokens === 'number' ? (
+                  <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                    {questGeneration.latencyMs ?? 'n/a'} ms • {questGeneration.totalTokens ?? 'n/a'} tokens • {questGeneration.attemptCount ?? 'n/a'} tries
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </motion.div>
         )}
+
+        {(missionChapters.length > 0 || storyline.length > 0) ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.37 }}
+            className="grid gap-3 lg:grid-cols-2"
+          >
+            {missionChapters.length > 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Quest Chapters</p>
+                <div className="mt-3 space-y-2">
+                  {missionChapters.slice(0, 3).map((chapter, index) => (
+                    <div key={chapter.id ?? `chapter-${index}`} className="rounded-xl border border-white/10 bg-navy/40 px-3 py-3">
+                      <p className="text-sm font-semibold text-white">{chapter.title || `Chapter ${index + 1}`}</p>
+                      <p className="mt-1 text-xs text-slate-300">{chapter.summary || 'The mission advances.'}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+            {storyline.length > 0 ? (
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Story Beats</p>
+                <div className="mt-3 space-y-2">
+                  {storyline.slice(0, 3).map((beat, index) => (
+                    <div key={`${index}-${String(beat)}`} className="rounded-xl border border-white/10 bg-navy/40 px-3 py-3 text-xs text-slate-300">
+                      Act {index + 1}: {String(beat)}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </motion.div>
+        ) : null}
 
         {/* Rewards preview */}
         <motion.div
@@ -256,9 +310,9 @@ export default function ActiveQuestPanel({
             <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">XP Earned</p>
             <p className="mt-2 text-2xl font-bold text-emerald-300">{quest.xpReward || '?'}</p>
           </div>
-          <div className="rounded-2xl border border-purple-500/30 bg-purple-500/10 p-4">
-            <p className="text-xs uppercase tracking-[0.2em] text-purple-300">NFT Rarity</p>
-            <p className="mt-2 text-2xl font-bold text-purple-300">{getRarityLabel(quest.difficulty)}</p>
+          <div className="rounded-2xl border border-glowyellow/20 bg-glowyellow/10 p-4">
+            <p className="text-xs uppercase tracking-[0.2em] text-softyellow">NFT Rarity</p>
+            <p className="mt-2 text-2xl font-bold text-white">{getRarityLabel(quest.difficulty)}</p>
           </div>
         </motion.div>
 

@@ -68,7 +68,10 @@ class RealtimeEventPublisher {
     })).values()];
 
     const insertedEventIds: number[] = [];
-    const serializedPayload = serializeJsonValue(input.payload);
+    const serializedPayload = serializeJsonValue({
+      ...input.payload,
+      realtimeReplayKey: input.replayKey
+    });
     const payloadJson = JSON.stringify(serializedPayload);
 
     for (const scope of scopes) {

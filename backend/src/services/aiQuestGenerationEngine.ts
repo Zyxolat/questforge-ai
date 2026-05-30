@@ -48,7 +48,14 @@ class AIQuestGenerationEngine {
     lastGeneratedQuestId: null as string | null,
     lastGeneratedAt: null as string | null,
     lastGenerationSource: null as string | null,
-    lastPromptHash: null as string | null
+    lastPromptHash: null as string | null,
+    lastRequestId: null as string | null,
+    lastLatencyMs: null as number | null,
+    lastPromptTokens: null as number | null,
+    lastCompletionTokens: null as number | null,
+    lastTotalTokens: null as number | null,
+    lastAttemptCount: null as number | null,
+    lastFallbackReason: null as string | null
   };
 
   async generateQuest(input: { wallet: string; chain: string }): Promise<QuestGenerationResult> {
@@ -269,6 +276,13 @@ class AIQuestGenerationEngine {
     this.diagnostics.lastGeneratedAt = new Date().toISOString();
     this.diagnostics.lastGenerationSource = validated.generation.source;
     this.diagnostics.lastPromptHash = validated.generation.promptHash;
+    this.diagnostics.lastRequestId = validated.generation.requestId ?? null;
+    this.diagnostics.lastLatencyMs = validated.generation.latencyMs ?? null;
+    this.diagnostics.lastPromptTokens = validated.generation.promptTokens ?? null;
+    this.diagnostics.lastCompletionTokens = validated.generation.completionTokens ?? null;
+    this.diagnostics.lastTotalTokens = validated.generation.totalTokens ?? null;
+    this.diagnostics.lastAttemptCount = validated.generation.attemptCount ?? null;
+    this.diagnostics.lastFallbackReason = validated.generation.fallbackReason ?? null;
 
     logger.info('[QUEST-GENERATION] Quest generation complete with diagnostics', {
       wallet,
@@ -281,6 +295,10 @@ class AIQuestGenerationEngine {
       generationProvider: validated.generation.provider,
       generationModel: validated.generation.model,
       fallbackReason: validated.generation.fallbackReason,
+      requestId: validated.generation.requestId,
+      latencyMs: validated.generation.latencyMs,
+      totalTokens: validated.generation.totalTokens,
+      attemptCount: validated.generation.attemptCount,
       totalGenerated: this.diagnostics.generatedCount,
       openAICount: this.diagnostics.openAIGeneratedCount,
       fallbackCount: this.diagnostics.fallbackGeneratedCount,
@@ -651,6 +669,11 @@ class AIQuestGenerationEngine {
       title: input.validated.title,
       description: input.validated.description,
       lore: input.validated.lore,
+      missionStructure: input.validated.missionStructure,
+      missionObjectives: input.validated.missionObjectives,
+      missionChapters: input.validated.missionChapters,
+      storyline: input.validated.storyline,
+      rewardRationale: input.validated.rewardRationale,
       difficulty: input.validated.difficulty,
       questType: input.validated.questType,
       objective: input.validated.objective,
@@ -666,6 +689,12 @@ class AIQuestGenerationEngine {
         openingDialogue: input.validated.npc.openingDialogue
       },
       faction: input.validated.faction,
+      worldInfluence: input.validated.worldInfluence,
+      branchingHooks: input.validated.branchingHooks,
+      txRequirements: input.validated.txRequirements,
+      chainInteraction: input.validated.chainInteraction,
+      coOpHooks: input.validated.coOpHooks,
+      loreContinuity: input.validated.loreContinuity,
       worldStateVersion: input.validated.worldStateVersion,
       transactionCount: input.validated.transactionCount,
       requiredTxTypes: input.validated.requiredTxTypes,

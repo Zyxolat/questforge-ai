@@ -138,6 +138,7 @@ async function bootstrap() {
   const { prisma } = await import('./services/chain');
   const { assertAuthStorageReady } = await import('./services/auth');
   const { aiQuestGenerationEngine } = await import('./services/aiQuestGenerationEngine');
+  const { aiOpenAIClient } = await import('./services/aiOpenAIClient');
   const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
   const { startProofVerificationWorker, stopProofVerificationWorker } = await import('./services/verification');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
@@ -296,6 +297,8 @@ async function bootstrap() {
   };
 
   const initializeOptionalRuntimeServices = async (attempt: number) => {
+    const openAIOptional = env.ALLOW_AI_FALLBACK;
+
     if (!env.WEBSOCKET_ENABLED) {
       markServiceSkipped('websocket', 'WEBSOCKET_ENABLED=false');
     } else if (startupState.services.websocket.status !== 'ready') {
@@ -319,20 +322,18 @@ async function bootstrap() {
     }
 
     if (startupState.services.openai.status !== 'ready') {
-      startupState.services.openai = {
-        ...startupState.services.openai,
-        status: 'ready',
-        attempts: startupState.services.openai.attempts + 1,
-        lastStartedAt: nowIso(),
-        lastReadyAt: nowIso(),
-        lastError: null
-      };
-
-      logger.info('[STARTUP] Service ready: openai', {
-        service: 'openai',
+      await runStartupStep(
+        'openai',
         attempt,
-        mode: 'configured'
-      });
+        async () => {
+          await aiOpenAIClient.validateModelAccess(env.OPENAI_MODEL);
+        },
+        {
+          optional: openAIOptional,
+          swallowFailure: openAIOptional,
+          timeoutMs: 15000
+        }
+      );
     }
   };
 
@@ -530,6 +531,7 @@ async function bootstrap() {
       const rpcHealth = await rpcFailoverManager.getHealthStatus();
       const worldDiagnostics = worldStateCoordinator.getDiagnostics();
       const questDiagnostics = aiQuestGenerationEngine.getDiagnostics();
+      const openAIHealth = aiOpenAIClient.getHealthStatus();
 
       res.status(200).json({
         timestamp: new Date().toISOString(),
@@ -538,6 +540,7 @@ async function bootstrap() {
         worker: workerStatus,
         queue: queueStats,
         websocket: wsStats,
+        openai: openAIHealth,
         rpc: {
           endpoints: rpcHealth,
           lastSuccessful: rpcFailoverManager.getLastSuccessfulEndpoint(),
@@ -551,6 +554,7 @@ async function bootstrap() {
         },
         healthy:
           startupState.servicesReady &&
+          (env.ALLOW_AI_FALLBACK || openAIHealth.validated) &&
           ingestorStatus.running &&
           workerStatus.running &&
           (queueStats?.healthy ?? false) &&

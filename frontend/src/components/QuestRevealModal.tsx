@@ -58,11 +58,11 @@ export default function QuestRevealModal({
     ? quest.requiredTxTypes.filter((value): value is string => typeof value === 'string' && value.length > 0)
     : [];
   const colorClasses: Record<string, string> = {
-    purple: 'from-purple-600 to-pink-600',
-    orange: 'from-orange-600 to-red-600',
-    blue: 'from-blue-600 to-cyan-600',
-    green: 'from-green-600 to-emerald-600',
-    yellow: 'from-yellow-600 to-amber-600'
+    purple: 'from-yellow-500 to-amber-400',
+    orange: 'from-yellow-500 to-amber-500',
+    blue: 'from-yellow-500 to-yellow-300',
+    green: 'from-yellow-500 to-lime-300',
+    yellow: 'from-yellow-500 to-amber-500'
   };
 
   return (
@@ -185,6 +185,35 @@ export default function QuestRevealModal({
                         </motion.div>
                       )}
 
+                      {quest.missionStructure ? (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.62 }}
+                          className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                        >
+                          <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Cinematic Structure</p>
+                          <p className="mt-2 text-sm text-slate-200">{quest.missionStructure}</p>
+                        </motion.div>
+                      ) : null}
+
+                      {Array.isArray(quest.missionChapters) && quest.missionChapters.length > 0 ? (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: 0.64 }}
+                          className="grid gap-3"
+                        >
+                          {quest.missionChapters.slice(0, 3).map((chapter, index) => (
+                            <div key={chapter.id ?? `chapter-${index}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Chapter {index + 1}</p>
+                              <p className="mt-2 text-base font-semibold text-white">{chapter.title || `Chapter ${index + 1}`}</p>
+                              <p className="mt-1 text-sm text-slate-300">{chapter.summary || 'The mission advances deeper into the realm.'}</p>
+                            </div>
+                          ))}
+                        </motion.div>
+                      ) : null}
+
                       {(questNpc || questGeneration || requiredTxTypes.length > 0) && (
                         <motion.div
                           initial={{ opacity: 0 }}
@@ -204,6 +233,11 @@ export default function QuestRevealModal({
                               <p className="text-xs uppercase tracking-[0.2em] text-slate-400">AI Provenance</p>
                               <p className="mt-2 text-lg font-semibold text-white">{String(questGeneration.provider ?? questGeneration.source ?? 'Adaptive engine')}</p>
                               {typeof questGeneration.model === 'string' ? <p className="mt-1 text-sm text-slate-300">{questGeneration.model}</p> : null}
+                              {typeof questGeneration.latencyMs === 'number' || typeof questGeneration.totalTokens === 'number' ? (
+                                <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
+                                  {questGeneration.latencyMs ?? 'n/a'} ms • {questGeneration.totalTokens ?? 'n/a'} tokens
+                                </p>
+                              ) : null}
                             </div>
                           ) : null}
                           {requiredTxTypes.length > 0 ? (
@@ -239,8 +273,8 @@ export default function QuestRevealModal({
                           <p className="mt-2 text-2xl font-bold text-emerald-300">{quest.xpReward}</p>
                         </div>
                         <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-3 text-center">
-                          <p className="text-xs uppercase tracking-[0.2em] text-purple-300">NFT Rarity</p>
-                          <p className="mt-2 text-2xl font-bold text-purple-300">
+                          <p className="text-xs uppercase tracking-[0.2em] text-softyellow">NFT Rarity</p>
+                          <p className="mt-2 text-2xl font-bold text-white">
                             {Number(quest.difficulty) === 5 ? 'Legendary' : Number(quest.difficulty) === 4 ? 'Epic' : Number(quest.difficulty) === 3 ? 'Rare' : Number(quest.difficulty) === 2 ? 'Uncommon' : 'Common'}
                           </p>
                         </div>

@@ -45,6 +45,12 @@ type GenerationProfile = {
   model?: string | null;
   promptHash?: string | null;
   fallbackReason?: string | null;
+  requestId?: string | null;
+  latencyMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  attemptCount?: number | null;
 };
 type TxStatusType = 'pending' | 'success' | 'error' | 'confirmed';
 type QuestFlowStage =
@@ -97,6 +103,24 @@ function resolveGenerationProfile(quest: QuestState | null): GenerationProfile |
   const metadata = asRecord(quest?.metadata);
   const generation = metadata ? asRecord(metadata.generation) : null;
   return generation as GenerationProfile | null;
+}
+
+function resolveNarrativeRecord(quest: QuestState | null) {
+  const direct = asRecord(quest);
+  if (direct?.missionStructure || direct?.storyline || direct?.missionChapters) {
+    return direct;
+  }
+
+  const metadata = asRecord(quest?.metadata);
+  return metadata ? asRecord(metadata.orchestration) : null;
+}
+
+function formatActivityLabel(eventName?: string) {
+  if (!eventName) {
+    return 'Realm update';
+  }
+
+  return eventName.replace(/[:-]/g, ' ').replace(/\b\w/g, (value) => value.toUpperCase());
 }
 
 function resolveQuestRarityLabel(difficulty: number | string | undefined) {
@@ -260,6 +284,7 @@ export default function CommandCenter() {
     connectionStatus,
     hydrationStatus,
     isRealtimeReady,
+    notifications,
     player,
     quests,
     syncNow,
@@ -345,6 +370,8 @@ export default function CommandCenter() {
     interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest) ? null : activeQuest;
   const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
+  const narrativeProfile = resolveNarrativeRecord(currentQuestForDisplay);
+  const recentNotifications = notifications.slice(0, 5);
   const canRetryProofQueue =
     interactiveQuest?.status === 'SUBMITTED' && pendingProofRetry?.questId === interactiveQuest.id;
 
@@ -1463,25 +1490,94 @@ export default function CommandCenter() {
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
                   <p className="text-xs uppercase tracking-[0.18em] text-slate-400">AI Layer</p>
-                  <p className="mt-2 text-white">
-                    {generationProfile?.provider || generationProfile?.source || 'Adaptive quest engine'}
-                  </p>
-                  {generationProfile?.model ? (
-                    <p className="mt-1 text-xs text-slate-400">{generationProfile.model}</p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <span className="rounded-full border border-glowyellow/30 bg-glowyellow/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-glowyellow">
+                      {generationProfile?.provider || generationProfile?.source || 'Adaptive engine'}
+                    </span>
+                    {generationProfile?.model ? (
+                      <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-300">
+                        {generationProfile.model}
+                      </span>
+                    ) : null}
+                  </div>
+                  {(generationProfile?.latencyMs || generationProfile?.totalTokens || generationProfile?.attemptCount) ? (
+                    <div className="mt-3 grid grid-cols-3 gap-2 text-[11px] uppercase tracking-[0.16em] text-slate-400">
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        {generationProfile.latencyMs ?? 'n/a'} ms
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        {generationProfile.totalTokens ?? 'n/a'} tokens
+                      </div>
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2">
+                        {generationProfile.attemptCount ?? 'n/a'} tries
+                      </div>
+                    </div>
                   ) : null}
                   {generationProfile?.fallbackReason ? (
                     <p className="mt-2 text-xs text-amber-300">
                       Fallback: {generationProfile.fallbackReason}
                     </p>
                   ) : null}
+                  {generationProfile?.requestId ? (
+                    <p className="mt-2 break-all text-[11px] text-slate-500">
+                      request {generationProfile.requestId}
+                    </p>
+                  ) : null}
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Judge Narrative</p>
-                  <p className="mt-2 text-white">
-                    The flow shows AI quest generation, secure wallet auth, onchain execution,
-                    proof-driven verification, and NFT reward delivery in one loop.
-                  </p>
-                </div>
+                {narrativeProfile?.missionStructure ? (
+                  <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Mission Structure</p>
+                    <p className="mt-2 text-white">{String(narrativeProfile.missionStructure)}</p>
+                    {Array.isArray(narrativeProfile.storyline) && narrativeProfile.storyline.length > 0 ? (
+                      <div className="mt-3 space-y-2">
+                        {narrativeProfile.storyline.slice(0, 3).map((beat, index) => (
+                          <div key={`${index}-${String(beat)}`} className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-300">
+                            Act {index + 1}: {String(beat)}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-white/10 bg-white/5 p-6 shadow-xl"
+            >
+              <h3 className="font-bold text-softyellow text-sm uppercase tracking-[0.25em]">
+                Live Activity Feed
+              </h3>
+              <div className="mt-4 space-y-3">
+                {recentNotifications.length > 0 ? (
+                  recentNotifications.map((event) => (
+                    <div key={`${event.eventName}-${event.id ?? event.sourceId ?? event.createdAt ?? 'event'}`} className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <p className="text-xs uppercase tracking-[0.18em] text-glowyellow">
+                          {formatActivityLabel(event.eventName)}
+                        </p>
+                        <p className="text-[11px] text-slate-500">
+                          {event.createdAt ? new Date(event.createdAt).toLocaleTimeString() : 'live'}
+                        </p>
+                      </div>
+                      <p className="mt-2 text-sm text-slate-200">
+                        {String(
+                          asRecord(event.payload)?.title ||
+                            asRecord(event.payload)?.dialogue ||
+                            asRecord(event.payload)?.status ||
+                            asRecord(event.payload)?.questId ||
+                            'Realm state updated.'
+                        )}
+                      </p>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-2xl border border-white/10 bg-navy/40 p-4 text-sm text-slate-400">
+                    Waiting for blockchain and AI events to stream into the realm feed.
+                  </div>
+                )}
               </div>
             </motion.div>
 

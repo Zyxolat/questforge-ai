@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import { env } from '../config/env';
 import { aiOpenAIClient } from './aiOpenAIClient';
 import { aiValidator } from './aiSafety';
 import { logger } from './logger';
@@ -55,16 +56,74 @@ type NarrativeResponseShape = {
 
 const MAX_ITEMS = 4;
 const RISK_LEVELS = new Set(['low', 'moderate', 'high', 'extreme']);
-const OPENAI_MODEL = 'gpt-4o-mini';
+const OPENAI_MODEL = env.OPENAI_MODEL;
 
-function safeJsonParse<T>(value: string): T | null {
-  try {
-    const firstBrace = value.indexOf('{');
-    const body = firstBrace >= 0 ? value.slice(firstBrace) : value;
-    return JSON.parse(body) as T;
-  } catch {
+function extractJsonObject(value: string) {
+  const sanitized = value
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```$/i, '')
+    .trim();
+
+  const firstBrace = sanitized.indexOf('{');
+  if (firstBrace < 0) {
     return null;
   }
+
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+
+  for (let index = firstBrace; index < sanitized.length; index += 1) {
+    const char = sanitized[index];
+
+    if (escaping) {
+      escaping = false;
+      continue;
+    }
+
+    if (char === '\\') {
+      escaping = true;
+      continue;
+    }
+
+    if (char === '"') {
+      inString = !inString;
+      continue;
+    }
+
+    if (inString) {
+      continue;
+    }
+
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+
+    if (char === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        return sanitized.slice(firstBrace, index + 1);
+      }
+    }
+  }
+
+  return sanitized.slice(firstBrace);
+}
+
+function safeJsonParse<T>(value: string): T | null {
+  const candidates = [value, extractJsonObject(value)].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    try {
+      return JSON.parse(candidate) as T;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+
+  return null;
 }
 
 function normalizeString(value: unknown, fallback: string, maxLength = 400) {
@@ -195,6 +254,18 @@ CRITICAL RULES:
 }
 
 class QuestNarrativeEngine {
+  private buildFallbackNarrative(
+    context: NarrativeContext,
+    generation: QuestGenerationDiagnostics,
+    failureLabel: string
+  ) {
+    if (!env.ALLOW_AI_FALLBACK) {
+      throw new Error(`${failureLabel}. Live AI fallback is disabled in this environment.`);
+    }
+
+    return this.buildDeterministicNarrative(context, generation);
+  }
+
   async generateQuestNarrative(context: NarrativeContext): Promise<QuestNarrativeDraft> {
     const prompt = buildAIQuestPrompt(context);
     const promptHash = hashPrompt(prompt);
@@ -219,15 +290,21 @@ class QuestNarrativeEngine {
         promptHash
       });
 
-      const fallback = this.buildDeterministicNarrative(context, {
+      const fallback = this.buildFallbackNarrative(context, {
         source: 'deterministic_fallback',
         provider: 'deterministic',
         model: null,
         promptHash,
         promptPreview: promptSummary,
         fallbackReason: 'OPENAI_API_KEY not configured',
-        generatedAt: new Date().toISOString()
-      });
+        generatedAt: new Date().toISOString(),
+        requestId: null,
+        latencyMs: null,
+        promptTokens: null,
+        completionTokens: null,
+        totalTokens: null,
+        attemptCount: null
+      }, 'OpenAI is not configured for quest generation');
 
       return fallback;
     }
@@ -240,7 +317,13 @@ class QuestNarrativeEngine {
       promptHash,
       promptPreview: promptSummary,
       fallbackReason: 'API request failed after retries',
-      generatedAt: new Date().toISOString()
+      generatedAt: new Date().toISOString(),
+      requestId: null,
+      latencyMs: null,
+      promptTokens: null,
+      completionTokens: null,
+      totalTokens: null,
+      attemptCount: null
     };
 
     try {
@@ -292,11 +375,11 @@ class QuestNarrativeEngine {
           requestId: result.telemetry.requestId,
           contentPreview: result.content.slice(0, 200)
         });
-        return this.buildDeterministicNarrative(context, {
+        return this.buildFallbackNarrative(context, {
           ...baseFallbackGeneration,
           fallbackReason: 'Response parsing failed',
           generatedAt: new Date().toISOString()
-        });
+        }, 'OpenAI quest generation returned unparsable JSON');
       }
 
       // Validate against hallucinations
@@ -322,7 +405,13 @@ class QuestNarrativeEngine {
         promptHash,
         promptPreview: promptSummary,
         fallbackReason: hallCheck.isHallucinated ? `Hallucination detected: ${hallCheck.reason}` : null,
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
+        requestId: result.telemetry.requestId,
+        latencyMs: result.telemetry.latencyMs,
+        promptTokens: result.telemetry.promptTokens,
+        completionTokens: result.telemetry.completionTokens,
+        totalTokens: result.telemetry.totalTokens,
+        attemptCount: result.telemetry.attemptCount
       });
 
       logger.info('[QUEST-AI-GENERATION] AI-generated quest accepted and merged', {
@@ -343,11 +432,11 @@ class QuestNarrativeEngine {
         promptHash
       });
 
-      return this.buildDeterministicNarrative(context, {
+      return this.buildFallbackNarrative(context, {
         ...baseFallbackGeneration,
         fallbackReason: errorMessage,
         generatedAt: new Date().toISOString()
-      });
+      }, 'OpenAI quest generation failed');
     }
   }
 

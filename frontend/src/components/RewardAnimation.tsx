@@ -123,11 +123,11 @@ export default function RewardAnimation({
                 transition={{ duration: 1 }}
                 className="relative"
               >
-                <motion.div className="absolute inset-0 bg-purple-500 blur-2xl rounded-full opacity-60" animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1 }} />
-                <div className="relative rounded-full bg-gradient-to-r from-purple-500 to-pink-500 p-8 shadow-2xl">
+                  <motion.div className="absolute inset-0 bg-glowyellow blur-2xl rounded-full opacity-60" animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1 }} />
+                <div className="relative rounded-full bg-gradient-to-r from-glowyellow to-softyellow p-8 shadow-2xl">
                   <p className="text-center text-sm uppercase tracking-[0.2em] text-white font-bold">NFT Minted</p>
-                  <p className="mt-2 text-center text-3xl font-black text-white drop-shadow-lg">✨</p>
-                  <p className="text-center text-white font-bold mt-2">{nftRarity}</p>
+                  <p className="mt-2 text-center text-3xl font-black text-navy drop-shadow-lg">✨</p>
+                  <p className="text-center text-navy font-bold mt-2">{nftRarity}</p>
                 </div>
               </motion.div>
             )}

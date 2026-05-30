@@ -8,6 +8,11 @@ import { isApprovalEvent, type ObjectiveType } from './questTemplates';
 import { logger } from './logger';
 import { realtimeEventPublisher } from './realtimeEventPublisher';
 
+// SAFETY: Maximum time to wait for a transaction receipt.
+// Prevents the verification worker from blocking indefinitely
+// if an RPC node goes silent or a transaction is stuck.
+const TX_WAIT_TIMEOUT_MS = 120_000; // 2 minutes
+
 type VerificationMetadata = {
   type: ObjectiveType;
   questType: string;
@@ -47,6 +52,29 @@ const TX_HASH_PATTERN = /^0x[a-fA-F0-9]{64}$/;
 
 let workerTimer: NodeJS.Timeout | null = null;
 let workerActive = false;
+
+/**
+ * Wait for a transaction receipt with a timeout.
+ * Prevents indefinite blocking when RPC nodes are unresponsive.
+ */
+async function waitForTransaction(
+  tx: ethers.TransactionResponse,
+  timeoutMs: number = TX_WAIT_TIMEOUT_MS
+): Promise<ethers.TransactionReceipt | null> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    tx.wait(),
+    new Promise<ethers.TransactionReceipt | null>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`Transaction wait timed out after ${timeoutMs}ms: ${tx.hash}`));
+      }, timeoutMs);
+    })
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+
 
 function elapsedMs(startedAtMs: number) {
   return Date.now() - startedAtMs;
@@ -737,7 +765,7 @@ async function settleVerificationSuccess(input: {
 
   const verifierContract = ensureVerifierContract();
   const tx = await verifierContract.verifyQuest(quest.chainQuestId, true, expectedVerificationHash);
-  const receipt = await tx.wait();
+  const receipt = await waitForTransaction(tx);
   const verificationTxHash = (receipt?.hash || tx.hash) as string;
   const xpReward = Number(onchainQuest.xpReward);
 
@@ -801,7 +829,7 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
   let receipt: ethers.TransactionReceipt | null = null;
   if (contracts.forgeQuestManagerWrite && Number(onchainQuest.status) === 2) {
     const tx = await ensureVerifierContract().verifyQuest(quest.chainQuestId, false, expectedVerificationHash);
-    receipt = await tx.wait();
+    receipt = await waitForTransaction(tx);
     verificationTxHash = (receipt?.hash || tx.hash) as string;
   }
 

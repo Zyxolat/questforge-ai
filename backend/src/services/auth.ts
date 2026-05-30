@@ -494,37 +494,42 @@ export async function issueWalletChallenge(context: WalletChallengeContext) {
     normalizedWallet
   });
 
-  await prisma.$executeRaw`
-    DELETE FROM "AuthChallenge"
-    WHERE wallet = ${normalizedWallet}
-      AND "consumedAt" IS NULL
-  `;
+  // Wrap DELETE and INSERT in an atomic transaction to prevent race conditions
+  // where concurrent requests could create multiple challenges for the same wallet
+  const challenge = await prisma.$transaction(async (tx) => {
+    await tx.$executeRaw`
+      DELETE FROM "AuthChallenge"
+      WHERE wallet = ${normalizedWallet}
+        AND "consumedAt" IS NULL
+    `;
 
-  const issuedAt = now;
-  const expiresAt = addMinutes(issuedAt, NONCE_TTL_MINUTES);
-  const nonce = createNonce();
-  const message = buildWalletSignInMessage({
-    wallet,
-    chainId: context.chainId,
-    domain: context.domain,
-    uri: context.uri,
-    nonce,
-    issuedAt,
-    expiresAt
+    const issuedAt = now;
+    const expiresAt = addMinutes(issuedAt, NONCE_TTL_MINUTES);
+    const nonce = createNonce();
+    const message = buildWalletSignInMessage({
+      wallet,
+      chainId: context.chainId,
+      domain: context.domain,
+      uri: context.uri,
+      nonce,
+      issuedAt,
+      expiresAt
+    });
+
+    console.debug('[AUTH-SERVICE] Built SIWE message', {
+      messageLength: message.length,
+      messageStart: message.slice(0, 50),
+      nonce: `${nonce.slice(0, 8)}...`,
+      expiresAt: expiresAt.toISOString()
+    });
+
+    const [inserted] = await tx.$queryRaw<AuthChallengeRow[]>`
+      INSERT INTO "AuthChallenge" (id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "createdAt")
+      VALUES (${crypto.randomUUID()}, ${normalizedWallet}, ${nonce}, ${message}, ${context.chainId}, ${context.domain}, ${context.uri}, ${expiresAt}, ${issuedAt})
+      RETURNING id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "consumedAt", "createdAt"
+    `;
+    return inserted;
   });
-
-  console.debug('[AUTH-SERVICE] Built SIWE message', {
-    messageLength: message.length,
-    messageStart: message.slice(0, 50),
-    nonce: `${nonce.slice(0, 8)}...`,
-    expiresAt: expiresAt.toISOString()
-  });
-
-  const [challenge] = await prisma.$queryRaw<AuthChallengeRow[]>`
-    INSERT INTO "AuthChallenge" (id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "createdAt")
-    VALUES (${crypto.randomUUID()}, ${normalizedWallet}, ${nonce}, ${message}, ${context.chainId}, ${context.domain}, ${context.uri}, ${expiresAt}, ${issuedAt})
-    RETURNING id, wallet, nonce, message, "chainId", domain, uri, "expiresAt", "consumedAt", "createdAt"
-  `;
 
   console.info('[AUTH-SERVICE] Challenge issued', {
     normalizedWallet: `${normalizedWallet.slice(0, 6)}...${normalizedWallet.slice(-4)}`,

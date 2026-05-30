@@ -33,6 +33,16 @@ interface RequestTelemetry {
   fallbackReason?: string;
 }
 
+interface OpenAIHealthStatus {
+  configured: boolean;
+  available: boolean;
+  validated: boolean;
+  model: string;
+  lastCheckedAt: string | null;
+  lastSuccessfulAt: string | null;
+  lastError: string | null;
+}
+
 interface AICompletionResult {
   content: string;
   telemetry: RequestTelemetry;
@@ -50,11 +60,25 @@ class AIOpenAIClient {
   private client: OpenAI | null;
   private readonly isConfigured: boolean;
   private requestIdCounter = 0;
+  private healthStatus: OpenAIHealthStatus = {
+    configured: false,
+    available: false,
+    validated: false,
+    model: env.OPENAI_MODEL,
+    lastCheckedAt: null,
+    lastSuccessfulAt: null,
+    lastError: null
+  };
 
   constructor() {
     if (env.OPENAI_API_KEY) {
       this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
       this.isConfigured = true;
+      this.healthStatus = {
+        ...this.healthStatus,
+        configured: true,
+        available: true
+      };
       logger.info('[OPENAI-CLIENT] OpenAI client initialized successfully', {
         configured: true,
         keyPresent: true
@@ -62,6 +86,13 @@ class AIOpenAIClient {
     } else {
       this.client = null;
       this.isConfigured = false;
+      this.healthStatus = {
+        ...this.healthStatus,
+        configured: false,
+        available: false,
+        validated: false,
+        lastError: 'OPENAI_API_KEY not configured'
+      };
       logger.warn('[OPENAI-CLIENT] OpenAI API key not configured - fallback mode enabled', {
         configured: false,
         keyPresent: false
@@ -71,6 +102,10 @@ class AIOpenAIClient {
 
   isAvailable(): boolean {
     return this.isConfigured && this.client !== null;
+  }
+
+  getHealthStatus(): OpenAIHealthStatus {
+    return { ...this.healthStatus };
   }
 
   private generateRequestId(): string {
@@ -93,6 +128,29 @@ class AIOpenAIClient {
 
   private async sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private parseRetryAfterMs(error: unknown): number | null {
+    // SAFETY: This method is only called after an instanceof OpenAI.APIError check,
+    // but OpenAI.APIError cannot be used as a parameter type annotation in this SDK version.
+    const apiError = error as { headers?: Record<string, string | string[]>; status?: number };
+    const retryAfterHeader = apiError.headers?.['retry-after'];
+    if (!retryAfterHeader) {
+      return null;
+    }
+
+    const retryAfter = Array.isArray(retryAfterHeader) ? retryAfterHeader[0] : retryAfterHeader;
+    const retrySeconds = Number(retryAfter);
+    if (Number.isFinite(retrySeconds) && retrySeconds >= 0) {
+      return retrySeconds * 1000;
+    }
+
+    const retryDateMs = Date.parse(retryAfter);
+    if (Number.isFinite(retryDateMs)) {
+      return Math.max(0, retryDateMs - Date.now());
+    }
+
+    return null;
   }
 
   private isRetryableError(error: unknown): boolean {
@@ -200,11 +258,14 @@ class AIOpenAIClient {
         });
 
         if (isRetryable && attempt < config.maxAttempts) {
-          const delayMs = this.calculateBackoffDelay(attempt, config);
+          const retryAfterMs =
+            error instanceof OpenAI.APIError ? this.parseRetryAfterMs(error) : null;
+          const delayMs = retryAfterMs ?? this.calculateBackoffDelay(attempt, config);
           logger.info('[OPENAI-CLIENT] Retrying after exponential backoff', {
             requestId,
             attempt,
             delayMs,
+            retryAfterMs,
             nextAttempt: attempt + 1
           });
           await this.sleep(delayMs);
@@ -232,7 +293,85 @@ class AIOpenAIClient {
       `OpenAI request failed after ${config.maxAttempts} attempts: ${lastError?.message ?? 'Unknown error'}`
     );
   }
+
+  async validateModelAccess(model = env.OPENAI_MODEL): Promise<OpenAIHealthStatus> {
+    const checkedAt = new Date().toISOString();
+
+    if (!this.isAvailable()) {
+      this.healthStatus = {
+        ...this.healthStatus,
+        configured: false,
+        available: false,
+        validated: false,
+        model,
+        lastCheckedAt: checkedAt,
+        lastError: 'OPENAI_API_KEY not configured'
+      };
+      return this.getHealthStatus();
+    }
+
+    try {
+      await this.createChatCompletion(
+        {
+          model,
+          messages: [
+            {
+              role: 'system',
+              content: 'You are validating API connectivity. Reply with a single JSON object.'
+            },
+            {
+              role: 'user',
+              content: '{"status":"ok"}'
+            }
+          ],
+          temperature: 0,
+          maxTokens: 4,
+          responseFormat: { type: 'json_object' }
+        },
+        {
+          maxAttempts: 2,
+          initialDelayMs: 300,
+          maxDelayMs: 2000,
+          backoffMultiplier: 2,
+          jitterFactor: 0.05
+        }
+      );
+
+      this.healthStatus = {
+        ...this.healthStatus,
+        configured: true,
+        available: true,
+        validated: true,
+        model,
+        lastCheckedAt: checkedAt,
+        lastSuccessfulAt: checkedAt,
+        lastError: null
+      };
+
+      logger.info('[OPENAI-CLIENT] OpenAI connectivity probe succeeded', {
+        model
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.healthStatus = {
+        ...this.healthStatus,
+        configured: true,
+        available: true,
+        validated: false,
+        model,
+        lastCheckedAt: checkedAt,
+        lastError: message
+      };
+
+      logger.error('[OPENAI-CLIENT] OpenAI connectivity probe failed', error, {
+        model
+      });
+      throw error;
+    }
+
+    return this.getHealthStatus();
+  }
 }
 
 export const aiOpenAIClient = new AIOpenAIClient();
-export type { AICompletionResult, RequestTelemetry, RetryConfig };
+export type { AICompletionResult, OpenAIHealthStatus, RequestTelemetry, RetryConfig };

@@ -1,6 +1,7 @@
 import { env } from './env';
 import { prisma } from '../services/chain';
 import { contracts } from '../services/contracts';
+import { aiOpenAIClient } from '../services/aiOpenAIClient';
 import { aiQuestGenerationEngine } from '../services/aiQuestGenerationEngine';
 import { worldStateCoordinator } from '../services/worldStateCoordinator';
 import { productionEventIngestor } from '../services/productionEventIngestor';
@@ -41,6 +42,7 @@ async function withTimeout<T>(label: string, fn: () => Promise<T>, timeoutMs: nu
 export async function performHealthCheck(startup?: StartupSnapshot) {
   const heapUsage = process.memoryUsage();
   const heapUtilization = heapUsage.heapTotal > 0 ? heapUsage.heapUsed / heapUsage.heapTotal : 0;
+  const openAIHealth = aiOpenAIClient.getHealthStatus();
   const ingestorStatus = productionEventIngestor.getStatus();
   const queueStats = await withTimeout(
     'queue health check',
@@ -48,6 +50,8 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
     2000
   ).catch(() => null);
   const workerStatus = productionEventWorker.getStatus();
+  const eventStreamingRequired = env.NODE_ENV === 'production' || env.ENABLE_EVENT_STREAM;
+  const openAIRequired = !env.ALLOW_AI_FALLBACK;
   const recentSyncWindowMs = Math.max(env.EVENT_POLL_INTERVAL_MS * 3, 120000);
   const lastSuccessfulSyncAt = ingestorStatus.lastSuccessfulSyncAt
     ? Date.parse(ingestorStatus.lastSuccessfulSyncAt)
@@ -63,13 +67,20 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
     },
     blockchain: {
       ok: false,
-      required: env.ENABLE_EVENT_STREAM,
-      message: env.ENABLE_EVENT_STREAM ? 'Blockchain not checked yet' : 'Event streaming disabled'
+      required: eventStreamingRequired,
+      message: eventStreamingRequired ? 'Blockchain not checked yet' : 'Event streaming disabled'
     },
     worldState: {
       ok: false,
-      required: env.ENABLE_EVENT_STREAM,
-      message: env.ENABLE_EVENT_STREAM ? 'World state not initialized yet' : 'Event streaming disabled'
+      required: eventStreamingRequired,
+      message: eventStreamingRequired ? 'World state not initialized yet' : 'Event streaming disabled'
+    },
+    openai: {
+      ok: openAIRequired ? openAIHealth.validated : openAIHealth.configured,
+      required: openAIRequired,
+      message: openAIHealth.validated
+        ? `OpenAI model ${openAIHealth.model} validated`
+        : openAIHealth.lastError || (openAIRequired ? 'OpenAI has not been validated yet' : 'Fallback mode allowed')
     },
     verifier: {
       ok: Boolean(contracts.verifierSigner),
@@ -99,7 +110,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
   }
 
   const worldDiagnostics = worldStateCoordinator.getDiagnostics();
-  checks.worldState = env.ENABLE_EVENT_STREAM
+  checks.worldState = eventStreamingRequired
     ? {
         ok: worldDiagnostics.activeVersion !== null,
         required: true,
@@ -114,7 +125,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
         message: 'Event streaming disabled'
       };
 
-  if (!env.ENABLE_EVENT_STREAM) {
+  if (!eventStreamingRequired) {
     checks.blockchain = {
       ok: true,
       required: false,
@@ -159,7 +170,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
   }
 
   const requiredChecksHealthy = Object.values(checks).every((check) => !check.required || check.ok);
-  const backgroundHealthy = env.ENABLE_EVENT_STREAM
+  const backgroundHealthy = eventStreamingRequired
     ? Boolean(
         startup?.servicesReady &&
           ingestorStatus.running &&
@@ -167,7 +178,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
           workerStatus.running &&
           queueStats?.healthy
       )
-    : true;
+    : Boolean(startup?.servicesReady ?? true);
 
   return {
     healthy: requiredChecksHealthy && backgroundHealthy,
@@ -179,6 +190,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
       worker: workerStatus,
       ingestor: ingestorStatus,
       websocket: productionWebSocketBroadcaster.getStats(),
+      openai: openAIHealth,
       rpcLastSuccessfulEndpoint: rpcFailoverManager.getLastSuccessfulEndpoint()
     },
     orchestration: {

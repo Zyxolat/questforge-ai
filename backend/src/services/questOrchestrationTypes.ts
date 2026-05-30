@@ -160,6 +160,12 @@ export interface QuestGenerationDiagnostics {
   promptPreview: string;
   fallbackReason: string | null;
   generatedAt: string;
+  requestId?: string | null;
+  latencyMs?: number | null;
+  promptTokens?: number | null;
+  completionTokens?: number | null;
+  totalTokens?: number | null;
+  attemptCount?: number | null;
 }
 
 export interface QuestNarrativeDraft {
@@ -225,6 +231,11 @@ export interface ValidatedQuestOutput {
   questType: string;
   objective: string;
   lore: string;
+  missionStructure: string;
+  missionObjectives: QuestObjectiveDraft[];
+  missionChapters: QuestChapterDraft[];
+  storyline: string[];
+  rewardRationale: string;
   stakeAmount: number;
   rewardAmount: number;
   xpReward: number;
@@ -236,6 +247,12 @@ export interface ValidatedQuestOutput {
   validationWarnings: string[];
   npc: QuestNpcDraft;
   faction: QuestFactionContext;
+  worldInfluence: QuestNarrativeDraft['worldInfluence'];
+  branchingHooks: QuestBranchingHook[];
+  txRequirements: QuestTxRequirement[];
+  chainInteraction: QuestChainInteractionPattern;
+  coOpHooks: string[];
+  loreContinuity: string[];
   worldStateVersion: number;
   isEventQuest: boolean;
   generation: QuestGenerationDiagnostics;

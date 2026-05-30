@@ -105,6 +105,11 @@ class QuestValidationEngine {
       questType: verificationTemplate.questType,
       objective: verificationTemplate.objective,
       lore: input.narrative.lore,
+      missionStructure: input.narrative.missionStructure,
+      missionObjectives: input.narrative.missionObjectives,
+      missionChapters: input.narrative.missionChapters,
+      storyline: input.narrative.storyline,
+      rewardRationale: input.narrative.rewardRationale,
       stakeAmount,
       rewardAmount: this.roundCelo(input.rewardAmount),
       xpReward: Math.round(input.xpReward),
@@ -116,6 +121,12 @@ class QuestValidationEngine {
       validationWarnings: warnings,
       npc: input.narrative.npc,
       faction: input.narrative.faction,
+      worldInfluence: input.narrative.worldInfluence,
+      branchingHooks: input.narrative.branchingHooks,
+      txRequirements: input.narrative.txRequirements,
+      chainInteraction: input.narrative.chainInteraction,
+      coOpHooks: input.narrative.coOpHooks,
+      loreContinuity: input.narrative.loreContinuity,
       worldStateVersion: input.worldState.version,
       isEventQuest: input.worldState.activeEvents.length > 0,
       generation: input.narrative.generation
@@ -313,7 +324,13 @@ class QuestValidationEngine {
             provider: generation.provider,
             model: generation.model,
             promptHash: generation.promptHash,
-            fallbackReason: generation.fallbackReason ?? null
+            fallbackReason: generation.fallbackReason ?? null,
+            requestId: generation.requestId ?? null,
+            latencyMs: generation.latencyMs ?? null,
+            promptTokens: generation.promptTokens ?? null,
+            completionTokens: generation.completionTokens ?? null,
+            totalTokens: generation.totalTokens ?? null,
+            attemptCount: generation.attemptCount ?? null
           }
         : undefined,
       adaptive: adaptive

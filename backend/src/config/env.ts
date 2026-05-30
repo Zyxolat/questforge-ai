@@ -23,6 +23,8 @@ export type AppEnv = {
   PORT: number;
   DATABASE_URL: string;
   OPENAI_API_KEY: string;
+  OPENAI_MODEL: string;
+  ALLOW_AI_FALLBACK: boolean;
   FRONTEND_URL: string;
   FRONTEND_ORIGIN: string;
   CORS_ORIGINS: string[];
@@ -305,6 +307,8 @@ export function validateEnvironment(): EnvValidationResult {
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
   const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
+  const openAIModel = optionalEnv('OPENAI_MODEL') || 'gpt-4o-mini';
+  const allowAIFallback = parseBoolean('ALLOW_AI_FALLBACK', optionalEnv('ALLOW_AI_FALLBACK'), nodeEnv !== 'production');
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
@@ -384,6 +388,33 @@ export function validateEnvironment(): EnvValidationResult {
     );
   }
 
+  if (nodeEnv === 'production' && !enableEventStream) {
+    addIssue(
+      errors,
+      'Event Streaming',
+      'ENABLE_EVENT_STREAM',
+      'must be true in production so realtime chain projection and websocket updates stay authoritative'
+    );
+  }
+
+  if (nodeEnv === 'production' && !optionalEnv('OPENAI_API_KEY')) {
+    addIssue(
+      errors,
+      'AI Generation',
+      'OPENAI_API_KEY',
+      'is required in production because QuestForge production readiness depends on live OpenAI quest generation'
+    );
+  }
+
+  if (nodeEnv === 'production' && allowAIFallback) {
+    addIssue(
+      errors,
+      'AI Generation',
+      'ALLOW_AI_FALLBACK',
+      'must be false in production so OpenAI outages cannot silently degrade into deterministic fallback content'
+    );
+  }
+
   const authUriRaw = optionalEnv('AUTH_URI') || frontendUrl?.toString();
   let authUri: URL | undefined;
   if (authUriRaw) {
@@ -448,6 +479,8 @@ export function validateEnvironment(): EnvValidationResult {
         PORT: parsePort('PORT', optionalEnv('PORT'), 4000),
         DATABASE_URL: databaseUrl!,
         OPENAI_API_KEY: optionalEnv('OPENAI_API_KEY') || '',
+        OPENAI_MODEL: openAIModel,
+        ALLOW_AI_FALLBACK: allowAIFallback,
         FRONTEND_URL: frontendUrl!.toString(),
         FRONTEND_ORIGIN: frontendUrl!.origin,
         CORS_ORIGINS: resolvedCorsOrigins,

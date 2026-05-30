@@ -317,6 +317,20 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     function supportsInterface(bytes4 interfaceId) public view override(AccessControl) returns (bool) {
         return super.supportsInterface(interfaceId);
     }
+    /**
+     * @dev Helper to safely extract a substring. Used for URI prefix validation
+     *      to prevent arbitrary/malicious content from being used as NFT metadata.
+     */
+    function _substring(string memory str, uint startIndex, uint endIndex) private pure returns (string memory) {
+        bytes memory strBytes = bytes(str);
+        require(startIndex <= endIndex && endIndex <= strBytes.length, "Invalid substring indices");
+        bytes memory result = new bytes(endIndex - startIndex);
+        for (uint i = startIndex; i < endIndex; i++) {
+            result[i - startIndex] = strBytes[i];
+        }
+        return string(result);
+    }
+
 
     function transferOwnership(address newOwner) public override onlyOwner {
         address previousOwner = owner();
@@ -339,7 +353,15 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
             quest.stakeAmount
         );
 
-        string memory rewardMetadataUri = bytes(quest.proofUri).length > 0 ? quest.proofUri : quest.metadataUri;
+        // SAFETY: validate proofUri before using as NFT metadata to prevent abuse
+        // Only allow http/https URIs (not arbitrary data or file paths)
+        bytes memory proofBytes = bytes(quest.proofUri);
+        bool isSafeProofUri = proofBytes.length > 0
+            && proofBytes.length <= 2048
+            && (proofBytes.length < 7
+                || (keccak256(bytes(_substring(quest.proofUri, 0, 7))) == keccak256("http://")
+                    || keccak256(bytes(_substring(quest.proofUri, 0, 8))) == keccak256("https://")));
+        string memory rewardMetadataUri = isSafeProofUri ? quest.proofUri : quest.metadataUri;
         rewardNFT.mintQuestReward(quest.player, questId, rewardMetadataUri);
         reputation.rewardXP(quest.player, quest.xpReward, 1);
 

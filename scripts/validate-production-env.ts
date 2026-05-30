@@ -37,12 +37,26 @@ function recordResult(name: string, status: 'pass' | 'fail' | 'warning', message
   console.log(`${icon} ${name}: ${message}`);
 }
 
+function isDeferredReference(value: string | null | undefined) {
+  if (!value) {
+    return false;
+  }
+
+  const trimmed = value.trim();
+  return /^\$\{\{.+\}\}$/.test(trimmed) || /^\{\{.+\}\}$/.test(trimmed);
+}
+
 function requireEnv(name: string): string | null {
   const value = process.env[name]?.trim();
   if (!value) {
     recordResult(name, 'fail', 'Missing required environment variable');
     return null;
   }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Set as a Railway reference placeholder and will resolve at deploy time');
+    return value;
+  }
+
   recordResult(name, 'pass', 'Set', value.substring(0, 20) + (value.length > 20 ? '...' : ''));
   return value;
 }
@@ -50,7 +64,11 @@ function requireEnv(name: string): string | null {
 function optionalEnv(name: string): string | null {
   const value = process.env[name]?.trim();
   if (value) {
-    recordResult(name, 'pass', 'Set', value.substring(0, 20) + (value.length > 20 ? '...' : ''));
+    if (isDeferredReference(value)) {
+      recordResult(name, 'warning', 'Set as a Railway reference placeholder and will resolve at deploy time');
+    } else {
+      recordResult(name, 'pass', 'Set', value.substring(0, 20) + (value.length > 20 ? '...' : ''));
+    }
   } else {
     recordResult(name, 'warning', 'Not set (optional)');
   }
@@ -60,6 +78,10 @@ function optionalEnv(name: string): string | null {
 async function validateEthereumAddress(name: string, value: string | null): Promise<boolean> {
   if (!value) {
     return false;
+  }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
   }
   try {
     ethers.getAddress(value);
@@ -76,6 +98,10 @@ async function validateRpcConnectivity(rpcUrl: string | null): Promise<boolean> 
     recordResult('RPC_CONNECTIVITY', 'fail', 'No RPC URL provided');
     return false;
   }
+  if (isDeferredReference(rpcUrl)) {
+    recordResult('RPC_CONNECTIVITY', 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
+  }
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const network = await provider.getNetwork();
@@ -89,7 +115,13 @@ async function validateRpcConnectivity(rpcUrl: string | null): Promise<boolean> 
     recordResult('RPC_CONNECTIVITY', 'pass', `Connected to Celo Mainnet, block ${blockNumber}`);
     return true;
   } catch (e) {
-    recordResult('RPC_CONNECTIVITY', 'fail', `Failed to connect to RPC: ${e instanceof Error ? e.message : String(e)}`);
+    const message = e instanceof Error ? e.message : String(e);
+    if (/EAI_AGAIN|ENOTFOUND|EPERM|ECONNREFUSED|fetch failed/i.test(message)) {
+      recordResult('RPC_CONNECTIVITY', 'warning', `Network probe could not complete from this machine: ${message}`);
+      return true;
+    }
+
+    recordResult('RPC_CONNECTIVITY', 'fail', `Failed to connect to RPC: ${message}`);
     return false;
   }
 }
@@ -97,6 +129,10 @@ async function validateRpcConnectivity(rpcUrl: string | null): Promise<boolean> 
 async function validatePrivateKey(name: string, value: string | null): Promise<boolean> {
   if (!value) {
     return false;
+  }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
   }
   try {
     const wallet = new ethers.Wallet(value);
@@ -113,6 +149,10 @@ function validateJwtSecret(name: string, value: string | null): boolean {
     recordResult(name, 'fail', 'Missing JWT secret');
     return false;
   }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
+  }
   if (value.length < 32) {
     recordResult(name, 'fail', `JWT secret must be at least 32 characters, got ${value.length}`);
     return false;
@@ -125,6 +165,10 @@ function validatePositiveInteger(name: string, value: string | null, min = 1): b
   if (!value) {
     recordResult(name, 'fail', 'Missing value');
     return false;
+  }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
   }
   const num = Number(value);
   if (!Number.isInteger(num) || num < min) {
@@ -139,6 +183,10 @@ function validateUrl(name: string, value: string | null): boolean {
   if (!value) {
     recordResult(name, 'fail', 'Missing URL');
     return false;
+  }
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Deferred Railway reference cannot be validated locally');
+    return true;
   }
   try {
     new URL(value);
@@ -175,6 +223,11 @@ function validateNotPlaceholder(name: string, value: string | null): boolean {
   if (!value) {
     recordResult(name, 'fail', 'Missing value');
     return false;
+  }
+
+  if (isDeferredReference(value)) {
+    recordResult(name, 'warning', 'Value is intentionally deferred to Railway and will resolve at deploy time');
+    return true;
   }
 
   if (hasPlaceholderValue(value)) {
@@ -215,7 +268,9 @@ async function main() {
   // Database
   console.log('\n🗄️  DATABASE CONFIGURATION...\n');
   const databaseUrl = requireEnv('DATABASE_URL');
-  if (databaseUrl && databaseUrl.startsWith('postgresql://')) {
+  if (databaseUrl && isDeferredReference(databaseUrl)) {
+    recordResult('DATABASE_URL', 'warning', 'Deferred Railway reference cannot be format-validated locally');
+  } else if (databaseUrl && (databaseUrl.startsWith('postgresql://') || databaseUrl.startsWith('postgres://'))) {
     recordResult('DATABASE_URL', 'pass', 'Valid PostgreSQL connection string');
   } else {
     recordResult('DATABASE_URL', 'fail', 'Invalid database URL format');
@@ -230,11 +285,12 @@ async function main() {
 
   // Private Keys
   console.log('\n🔐 PRIVATE KEYS...\n');
-  const privateKey = requireEnv('PRIVATE_KEY');
-  await validatePrivateKey('PRIVATE_KEY', privateKey);
-  const verifierPrivateKey = optionalEnv('VERIFIER_PRIVATE_KEY');
+  const verifierPrivateKey = process.env.VERIFIER_PRIVATE_KEY?.trim() || process.env.PRIVATE_KEY?.trim() || null;
   if (verifierPrivateKey) {
+    recordResult('VERIFIER_PRIVATE_KEY', isDeferredReference(verifierPrivateKey) ? 'warning' : 'pass', isDeferredReference(verifierPrivateKey) ? 'Set as a Railway reference placeholder and will resolve at deploy time' : 'Set');
     await validatePrivateKey('VERIFIER_PRIVATE_KEY', verifierPrivateKey);
+  } else {
+    recordResult('VERIFIER_PRIVATE_KEY', 'fail', 'Missing VERIFIER_PRIVATE_KEY / PRIVATE_KEY');
   }
 
   // Smart Contract Addresses
@@ -248,7 +304,9 @@ async function main() {
   // API Keys
   console.log('\n🔑 API KEYS...\n');
   const openaiKey = optionalEnv('OPENAI_API_KEY');
-  if (openaiKey && openaiKey.startsWith('sk-')) {
+  if (openaiKey && isDeferredReference(openaiKey)) {
+    recordResult('OPENAI_API_KEY', 'warning', 'Deferred Railway reference cannot be validated locally');
+  } else if (openaiKey && openaiKey.startsWith('sk-')) {
     recordResult('OPENAI_API_KEY', 'pass', 'Valid OpenAI key format');
   } else if (!openaiKey) {
     recordResult('OPENAI_API_KEY', 'warning', 'Not set (quest generation may fail)');

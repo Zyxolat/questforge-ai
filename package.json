@@ -31,6 +31,7 @@
     "validate:minipay": "ts-node scripts/validate-minipay.ts",
     "validate:backend-runtime": "ts-node scripts/validate-backend-runtime.ts",
     "validate:frontend-runtime": "TS_NODE_PROJECT=frontend/tsconfig.json node --loader ts-node/esm scripts/validate-frontend-runtime.mjs",
+    "test:e2e": "npm run build:frontend && playwright test",
     "verify:contracts": "npm --prefix contracts run verify:mainnet",
     "validate:all": "npm run validate:production-env && npm run build:contracts && npm run test:contracts && npm run validate:treasury && npm run validate:gameplay && npm run validate:security && npm run validate:backend-runtime",
     "deploy:production": "ts-node scripts/deploy-production.ts",
@@ -46,6 +47,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.60.0",
     "@types/node": "^22.15.21",
     "@typescript-eslint/eslint-plugin": "^8.59.3",
     "@typescript-eslint/parser": "^8.59.3",
@@ -56,6 +58,7 @@
     "jiti": "^2.7.0",
     "lint-staged": "^15.5.2",
     "prettier": "^3.5.3",
+    "@playwright/test": "^1.54.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.59.3"
