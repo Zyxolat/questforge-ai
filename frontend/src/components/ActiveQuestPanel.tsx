@@ -202,7 +202,7 @@ export default function ActiveQuestPanel({
             className="rounded-2xl border border-white/10 bg-white/5 p-4"
           >
             <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Mission Structure</p>
-            <p className="mt-2 text-sm text-slate-200">{quest.missionStructure}</p>
+            <p className="mt-2 text-sm text-slate-200">{String(quest.missionStructure ?? "")}</p>
           </motion.div>
         ) : null}
 
@@ -252,7 +252,7 @@ export default function ActiveQuestPanel({
                 {typeof questGeneration.model === 'string' ? <p className="mt-1 text-sm text-slate-300">{questGeneration.model}</p> : null}
                 {typeof questGeneration.latencyMs === 'number' || typeof questGeneration.totalTokens === 'number' ? (
                   <p className="mt-2 text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                    {questGeneration.latencyMs ?? 'n/a'} ms • {questGeneration.totalTokens ?? 'n/a'} tokens • {questGeneration.attemptCount ?? 'n/a'} tries
+                    {String(questGeneration.latencyMs ?? "n/a")} ms • {String(questGeneration.totalTokens ?? "n/a")} tokens • {String(questGeneration.attemptCount ?? "n/a")} tries
                   </p>
                 ) : null}
               </div>
