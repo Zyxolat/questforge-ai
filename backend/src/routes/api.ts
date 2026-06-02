@@ -9,7 +9,7 @@ import {
   registerQuestStart,
   submitProof
 } from '../controllers/questController';
-import { getPlayerStats, getProgression } from '../controllers/userController';
+import { getPlayerStats, getProgression, claimDailyLoginBonus } from '../controllers/userController';
 import { getNFTMetadata } from '../controllers/metadataController';
 import {
   createAuthNonce,
@@ -62,6 +62,7 @@ apiRouter.get('/quests/orchestration/diagnostics', getQuestOrchestrationDiagnost
 apiRouter.get('/realtime/bootstrap', requireAuth, getRealtimeBootstrap);
 apiRouter.get('/realtime/sync', requireAuth, getRealtimeSync);
 apiRouter.get('/npc/dialogue', getNPCDialogue);
+apiRouter.post('/player/daily-bonus', requireAuth, claimDailyLoginBonus);
 apiRouter.get('/player/stats', getPlayerStats);
 apiRouter.get('/player/progression', getProgression);
 apiRouter.get('/nft/metadata', getNFTMetadata);

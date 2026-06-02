@@ -26,10 +26,6 @@ const productionEnvPaths = [
   path.join(__dirname, ".env.production"),
 ];
 
-const CELO_MAINNET_CHAIN_ID = 42220;
-const CELOSCAN_API_URL = "https://api.celoscan.io/api";
-const CELOSCAN_BROWSER_URL = "https://celoscan.io";
-
 for (const envPath of baseEnvPaths) {
   loadEnvFile(envPath, false);
 }
@@ -53,38 +49,8 @@ function parseLocalChainId() {
   return parsed;
 }
 
-function readOptionalEnv(name: string) {
-  const raw = process.env[name]?.trim();
-  if (!raw) {
-    return undefined;
-  }
-
-  // Ignore unresolved template placeholders from deployment platforms.
-  if (/^\$\{\{.+\}\}$/.test(raw) || /^\$\{.+\}$/.test(raw)) {
-    return undefined;
-  }
-
-  return raw;
-}
-
-function normalizePrivateKey(raw: string, name: string) {
-  const normalized = raw.startsWith("0x") ? raw : `0x${raw}`;
-
-  if (!/^0x[a-fA-F0-9]{64}$/.test(normalized)) {
-    throw new Error(
-      `${name} must be a 32-byte hex string${raw.startsWith("0x") ? "" : " (with or without a 0x prefix)"}.`
-    );
-  }
-
-  if (/^0x0{64}$/i.test(normalized)) {
-    throw new Error(`${name} must not be the all-zero private key`);
-  }
-
-  return normalized;
-}
-
 function resolveCeloAccounts() {
-  const raw = readOptionalEnv("PRIVATE_KEY");
+  const raw = process.env.PRIVATE_KEY?.trim();
   const selectedNetwork = selectedNetworkName();
 
   if (!raw) {
@@ -98,7 +64,10 @@ function resolveCeloAccounts() {
   }
 
   try {
-    const privateKey = new Wallet(normalizePrivateKey(raw, "PRIVATE_KEY")).privateKey;
+    const privateKey = new Wallet(raw).privateKey;
+    if (/^0x0{64}$/i.test(privateKey)) {
+      throw new Error("must not be the all-zero private key");
+    }
     return [privateKey];
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -109,7 +78,6 @@ function resolveCeloAccounts() {
 }
 
 const localChainId = parseLocalChainId();
-const celoscanApiKey = readOptionalEnv("CELOSCAN_API_KEY") || readOptionalEnv("ETHERSCAN_API_KEY");
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -133,24 +101,8 @@ const config: HardhatUserConfig = {
     celo: {
       url: process.env.CELO_RPC_URL || "https://forno.celo.org",
       accounts: resolveCeloAccounts(),
-      chainId: CELO_MAINNET_CHAIN_ID,
+      chainId: 42220,
     },
-  },
-  etherscan: {
-    apiKey: celoscanApiKey ? { celo: celoscanApiKey } : {},
-    customChains: [
-      {
-        network: "celo",
-        chainId: CELO_MAINNET_CHAIN_ID,
-        urls: {
-          apiURL: CELOSCAN_API_URL,
-          browserURL: CELOSCAN_BROWSER_URL,
-        },
-      },
-    ],
-  },
-  sourcify: {
-    enabled: true,
   },
   typechain: {
     outDir: "typechain-types",

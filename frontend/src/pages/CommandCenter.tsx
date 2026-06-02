@@ -10,6 +10,8 @@ import QuestRevealModal from '../components/QuestRevealModal';
 import QuestCompletionModal from '../components/QuestCompletionModal';
 import RewardAnimation from '../components/RewardAnimation';
 import LoadingScreen from '../components/LoadingScreen';
+import OnboardingFlow from '../components/OnboardingFlow';
+import DailyLoginBonus from '../components/DailyLoginBonus';
 import { QuestState, useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
 import {
@@ -302,6 +304,10 @@ export default function CommandCenter() {
   const [completionModal, setCompletionModal] = useState(false);
   const [showRewardAnimation, setShowRewardAnimation] = useState(false);
   const [rewardData, setRewardData] = useState({ xp: 0, token: '0', nft: 'Rare' });
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return !localStorage.getItem('questforge:onboarding-complete');
+  });
   const [txStatus, setTxStatus] = useState<{
     type: TxStatusType;
     hash?: string;
@@ -1189,6 +1195,10 @@ export default function CommandCenter() {
         nftRarity={rewardData.nft}
         onComplete={() => setShowRewardAnimation(false)}
       />
+      <OnboardingFlow
+        open={onboardingOpen}
+        onComplete={() => setOnboardingOpen(false)}
+      />
 
       <div className="space-y-8">
         <motion.div
@@ -1306,6 +1316,16 @@ export default function CommandCenter() {
             onDismiss={() => setTxStatus(null)}
           />
         ) : null}
+
+        {authStatus === 'authenticated' && (
+          <DailyLoginBonus
+            onBonusClaimed={(data) => {
+              if (player) {
+                player.xp = (player.xp || 0) + data.xp;
+              }
+            }}
+          />
+        )}
 
         <div className="grid gap-8 lg:grid-cols-3">
           <div className="space-y-8 lg:col-span-2">

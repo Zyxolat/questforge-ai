@@ -739,25 +739,8 @@ class AuthoritativeEventProjector {
     }
 
     try {
-      // FETCH ALL ONCHAIN DATA BEFORE THE TRANSACTION
-      // Prevents holding a DB connection during blockchain RPC calls
-      let snapshot: QuestSnapshot | null = null;
-      let profile: OnchainProfileSnapshot | undefined;
-
-      if (chainEvent.chainQuestId) {
-        snapshot = await readQuestSnapshot(chainEvent.chainQuestId);
-      }
-
-      // Pre-fetch profile for events that need user stats
-      if (
-        chainEvent.playerWallet &&
-        ['quest_started', 'reward_claimed', 'stake_locked'].includes(chainEvent.eventType)
-      ) {
-        profile = await fetchProfileSnapshot(normalizeWallet(chainEvent.playerWallet));
-      }
-
       await prisma.$transaction(async (tx) => {
-        await this.materializeChainState(tx, chainEvent, snapshot, profile);
+        await this.materializeChainState(tx, chainEvent);
       });
 
       await gameStateProjector.projectChainEvent(chainEvent);
@@ -888,37 +871,37 @@ class AuthoritativeEventProjector {
     this.diagnostics.lastDurationMs = durationMs;
   }
 
-  private async materializeChainState(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null, preFetchedProfile: OnchainProfileSnapshot | undefined = undefined) {
+  private async materializeChainState(tx: TransactionClient, event: ChainEvent) {
     switch (event.eventType) {
       case 'quest_created':
-        await this.handleQuestCreated(tx, event, preFetchedSnapshot);
+        await this.handleQuestCreated(tx, event);
         break;
       case 'quest_started':
-        await this.handleQuestStarted(tx, event, preFetchedSnapshot, preFetchedProfile);
+        await this.handleQuestStarted(tx, event);
         break;
       case 'proof_submitted':
-        await this.handleProofSubmitted(tx, event, preFetchedSnapshot);
+        await this.handleProofSubmitted(tx, event);
         break;
       case 'reward_claimed':
-        await this.handleRewardClaimed(tx, event, preFetchedSnapshot, preFetchedProfile);
+        await this.handleRewardClaimed(tx, event);
         break;
       case 'reward_reserved':
-        await this.handleRewardReserved(tx, event, preFetchedSnapshot);
+        await this.handleRewardReserved(tx, event);
         break;
       case 'stake_locked':
-        await this.handleStakeLocked(tx, event, preFetchedSnapshot, preFetchedProfile);
+        await this.handleStakeLocked(tx, event);
         break;
       case 'reward_released':
-        await this.handleRewardReleased(tx, event, preFetchedSnapshot);
+        await this.handleRewardReleased(tx, event);
         break;
       case 'reward_paid':
-        await this.handleRewardPaid(tx, event, preFetchedSnapshot);
+        await this.handleRewardPaid(tx, event);
         break;
       case 'reward_refunded':
-        await this.handleRewardRefunded(tx, event, preFetchedSnapshot);
+        await this.handleRewardRefunded(tx, event);
         break;
       case 'nft_minted':
-        await this.handleRewardMinted(tx, event, preFetchedSnapshot);
+        await this.handleRewardMinted(tx, event);
         break;
       default:
         logger.debug('[PROJECTOR] No materializer registered', {
@@ -928,12 +911,12 @@ class AuthoritativeEventProjector {
     }
   }
 
-  private async handleQuestCreated(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleQuestCreated(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.creatorWallet) {
       return;
     }
 
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     await upsertUserInTx(tx, normalizeWallet(event.creatorWallet));
     await applyQuestSnapshot(tx, {
       snapshot,
@@ -953,14 +936,14 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleQuestStarted(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null, preFetchedProfile: OnchainProfileSnapshot | undefined = undefined) {
+  private async handleQuestStarted(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
-    const profile = preFetchedProfile ?? await fetchProfileSnapshot(playerWallet);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
+    const profile = await fetchProfileSnapshot(playerWallet);
     const user = await upsertUserInTx(tx, playerWallet, profile);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1003,13 +986,13 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleProofSubmitted(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleProofSubmitted(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const user = await upsertUserInTx(tx, playerWallet);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1063,7 +1046,7 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardClaimed(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null, preFetchedProfile: OnchainProfileSnapshot | undefined = undefined) {
+  private async handleRewardClaimed(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
@@ -1071,8 +1054,8 @@ class AuthoritativeEventProjector {
     const playerWallet = normalizeWallet(event.playerWallet);
     const payload = getEventPayload(event);
     const success = getBooleanValue(payload.success);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
-    const profile = preFetchedProfile ?? await fetchProfileSnapshot(playerWallet);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
+    const profile = await fetchProfileSnapshot(playerWallet);
     const user = await upsertUserInTx(tx, playerWallet, profile);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1137,13 +1120,13 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardReserved(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleRewardReserved(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.creatorWallet) {
       return;
     }
 
     const creatorWallet = normalizeWallet(event.creatorWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
@@ -1174,14 +1157,14 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleStakeLocked(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null, preFetchedProfile: OnchainProfileSnapshot | undefined = undefined) {
+  private async handleStakeLocked(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
-    const profile = preFetchedProfile ?? await fetchProfileSnapshot(playerWallet);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
+    const profile = await fetchProfileSnapshot(playerWallet);
     const user = await upsertUserInTx(tx, playerWallet, profile);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1219,13 +1202,13 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardReleased(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleRewardReleased(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const user = await upsertUserInTx(tx, playerWallet);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1268,13 +1251,13 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardPaid(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleRewardPaid(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const user = await upsertUserInTx(tx, playerWallet);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
@@ -1340,7 +1323,7 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardRefunded(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleRewardRefunded(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId) {
       return;
     }
@@ -1350,7 +1333,7 @@ class AuthoritativeEventProjector {
       normalizeOptionalWallet(event.playerWallet) ??
       normalizeOptionalWallet(getStringValue(payload.recipient)) ??
       normalizeOptionalWallet(event.creatorWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const forcedStatus: QuestStatus =
       snapshot.status === 'CANCELLED' ? 'CANCELLED' : snapshot.status === 'FAILED' ? 'FAILED' : 'CANCELLED';
     const user = recipientWallet ? await upsertUserInTx(tx, recipientWallet) : null;
@@ -1421,13 +1404,13 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleRewardMinted(tx: TransactionClient, event: ChainEvent, preFetchedSnapshot: QuestSnapshot | null = null) {
+  private async handleRewardMinted(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
     }
 
     const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = preFetchedSnapshot ?? await readQuestSnapshot(event.chainQuestId);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
     const user = await upsertUserInTx(tx, playerWallet);
     const quest = await applyQuestSnapshot(tx, {
       snapshot,

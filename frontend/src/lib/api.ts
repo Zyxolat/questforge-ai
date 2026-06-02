@@ -569,6 +569,10 @@ export function submitProofForVerification(questId: string, proofUri: string, su
   return api.post('/quests/submit-proof', { questId, proofUri, submissionTxHash });
 }
 
+export function claimDailyLoginBonus() {
+  return api.post('/player/daily-bonus');
+}
+
 export function extractAuthFailure(error: unknown) {
   return toAuthFailure(error);
 }
