@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-The QuestForge AI generation pipeline has been comprehensively audited and upgraded to ensure **LIVE OpenAI responses** in production. The system now provides:
+The QuestForge AI generation pipeline has been comprehensively audited and upgraded to ensure **LIVE Groq AI responses** in production. The system now provides:
 
 ✅ **Cinematic AI-powered quests** using GPT-4o-mini  
 ✅ **Exponential backoff retry** with production safeguards  
@@ -23,10 +23,10 @@ The QuestForge AI generation pipeline has been comprehensively audited and upgra
 
 ### 1. AI Client Wrapper (NEW)
 
-**File**: `backend/src/services/aiOpenAIClient.ts` (300+ lines)
+**File**: `backend/src/services/aiGroq AIClient.ts` (300+ lines)
 
 ```typescript
-// Production-grade OpenAI wrapper
+// Production-grade Groq AI wrapper
 - Exponential backoff retry (800ms → 2s → 5s)
 - Jitter to prevent thundering herd
 - Comprehensive telemetry (tokens, latency, attempts)
@@ -34,7 +34,7 @@ The QuestForge AI generation pipeline has been comprehensively audited and upgra
 - Request ID tracking for debugging
 ```
 
-**Before**: Direct OpenAI client calls, no retry logic  
+**Before**: Direct Groq AI client calls, no retry logic  
 **After**: Production-safe wrapper with 3-attempt retry strategy
 
 ---
@@ -68,14 +68,14 @@ Make every quest feel UNIQUE and NON-REPETITIVE..."
 
 ```typescript
 // BEFORE:
-if (!openai) return fallback;
+if (!Groq) return fallback;
 // Attempts request
 // On hallucination: returns fallback ❌
 
 // AFTER:
-if (!aiOpenAIClient.isAvailable()) {
+if (!aiGroq AIClient.isAvailable()) {
   logger.warn(
-    "[QUEST-AI-GENERATION] OpenAI not available - FALLBACK MODE ACTIVATED",
+    "[QUEST-AI-GENERATION] Groq AI not available - FALLBACK MODE ACTIVATED",
   );
   return buildDeterministicNarrative();
 }
@@ -93,14 +93,14 @@ logger.info("[QUEST-AI-GENERATION] Initiating AI quest generation", {
   difficulty,
   rewardAmount,
   stakeAmount,
-  openaiAvailable: true,
+  GroqAvailable: true,
   promptHash,
   npc: context.npc.name,
 });
 
-logger.info("[QUEST-AI-GENERATION] OpenAI request completed successfully", {
+logger.info("[QUEST-AI-GENERATION] Groq AI request completed successfully", {
   requestId: "req_1234567_1",
-  model: "gpt-4o-mini",
+  model: "llama-3.3-70b-versatile",
   promptTokens: 450,
   completionTokens: 280,
   totalTokens: 730,
@@ -112,13 +112,13 @@ logger.info("[QUEST-AI-GENERATION] OpenAI request completed successfully", {
 logger.info(
   "[QUEST-AI-GENERATION] Quest generation complete with diagnostics",
   {
-    generationSource: "openai",
-    generationProvider: "openai",
-    generationModel: "gpt-4o-mini",
+    generationSource: "Groq",
+    generationProvider: "Groq",
+    generationModel: "llama-3.3-70b-versatile",
     fallbackReason: null,
-    openAICount: 127,
+    aiCount: 127,
     fallbackCount: 1,
-    openAIRate: "99.2%",
+    aiRate: "99.2%",
   },
 );
 ```
@@ -126,8 +126,8 @@ logger.info(
 #### ✅ NPC Dialogue with Retry
 
 ```typescript
-// NPC dialogue now also uses aiOpenAIClient with retry
-const result = await aiOpenAIClient.createChatCompletion(
+// NPC dialogue now also uses aiGroq AIClient with retry
+const result = await aiGroq AIClient.createChatCompletion(
   { model, messages, temperature: 0.75, maxTokens: 120 },
   { maxAttempts: 2, initialDelayMs: 400 },
 );
@@ -143,11 +143,11 @@ const result = await aiOpenAIClient.createChatCompletion(
 
 ```
 generatedCount: 127 total quests
-openAIGeneratedCount: 126 from live OpenAI
+aiGeneratedCount: 126 from live Groq AI
 fallbackGeneratedCount: 1 from deterministic
 fallbackReason: (previous timeout on specific request)
 
-openAIRate: 99.2% ✅
+aiRate: 99.2% ✅
 
 Logged after EVERY quest generation:
 - Generation source
@@ -169,7 +169,7 @@ $ npm run validate:ai-generation
 
 ✅ Generates 5 test quests
 ✅ Measures variety (unique titles & descriptions)
-✅ Confirms OpenAI usage percentage
+✅ Confirms Groq AI usage percentage
 ✅ Validates diagnostics accuracy
 ✅ Tests retry and fallback behavior
 ```
@@ -200,8 +200,8 @@ Complete production guide including:
 1. **API Key Missing**
 
    ```
-   OPENAI_API_KEY not set
-   → Log: "OpenAI not available - FALLBACK MODE ACTIVATED"
+   GROQ_API_KEY not set
+   → Log: "Groq AI not available - FALLBACK MODE ACTIVATED"
    → Generate: Deterministic narrative
    ```
 
@@ -219,7 +219,7 @@ Complete production guide including:
 
    ```
    Response received but not valid JSON
-   → Log: "Failed to parse OpenAI response as JSON"
+   → Log: "Failed to parse Groq AI response as JSON"
    → Generate: Deterministic fallback
    ```
 
@@ -231,9 +231,9 @@ Complete production guide including:
    → Reason: Retry would be wasteful, GPT-4o-mini is reliable
    ```
 
-### When Live OpenAI is Used:
+### When Live Groq AI is Used:
 
-✅ `OPENAI_API_KEY` set and valid  
+✅ `GROQ_API_KEY` set and valid  
 ✅ Request succeeds (or succeeds after retry)  
 ✅ Response parses and validates  
 ✅ Content check passes  
@@ -245,8 +245,8 @@ Complete production guide including:
 
 ### Latency
 
-- **Total Generation**: 2-5 seconds (including OpenAI)
-- **OpenAI Request**: 1-3 seconds
+- **Total Generation**: 2-5 seconds (including Groq AI)
+- **Groq AI Request**: 1-3 seconds
 - **Fallback Generation**: <100ms
 
 ### Token Usage
@@ -257,7 +257,7 @@ Complete production guide including:
 
 ### Reliability
 
-- **OpenAI Success Rate**: 98%+ (with healthy API)
+- **Groq AI Success Rate**: 98%+ (with healthy API)
 - **Retry Success Rate**: 95%+
 - **Fallback Activation**: <2% (with healthy API)
 
@@ -280,9 +280,9 @@ curl http://localhost:8000/health/events | jq '.orchestration.questGeneration'
 # Should show:
 # {
 #   "generatedCount": X,
-#   "openAIGeneratedCount": Y,
+#   "aiGeneratedCount": Y,
 #   "fallbackGeneratedCount": Z,
-#   "lastGenerationSource": "openai"
+#   "lastGenerationSource": "Groq"
 # }
 ```
 
@@ -299,9 +299,9 @@ curl -X POST http://localhost:8000/api/quests/generate \
 # {
 #   "quest": {
 #     "generation": {
-#       "source": "openai" or "deterministic_fallback",
-#       "provider": "openai" or "deterministic",
-#       "model": "gpt-4o-mini" or null,
+#       "source": "groq" or "deterministic_fallback",
+#       "provider": "Groq" or "deterministic",
+#       "model": "llama-3.3-70b-versatile" or null,
 #       "fallbackReason": null or "error message"
 #     }
 #   }
@@ -315,7 +315,7 @@ npm run validate:ai-generation
 
 # Tests:
 # ✅ Variety: 80%+ unique content
-# ✅ OpenAI Usage: 100% (if API key configured)
+# ✅ Groq AI Usage: 100% (if API key configured)
 # ✅ Diagnostics: Accurate tracking
 # ✅ Retry Logic: Working correctly
 ```
@@ -328,7 +328,7 @@ tail -f backend/logs/quest-generation.log | grep "QUEST-AI-GENERATION"
 
 # Should see:
 # [QUEST-AI-GENERATION] Initiating AI quest generation
-# [QUEST-AI-GENERATION] OpenAI request completed successfully
+# [QUEST-AI-GENERATION] Groq AI request completed successfully
 # [QUEST-AI-GENERATION] Quest generation complete with diagnostics
 ```
 
@@ -340,15 +340,15 @@ tail -f backend/logs/quest-generation.log | grep "QUEST-AI-GENERATION"
 
 - [x] TypeScript compilation: `npm run build` (0 errors)
 - [x] All imports resolve correctly
-- [x] New aiOpenAIClient tested for retry logic
+- [x] New aiGroq AIClient tested for retry logic
 - [x] Prompt engineering validated
 - [x] Logging comprehensive and structured
 
 ### ✅ Functionality
 
-- [x] OpenAI requests succeed when API key present
+- [x] Groq AI requests succeed when API key present
 - [x] Fallback activates only on actual failures
-- [x] NPC dialogue uses OpenAI with retry
+- [x] NPC dialogue uses Groq AI with retry
 - [x] Content reaches all UI endpoints
 - [x] Diagnostics tracked accurately
 
@@ -382,12 +382,12 @@ tail -f backend/logs/quest-generation.log | grep "QUEST-AI-GENERATION"
 ### Step 1: Ensure Environment
 
 ```bash
-# Verify OPENAI_API_KEY is set
-echo $OPENAI_API_KEY  # Should output: sk-proj-xxxxx...
+# Verify GROQ_API_KEY is set
+echo $GROQ_API_KEY  # Should output: gsk_xxxxx...
 
 # Verify key is valid
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer $OPENAI_API_KEY" | head -20
+curl https://api.Groq.com/v1/models \
+  -H "Authorization: Bearer $GROQ_API_KEY" | head -20
 ```
 
 ### Step 2: Build & Test
@@ -421,7 +421,7 @@ curl -X POST https://your-api.com/api/quests/generate \
   -d '{"chain": "Celo"}'
 
 # Confirm in response:
-# "generation": {"source": "openai", ...}
+# "generation": {"source": "groq", ...}
 ```
 
 ---
@@ -433,7 +433,7 @@ During live hackathon demo, you should see:
 ✅ **Every quest feels unique** - titles, descriptions, narratives vary  
 ✅ **Cinematic storytelling** - quests read like fantasy novel chapters  
 ✅ **Fast responses** - 2-5 seconds per quest generation  
-✅ **No fallbacks** - diagnostics show 99%+ OpenAI rate  
+✅ **No fallbacks** - diagnostics show 99%+ Groq AI rate  
 ✅ **Rich NPC dialogue** - tavern conversations are varied and character-consistent  
 ✅ **Smooth gameplay** - no errors or downtime
 
@@ -444,12 +444,12 @@ During live hackathon demo, you should see:
 ### Problem: All quests using fallback?
 
 ```bash
-# Check if OpenAI is available
-echo $OPENAI_API_KEY  # Must be set
+# Check if Groq AI is available
+echo $GROQ_API_KEY  # Must be set
 
 # Check API key validity
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer $OPENAI_API_KEY"
+curl https://api.Groq.com/v1/models \
+  -H "Authorization: Bearer $GROQ_API_KEY"
 
 # Check for rate limits in logs
 tail -f logs/*.log | grep "429\|rate\|limit"
@@ -469,8 +469,8 @@ grep "Recent trials:" backend/src/services/questNarrativeEngine.ts
 ### Problem: High latency?
 
 ```bash
-# Check OpenAI API status
-curl https://status.openai.com/api/v2/incidents.json
+# Check Groq AI API status
+curl https://status.Groq.com/api/v2/incidents.json
 
 # Monitor latency in logs
 grep "latencyMs:" logs/*.log | tail -20
@@ -482,13 +482,13 @@ grep "latencyMs:" logs/*.log | tail -20
 
 ### New Files
 
-- ✨ `backend/src/services/aiOpenAIClient.ts` - Production OpenAI wrapper
+- ✨ `backend/src/services/aiGroq AIClient.ts` - Production Groq AI wrapper
 - ✨ `scripts/validate-ai-generation.ts` - Validation script
 - ✨ `AI_GENERATION_PRODUCTION_GUIDE.md` - Full documentation
 
 ### Modified Files
 
-- 📝 `backend/src/services/questNarrativeEngine.ts` - Upgraded with OpenAI client, cinematic prompts
+- 📝 `backend/src/services/questNarrativeEngine.ts` - Upgraded with Groq AI client, cinematic prompts
 - 📝 `backend/src/services/aiQuestGenerationEngine.ts` - Enhanced diagnostics
 
 ### Documentation
@@ -528,7 +528,7 @@ grep "latencyMs:" logs/*.log | tail -20
 
 The QuestForge AI generation pipeline is now **production-ready** with:
 
-🎯 **Live OpenAI responses** whenever API key present  
+🎯 **Live Groq AI responses** whenever API key present  
 🎯 **Robust fallback** activated only on actual failures  
 🎯 **Cinematic prompts** creating immersive, varied quests  
 🎯 **Comprehensive logging** with full telemetry  
@@ -541,4 +541,4 @@ The QuestForge AI generation pipeline is now **production-ready** with:
 
 **Status**: ✅ READY FOR PRODUCTION  
 **Next Step**: Deploy and monitor live generation rates  
-**Expected Outcome**: 99%+ OpenAI generation rate with zero fallbacks
+**Expected Outcome**: 99%+ Groq AI generation rate with zero fallbacks

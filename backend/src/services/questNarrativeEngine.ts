@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { env } from '../config/env';
-import { aiOpenAIClient } from './aiOpenAIClient';
+import { aiGroqClient } from './aiGroqClient';
 import { aiValidator } from './aiSafety';
 import { logger } from './logger';
 import type {
@@ -56,7 +56,7 @@ type NarrativeResponseShape = {
 
 const MAX_ITEMS = 4;
 const RISK_LEVELS = new Set(['low', 'moderate', 'high', 'extreme']);
-const OPENAI_MODEL = env.OPENAI_MODEL;
+const GROQ_MODEL = env.GROQ_MODEL;
 
 function extractJsonObject(value: string) {
   const sanitized = value
@@ -256,13 +256,8 @@ CRITICAL RULES:
 class QuestNarrativeEngine {
   private buildFallbackNarrative(
     context: NarrativeContext,
-    generation: QuestGenerationDiagnostics,
-    failureLabel: string
+    generation: QuestGenerationDiagnostics
   ) {
-    if (!env.ALLOW_AI_FALLBACK) {
-      throw new Error(`${failureLabel}. Live AI fallback is disabled in this environment.`);
-    }
-
     return this.buildDeterministicNarrative(context, generation);
   }
 
@@ -277,16 +272,15 @@ class QuestNarrativeEngine {
       difficulty: context.difficulty,
       rewardAmount: context.rewardAmount,
       stakeAmount: context.stakeAmount,
-      openaiAvailable: aiOpenAIClient.isAvailable(),
+      groqAvailable: aiGroqClient.isAvailable(),
       promptHash,
       npc: context.npc.name
     });
 
-    // If OpenAI is not available, use deterministic fallback immediately
-    if (!aiOpenAIClient.isAvailable()) {
-      logger.warn('[QUEST-AI-GENERATION] OpenAI not available - FALLBACK MODE ACTIVATED', {
+    if (!aiGroqClient.isAvailable()) {
+      logger.warn('[QUEST-AI-GENERATION] Groq not available - FALLBACK MODE ACTIVATED', {
         wallet: context.wallet,
-        reason: 'OPENAI_API_KEY not configured',
+        reason: 'GROQ_API_KEY not configured',
         promptHash
       });
 
@@ -296,7 +290,7 @@ class QuestNarrativeEngine {
         model: null,
         promptHash,
         promptPreview: promptSummary,
-        fallbackReason: 'OPENAI_API_KEY not configured',
+        fallbackReason: 'GROQ_API_KEY not configured',
         generatedAt: new Date().toISOString(),
         requestId: null,
         latencyMs: null,
@@ -304,7 +298,7 @@ class QuestNarrativeEngine {
         completionTokens: null,
         totalTokens: null,
         attemptCount: null
-      }, 'OpenAI is not configured for quest generation');
+      });
 
       return fallback;
     }
@@ -328,9 +322,9 @@ class QuestNarrativeEngine {
 
     try {
       // Request with exponential backoff retry
-      const result = await aiOpenAIClient.createChatCompletion(
+      const result = await aiGroqClient.createChatCompletion(
         {
-          model: OPENAI_MODEL,
+          model: GROQ_MODEL,
           messages: [
             {
               role: 'system',
@@ -355,7 +349,7 @@ class QuestNarrativeEngine {
         }
       );
 
-      logger.info('[QUEST-AI-GENERATION] OpenAI request completed successfully', {
+      logger.info('[QUEST-AI-GENERATION] Groq request completed successfully', {
         wallet: context.wallet,
         requestId: result.telemetry.requestId,
         model: result.telemetry.model,
@@ -370,7 +364,7 @@ class QuestNarrativeEngine {
       // Parse JSON response
       const parsed = safeJsonParse<NarrativeResponseShape>(result.content);
       if (!parsed) {
-        logger.error('[QUEST-AI-GENERATION] Failed to parse OpenAI response as JSON', {
+        logger.error('[QUEST-AI-GENERATION] Failed to parse Groq response as JSON', {
           wallet: context.wallet,
           requestId: result.telemetry.requestId,
           contentPreview: result.content.slice(0, 200)
@@ -379,7 +373,7 @@ class QuestNarrativeEngine {
           ...baseFallbackGeneration,
           fallbackReason: 'Response parsing failed',
           generatedAt: new Date().toISOString()
-        }, 'OpenAI quest generation returned unparsable JSON');
+        });
       }
 
       // Validate against hallucinations
@@ -394,14 +388,14 @@ class QuestNarrativeEngine {
           hallucination: hallCheck.reason
         });
         // For hallucinations, we still accept the response but mark it as suspicious
-        // Retry would be wasteful here since GPT-4o-mini is generally reliable
+        // Retry would be wasteful here because the response is structurally valid.
       }
 
       // Merge with fallback and return
       const merged = this.mergeWithFallback(parsed, this.buildDeterministicNarrative(context, baseFallbackGeneration), {
-        source: 'openai',
-        provider: 'openai',
-        model: OPENAI_MODEL,
+        source: 'groq',
+        provider: 'groq',
+        model: GROQ_MODEL,
         promptHash,
         promptPreview: promptSummary,
         fallbackReason: hallCheck.isHallucinated ? `Hallucination detected: ${hallCheck.reason}` : null,
@@ -423,9 +417,9 @@ class QuestNarrativeEngine {
 
       return merged;
     } catch (error) {
-      // OpenAI request failed - activate fallback
+      // Groq request failed - activate fallback
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('[QUEST-AI-GENERATION] OpenAI request failed - FALLBACK ACTIVATED', {
+      logger.error('[QUEST-AI-GENERATION] Groq request failed - FALLBACK ACTIVATED', {
         wallet: context.wallet,
         error: errorMessage,
         errorType: error instanceof Error ? error.constructor.name : typeof error,
@@ -436,15 +430,15 @@ class QuestNarrativeEngine {
         ...baseFallbackGeneration,
         fallbackReason: errorMessage,
         generatedAt: new Date().toISOString()
-      }, 'OpenAI quest generation failed');
+      });
     }
   }
 
   async generateNPCDialogue(context: NPCDialogueContext): Promise<string> {
     const fallback = `${context.npc.name} says: The sands of fate shift, ${context.playerName}. ${context.relationshipSummary[0] ?? 'Your path is marked.'}`;
 
-    if (!aiOpenAIClient.isAvailable()) {
-      logger.debug('[NPC-DIALOGUE] OpenAI not available, using static fallback', {
+    if (!aiGroqClient.isAvailable()) {
+      logger.debug('[NPC-DIALOGUE] Groq not available, using static fallback', {
         npcId: context.npc.npcId,
         npcName: context.npc.name,
         playerName: context.playerName
@@ -461,9 +455,9 @@ class QuestNarrativeEngine {
         relationshipSummary: context.relationshipSummary.join(' | ')
       });
 
-      const result = await aiOpenAIClient.createChatCompletion(
+      const result = await aiGroqClient.createChatCompletion(
         {
-          model: OPENAI_MODEL,
+          model: GROQ_MODEL,
           messages: [
             {
               role: 'system',

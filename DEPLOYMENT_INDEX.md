@@ -44,12 +44,14 @@
 ### Quick Command Reference
 
 **Validation (Run these first):**
+
 ```bash
 npm run validate:production-env    # Check environment (2 min)
 npm run validate:all               # Run all tests (15 min)
 ```
 
 **Deployment:**
+
 ```bash
 npm run deploy:production          # Deploy contracts (15 min)
 npm run validate:treasury          # Verify treasury (2 min)
@@ -57,34 +59,37 @@ npm run validate:gameplay          # Test full flow (15 min)
 ```
 
 **Reporting:**
+
 ```bash
 npm run generate:report            # Create deployment report (1 min)
 ```
 
 ### Scripts Breakdown
 
-| Script | File | Purpose | Time | Status |
-|--------|------|---------|------|--------|
-| validate:production-env | `validate-production-env.ts` | Env var validation | 2m | ✅ Ready |
-| deploy:production | `deploy-production.ts` | Contract deployment | 15m | ✅ Ready |
-| validate:treasury | `validate-treasury.ts` | Treasury health | 2m | ✅ Ready |
-| validate:gameplay | `validate-gameplay.ts` | E2E gameplay test | 15m | ✅ Ready |
-| validate:security | `validate-security.ts` | Security testing | 10m | ✅ Ready |
-| validate:minipay | `validate-minipay.ts` | Mobile wallet test | 45m | ✅ Ready |
-| validate:backend-runtime | `validate-backend-runtime.ts` | Backend health | 5m | ✅ Ready |
-| generate:report | `generate-deployment-report.ts` | Report generation | 2m | ✅ Ready |
+| Script                   | File                            | Purpose             | Time | Status   |
+| ------------------------ | ------------------------------- | ------------------- | ---- | -------- |
+| validate:production-env  | `validate-production-env.ts`    | Env var validation  | 2m   | ✅ Ready |
+| deploy:production        | `deploy-production.ts`          | Contract deployment | 15m  | ✅ Ready |
+| validate:treasury        | `validate-treasury.ts`          | Treasury health     | 2m   | ✅ Ready |
+| validate:gameplay        | `validate-gameplay.ts`          | E2E gameplay test   | 15m  | ✅ Ready |
+| validate:security        | `validate-security.ts`          | Security testing    | 10m  | ✅ Ready |
+| validate:minipay         | `validate-minipay.ts`           | Mobile wallet test  | 45m  | ✅ Ready |
+| validate:backend-runtime | `validate-backend-runtime.ts`   | Backend health      | 5m   | ✅ Ready |
+| generate:report          | `generate-deployment-report.ts` | Report generation   | 2m   | ✅ Ready |
 
 ---
 
 ## 📋 THE 10-PHASE DEPLOYMENT
 
 ### Phase 1: ✅ COMPLETE - Deployment Pipeline
+
 - Status: DONE
 - Deliverables: 8 scripts + 4 guides
 - Evidence: This file
 - Next: Phase 2
 
 ### Phase 2: ⏳ PENDING - Contract Deployment
+
 - Time: 15-20 minutes
 - Command: `npm run deploy:production`
 - Prerequisite: `.env.production` with PRIVATE_KEY
@@ -92,6 +97,7 @@ npm run generate:report            # Create deployment report (1 min)
 - Next: Phase 3
 
 ### Phase 3: ⏳ PENDING - Address Wiring
+
 - Time: 5 minutes
 - Task: Update .env with contract addresses
 - Command: Already automated in Phase 2
@@ -99,42 +105,49 @@ npm run generate:report            # Create deployment report (1 min)
 - Next: Phase 4
 
 ### Phase 4: ⏳ PENDING - Treasury Validation
+
 - Time: 5 minutes
 - Command: `npm run validate:treasury`
 - Success: Treasury is SOLVENT & CAPABLE
 - Next: Start backend & frontend
 
 ### Phase 5: ⏳ PENDING - Gameplay Validation
+
 - Time: 15-20 minutes
 - Command: `npm run validate:gameplay`
 - Success: Full E2E flow works
 - Next: Phase 6
 
 ### Phase 6: ⏳ PENDING - MiniPay Validation
+
 - Time: 45 minutes (manual)
 - Command: `npm run validate:minipay`
 - Success: Mobile flow works perfectly
 - Next: Phase 7
 
 ### Phase 7: ⏳ PENDING - Explorer Integration
+
 - Time: 5 minutes
 - Task: Verify Celoscan links
 - Success: All links working
 - Next: Phase 8
 
 ### Phase 8: ⏳ PENDING - Backend Runtime
+
 - Time: 5 minutes
 - Command: `npm run validate:backend-runtime`
 - Success: All health checks pass
 - Next: Phase 9
 
 ### Phase 9: ⏳ PENDING - Security Validation
+
 - Time: 10 minutes
 - Command: `npm run validate:security`
 - Success: All security tests pass
 - Next: Phase 10
 
 ### Phase 10: ⏳ PENDING - Final Sign-Off
+
 - Time: 60 minutes (monitoring)
 - Task: Monitor and go-live
 - Success: System stable for 24h
@@ -165,12 +178,14 @@ Before starting deployment:
 Your deployment is successful when:
 
 ✅ **Smart Contracts**
+
 - All 4 contracts deployed on Celo Mainnet
 - Addresses visible on Celoscan
 - All roles configured
 - Treasury funded with reward tokens
 
 ✅ **Gameplay**
+
 - Player connects wallet
 - Quest generates successfully
 - TX #1 (start) confirms on-chain
@@ -181,6 +196,7 @@ Your deployment is successful when:
 - Leaderboard updated
 
 ✅ **Security**
+
 - Replay attacks blocked
 - Double rewards prevented
 - Invalid proofs rejected
@@ -188,12 +204,14 @@ Your deployment is successful when:
 - Rate limiting active
 
 ✅ **Performance**
+
 - API response < 500ms
 - Transaction confirmation < 30s
 - No memory leaks
 - Error rate < 0.1%
 
 ✅ **Monitoring**
+
 - Dashboards showing live data
 - Alerts configured and working
 - Logs being collected
@@ -204,6 +222,7 @@ Your deployment is successful when:
 ## 🆘 IF SOMETHING GOES WRONG
 
 ### Cannot run scripts?
+
 ```bash
 # Install dependencies
 npm install
@@ -216,6 +235,7 @@ npx ts-node --version
 ```
 
 ### Environment validation fails?
+
 ```bash
 # Check required variables
 grep -E "PRIVATE_KEY|CELO_RPC_URL|DATABASE_URL" .env.production
@@ -225,6 +245,7 @@ npm run validate:production-env
 ```
 
 ### Deployment fails?
+
 ```bash
 # Check deployer wallet
 curl -s https://forno.celo.org -X POST \
@@ -235,6 +256,7 @@ cat deployment-error.log
 ```
 
 ### Contracts won't verify?
+
 ```bash
 # Check on Celoscan
 # https://celoscan.io/address/0xContractAddress
@@ -246,29 +268,32 @@ cat deployment-error.log
 
 ## 📞 SUPPORT CONTACTS
 
-| Role | Responsibility | Status |
-|------|------------------|--------|
-| Smart Contract Lead | Contract deployment | TBD |
-| Backend Lead | API operations | TBD |
-| DevOps Lead | Infrastructure | TBD |
-| Security Lead | Security validation | TBD |
-| Product Manager | Release coordination | TBD |
+| Role                | Responsibility       | Status |
+| ------------------- | -------------------- | ------ |
+| Smart Contract Lead | Contract deployment  | TBD    |
+| Backend Lead        | API operations       | TBD    |
+| DevOps Lead         | Infrastructure       | TBD    |
+| Security Lead       | Security validation  | TBD    |
+| Product Manager     | Release coordination | TBD    |
 
 ---
 
 ## 🔗 USEFUL LINKS
 
 ### Celo Network
+
 - Forno RPC: https://forno.celo.org
 - Celoscan Explorer: https://celoscan.io
 - Celo Docs: https://docs.celo.org/
 
 ### Development Tools
+
 - Hardhat: https://hardhat.org/
 - Ethers.js: https://docs.ethers.org/
-- OpenAI: https://platform.openai.com/
+- Groq AI: https://platform.Groq.com/
 
 ### Monitoring
+
 - Sentry: https://sentry.io/
 - DataDog: https://www.datadoghq.com/
 - Grafana: https://grafana.com/
@@ -324,17 +349,21 @@ npm run validate:production-env
 ## 📖 DETAILED DOCUMENTATION
 
 ### For Executives
+
 - 📄 [DEPLOYMENT_PLAYBOOK.md](./DEPLOYMENT_PLAYBOOK.md) - Overview and timeline
 
 ### For DevOps Teams
+
 - 📄 [PRODUCTION_DEPLOYMENT_GUIDE.md](./PRODUCTION_DEPLOYMENT_GUIDE.md) - Step-by-step guide
 - 📄 [DEPLOYMENT_EXECUTION_CHECKLIST.md](./DEPLOYMENT_EXECUTION_CHECKLIST.md) - Phase checklist
 
 ### For Technical Teams
+
 - 📄 [PRODUCTION_READINESS_REPORT.md](./PRODUCTION_READINESS_REPORT.md) - Security audit
 - 📄 [PRODUCTION_DEPLOYMENT_SUMMARY.md](./PRODUCTION_DEPLOYMENT_SUMMARY.md) - What's ready
 
 ### For All Teams
+
 - 📄 [DEPLOYMENT_GUIDE.md](./DEPLOYMENT_GUIDE.md) - General deployment info
 - 📄 [CHANGELOG.md](./CHANGELOG.md) - Recent changes
 - 📄 [README.md](./README.md) - Project overview
@@ -350,19 +379,21 @@ npm run validate:production-env
 ✅ **Production Environment** - Template ready to use  
 ✅ **Error Handling** - Comprehensive error reporting  
 ✅ **Monitoring Setup** - Health checks included  
-✅ **Rollback Procedures** - Recovery ready  
+✅ **Rollback Procedures** - Recovery ready
 
 ---
 
 ## 🎯 NEXT IMMEDIATE STEPS
 
 1. **Configure Environment** (2 minutes)
+
    ```bash
    cp .env.production.template .env.production
    nano .env.production
    ```
 
 2. **Validate Everything** (5 minutes)
+
    ```bash
    npm run validate:production-env
    ```

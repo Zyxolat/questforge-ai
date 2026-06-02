@@ -98,14 +98,14 @@ QuestForge AI has undergone a comprehensive production-readiness audit addressin
 ### Config Constants (antiAbuse.ts)
 
 ```typescript
-MAX_QUESTS_PER_DAY: 20
-MAX_XP_PER_DAY: 3000
-MAX_REWARDS_PER_DAY_CELO: 5.0
-MIN_QUEST_COOLDOWN_MINUTES: 5
-FAILURE_COOLDOWN_MINUTES: 15
-MAX_SINGLE_REWARD_CELO: 0.5
-MAX_SINGLE_STAKE_CELO: 10.0
-MIN_SINGLE_STAKE_CELO: 0.001
+MAX_QUESTS_PER_DAY: 20;
+MAX_XP_PER_DAY: 3000;
+MAX_REWARDS_PER_DAY_CELO: 5.0;
+MIN_QUEST_COOLDOWN_MINUTES: 5;
+FAILURE_COOLDOWN_MINUTES: 15;
+MAX_SINGLE_REWARD_CELO: 0.5;
+MAX_SINGLE_STAKE_CELO: 10.0;
+MIN_SINGLE_STAKE_CELO: 0.001;
 ```
 
 ---
@@ -325,23 +325,27 @@ New models:
 ### Migration: 20260509_anti_abuse_systems.sql
 
 Created tables:
+
 - QuestCooldown (userId PK, cooldownUntil, reason)
 - DailyActivity (userId + date PK, activity counters)
 - ProofSubmission (userId + questId, proofHash, verification metadata)
 
 Added indexes:
+
 - QuestCooldown (userId, cooldownUntil)
 - DailyActivity (userId, date) + (date)
 - ProofSubmission (proofHash, userId+submittedAt, verificationResult)
 
 Added fields to User:
+
 - lastQuestCompletedAt
-- lastFailedAt  
+- lastFailedAt
 - totalQuestsCompleted
 - totalQuestsFailed
 - streakDecayFactor
 
 Added fields to Quest:
+
 - maxRewardAmount
 - minStakeAmount / maxStakeAmount
 - stakeTxHash / proofTxHash
@@ -362,7 +366,7 @@ DATABASE_URL
 RPC_URL_ALFAJORES, RPC_URL_MAINNET, ACTIVE_CHAIN
 PRIVATE_KEY
 FORGE_QUEST_MANAGER_ADDRESS, REPUTATION_ADDRESS, REWARD_NFT_ADDRESS, TREASURY_ADDRESS
-OPENAI_API_KEY
+GROQ_API_KEY
 JWT_SECRET (min 32 chars)
 AUTH_STATEMENT, AUTH_NONCE_TTL_MINUTES, AUTH_SESSION_TTL_HOURS
 RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX_REQUESTS
@@ -370,6 +374,7 @@ LOG_LEVEL, HEALTH_CHECK_INTERVAL_MS, DB_POOL_SIZE
 ```
 
 Validation:
+
 - Production-specific checks
 - Ethereum address format validation
 - Port range validation
@@ -456,7 +461,7 @@ Validation:
 ✅ Safe transfer patterns (.call{})  
 ✅ JWT token rotation  
 ✅ Challenge message expiration  
-✅ Signature verification (EIP-191)  
+✅ Signature verification (EIP-191)
 
 ---
 
@@ -556,6 +561,7 @@ Validation:
 ### Files Created/Modified
 
 **Backend:**
+
 - ✅ backend/prisma/schema.prisma (updated)
 - ✅ backend/prisma/migrations/20260509_anti_abuse_systems.sql (created)
 - ✅ backend/src/services/antiAbuse.ts (created)
@@ -565,6 +571,7 @@ Validation:
 - ✅ backend/src/config/production.ts (created)
 
 **Contracts:**
+
 - ✅ contracts/contracts/ForgeQuestManager.sol (updated with v2 features)
 - ✅ contracts/contracts/ForgeQuestManagerV2.sol (backup with same features)
 - ✅ contracts/test/ForgeQuestManager.security.test.ts (created)
@@ -591,11 +598,12 @@ QuestForge AI has been transformed from a hackathon prototype to a production-gr
 ✅ Circuit breaker protection  
 ✅ Rate limiting enforcement  
 ✅ Security hardening  
-✅ Comprehensive testing  
+✅ Comprehensive testing
 
 **Ready for: Production Deployment (Celo Network)**
 
 **Next Steps:**
+
 1. Install missing npm dependencies
 2. Run database migrations
 3. Deploy smart contracts

@@ -6,9 +6,9 @@
  * Validates:
  * 1. Wallet auth against the real API surface
  * 2. Multiple quest generations through the live generation path
- * 3. OpenAI source attribution and fallback rate
+ * 3. Groq source attribution and fallback rate
  * 4. Narrative diversity across title, lore, mission structure, and NPC dialogue
- * 5. Telemetry visibility (latency + token usage) when OpenAI is active
+ * 5. Telemetry visibility (latency + token usage) when Groq is active
  *
  * Usage:
  *   npx ts-node scripts/validate-ai-generation.ts
@@ -68,7 +68,7 @@ type DiagnosticsPayload = {
   orchestration?: {
     questGeneration?: {
       generatedCount?: number;
-      openAIGeneratedCount?: number;
+      aiGeneratedCount?: number;
       fallbackGeneratedCount?: number;
       lastGenerationSource?: string | null;
       lastFallbackReason?: string | null;
@@ -205,7 +205,7 @@ async function main() {
   const missionStructures = new Set<string>();
   const dialogueLines = new Set<string>();
   const chapterFingerprints = new Set<string>();
-  const openAISources: string[] = [];
+  const aiSources: string[] = [];
   const fallbackSources: string[] = [];
   const latencies: number[] = [];
   const tokenTotals: number[] = [];
@@ -232,8 +232,8 @@ async function main() {
       );
     }
 
-    if (generation.source === 'openai') {
-      openAISources.push(quest.id);
+    if (generation.source === 'groq') {
+      aiSources.push(quest.id);
     } else {
       fallbackSources.push(`${quest.id}:${generation.fallbackReason || 'unknown-fallback'}`);
     }
@@ -283,7 +283,7 @@ async function main() {
   });
 
   console.log('\nGeneration health:');
-  console.log(`  - OpenAI-sourced quests: ${openAISources.length}/${testsCount}`);
+  console.log(`  - Groq-sourced quests: ${aiSources.length}/${testsCount}`);
   console.log(`  - Fallback quests: ${fallbackSources.length}/${testsCount}`);
   console.log(`  - Avg latency: ${averageLatencyMs ?? 'n/a'} ms`);
   console.log(`  - Avg total tokens: ${averageTokens ?? 'n/a'}`);
@@ -291,7 +291,7 @@ async function main() {
   if (orchestration) {
     console.log('\nBackend diagnostics:');
     console.log(`  - generatedCount: ${orchestration.generatedCount ?? 'n/a'}`);
-    console.log(`  - openAIGeneratedCount: ${orchestration.openAIGeneratedCount ?? 'n/a'}`);
+    console.log(`  - aiGeneratedCount: ${orchestration.aiGeneratedCount ?? 'n/a'}`);
     console.log(`  - fallbackGeneratedCount: ${orchestration.fallbackGeneratedCount ?? 'n/a'}`);
     console.log(`  - lastGenerationSource: ${orchestration.lastGenerationSource ?? 'n/a'}`);
     console.log(`  - lastLatencyMs: ${orchestration.lastLatencyMs ?? 'n/a'}`);
@@ -303,8 +303,8 @@ async function main() {
 
   const failedChecks: string[] = [];
 
-  if (requireRealAI && openAISources.length !== testsCount) {
-    failedChecks.push(`Expected ${testsCount}/${testsCount} quests from OpenAI, got ${openAISources.length}`);
+  if (requireRealAI && aiSources.length !== testsCount) {
+    failedChecks.push(`Expected ${testsCount}/${testsCount} quests from Groq, got ${aiSources.length}`);
   }
 
   if (fallbackSources.length > 0) {
@@ -319,7 +319,7 @@ async function main() {
   }
 
   if (!averageLatencyMs || !averageTokens) {
-    failedChecks.push('OpenAI telemetry was not exposed for generated quests');
+    failedChecks.push('Groq telemetry was not exposed for generated quests');
   }
 
   if (orchestration && typeof orchestration.fallbackGeneratedCount === 'number' && orchestration.fallbackGeneratedCount > 0) {

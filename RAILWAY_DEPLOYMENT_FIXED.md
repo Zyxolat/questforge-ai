@@ -92,10 +92,10 @@ CORS_ORIGIN=https://your-frontend.railway.app
 API_URL=${{Railway.PublicUrl}}
 ```
 
-#### OpenAI (Required in production)
+#### Groq AI (Required in production)
 
 ```
-OPENAI_API_KEY=sk-proj-<your-openai-key>
+GROQ_API_KEY=gsk_<your-Groq-key>
 ```
 
 #### Verifier Key (Required in production)

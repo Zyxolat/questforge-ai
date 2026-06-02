@@ -113,7 +113,7 @@ isMiniPay: boolean flag tracked separately
 2. Calculate difficulty based on user profile
 3. Fetch world state (factions, events, seasonal data)
 4. Calculate reward bounds with treasury health check
-5. Generate narrative using AI (OpenAI or fallback)
+5. Generate narrative using AI (Groq AI or fallback)
 6. Validate quest against deterministic rules
 7. Persist quest with all metadata
 8. Emit real-time events
@@ -306,7 +306,7 @@ const creationTx = await forgeQuestManager.createQuest(
 
 **AI Validator:** `aiSafety.ts`
 
-- **Model:** Integrated with OpenAI API
+- **Model:** Integrated with Groq AI API
 - **Fallback:** Deterministic template validation
 
 **Verification Checks:**
@@ -749,7 +749,7 @@ Backend Event -> Event Queue -> WebSocket Broadcast -> Frontend State Update
 
 **Current State:** Fallback templates available but not extensively documented
 **Recommendation:** Add more diversity to fallback quest types
-**Impact:** Better UX if OpenAI API is unavailable
+**Impact:** Better UX if Groq AI API is unavailable
 
 #### 3. **Proof Submission Timeout** (Low Priority)
 

@@ -153,8 +153,8 @@ export interface QuestChainInteractionPattern {
 }
 
 export interface QuestGenerationDiagnostics {
-  source: 'openai' | 'deterministic_fallback';
-  provider: 'openai' | 'deterministic';
+  source: 'groq' | 'deterministic_fallback';
+  provider: 'groq' | 'deterministic';
   model: string | null;
   promptHash: string;
   promptPreview: string;

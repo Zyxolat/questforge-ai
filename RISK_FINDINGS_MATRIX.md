@@ -96,14 +96,14 @@ TREASURY_ADDRESS=0xActualMainnetAddress...
 
 ---
 
-## 🔴 CRITICAL-002: OpenAI API Key Not Configured
+## 🔴 CRITICAL-002: Groq AI API Key Not Configured
 
-**Issue:** Production environment shows `${{OPENAI_API_KEY}}` placeholder instead of actual API key.
+**Issue:** Production environment shows `${{GROQ_API_KEY}}` placeholder instead of actual API key.
 
 **File:** [.env.production](./.env.production) line 27
 
 ```
-OPENAI_API_KEY=${{OPENAI_API_KEY}}
+GROQ_API_KEY=${{GROQ_API_KEY}}
 ```
 
 **Root Cause:**
@@ -118,23 +118,23 @@ OPENAI_API_KEY=${{OPENAI_API_KEY}}
 [backend/src/config/env.ts:400-407]
 
 ```typescript
-if (nodeEnv === "production" && !optionalEnv("OPENAI_API_KEY")) {
+if (nodeEnv === "production" && !optionalEnv("GROQ_API_KEY")) {
   addIssue(
     errors,
     "AI Generation",
-    "OPENAI_API_KEY",
-    "is required in production because QuestForge production readiness depends on live OpenAI quest generation",
+    "GROQ_API_KEY",
+    "is required in production because QuestForge production readiness depends on live Groq AI quest generation",
   );
 }
 ```
 
-[backend/src/services/aiOpenAIClient.ts:74-96]
+[backend/src/services/aiGroq AIClient.ts:74-96]
 
 ```typescript
-if (env.OPENAI_API_KEY) {
-  this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+if (env.GROQ_API_KEY) {
+  this.client = new Groq AI({ apiKey: env.GROQ_API_KEY });
   this.isConfigured = true;
-  logger.info("[OPENAI-CLIENT] OpenAI client initialized successfully", {
+  logger.info("[OPENAI-CLIENT] Groq AI client initialized successfully", {
     configured: true,
     keyPresent: true,
   });
@@ -142,17 +142,17 @@ if (env.OPENAI_API_KEY) {
   this.client = null;
   this.isConfigured = false;
   logger.warn(
-    "[OPENAI-CLIENT] OpenAI API key not configured - fallback mode enabled",
+    "[OPENAI-CLIENT] Groq AI API key not configured - fallback mode enabled",
   );
 }
 ```
 
 **Impact:**
 
-- ❌ Quests use deterministic fallback instead of live OpenAI
+- ❌ Quests use deterministic fallback instead of live Groq AI
 - ❌ No narrative variety (template-based)
 - ❌ No telemetry (latency, tokens not tracked)
-- ❌ generation.source shows "deterministic_fallback" not "openai"
+- ❌ generation.source shows "deterministic_fallback" not "groq"
 - **User Facing:** Judges experience poor AI quality; looks like static content
 
 **Risk Level:** 🔴 CRITICAL (degrades primary feature)
@@ -160,23 +160,23 @@ if (env.OPENAI_API_KEY) {
 **Fix Required:**
 
 ```bash
-# Step 1: Get OpenAI API key from https://platform.openai.com/api-keys
-# Format: sk-proj-xxxxxxxxxxxxx...
+# Step 1: Get Groq AI API key from https://platform.Groq.com/api-keys
+# Format: gsk_xxxxxxxxxxxxx...
 
 # Step 2: Set in Railway dashboard
-# Backend Service → Variables → OPENAI_API_KEY = sk-proj-...
+# Backend Service -> Variables -> GROQ_API_KEY = gsk_...
 # Check "Encrypt this variable" for security
 
 # Step 3: Restart backend service
 
 # Step 4: Verify with health endpoint
-curl https://your-backend.railway.app/health/events | jq '.services.openai'
+curl https://your-backend.railway.app/health/events | jq '.services.Groq'
 # Should show: "available": true
 ```
 
 **Estimated Fix Time:** 5 minutes
 
-**Verification:** Health endpoint shows `openai.available: true` and `openai.validated: true`
+**Verification:** Health endpoint shows `Groq.available: true` and `Groq.validated: true`
 
 ---
 
@@ -457,7 +457,7 @@ npm run build  # Warning should disappear
 | ID  | Severity    | Issue                    | File                 | Fix Time | Status   |
 | --- | ----------- | ------------------------ | -------------------- | -------- | -------- |
 | 001 | 🔴 CRITICAL | No mainnet contracts     | .env.production:9-13 | 30m      | BLOCKER  |
-| 002 | 🔴 CRITICAL | OpenAI API key missing   | .env.production:27   | 5m       | BLOCKER  |
+| 002 | 🔴 CRITICAL | Groq AI API key missing  | .env.production:27   | 5m       | BLOCKER  |
 | 003 | 🔴 CRITICAL | Database not configured  | .env.production:14   | 15m      | BLOCKER  |
 | 004 | 🟠 HIGH     | Event streaming disabled | .env.production:72   | 10m      | OPTIONAL |
 | 005 | 🟠 HIGH     | Verifier not configured  | .env.production:31   | 10m      | BLOCKER  |
@@ -470,7 +470,7 @@ npm run build  # Warning should disappear
 ```
 Immediate (Required):
 ├─ Deploy contracts → 30m (CRITICAL-001)
-├─ Set OpenAI key → 5m (CRITICAL-002)
+├─ Set Groq AI key → 5m (CRITICAL-002)
 ├─ Configure database → 15m (CRITICAL-003)
 └─ Set verifier wallet → 10m (HIGH-002)
 
@@ -504,7 +504,7 @@ Total With Optional: ~87 minutes
 **What's Blocked:**
 
 - ❌ No mainnet contracts
-- ❌ No OpenAI key
+- ❌ No Groq AI key
 - ❌ No database
 - ❌ No verifier wallet
 

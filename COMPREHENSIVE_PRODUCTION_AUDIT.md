@@ -192,9 +192,9 @@ QuestForge AI is a **production-hardened AI-powered fantasy RPG** on Celo with s
 
 - **Quest Generation Engine**: Multi-factor difficulty + world state
 - **Reward Calculation**: Adaptive to player profile + treasury health
-- **Fallback Generation**: Deterministic when OpenAI unavailable
+- **Fallback Generation**: Deterministic when Groq AI unavailable
 - **Validation**: Comprehensive schema enforcement
-- **Status**: Tested, with OpenAI fallback safety
+- **Status**: Tested, with Groq AI fallback safety
 - **Key Files**: `backend/src/services/aiQuestGenerationEngine.ts`, `backend/src/services/aiRewardEngine.ts`
 
 ### 5. Database + Schema ✅
@@ -750,7 +750,7 @@ rewards on Celo. Immersive, AI-driven, scalable."
 | **Futuristic Fantasy RPG**         | ✅ 85%  | Navy + yellow theme; cinematic UX; quest system              |
 | **Every Quest = Onchain Activity** | ✅ 90%  | startQuest, submitQuest, verification, rewards create 5+ txs |
 | **Wallet Connection**              | ✅ 100% | WalletConnect/MiniPay/AppKit fully working                   |
-| **AI Quest Generation**            | ✅ 88%  | OpenAI + fallback system; personality-driven                 |
+| **AI Quest Generation**            | ✅ 88%  | Groq AI + fallback system; personality-driven                |
 | **Meaningful Difficulty**          | ✅ 85%  | 5-level scaling; world state multipliers; player adaptation  |
 | **Blockchain Missions**            | ✅ 80%  | 3 quest types (transfer, contract, approval); extensible     |
 | **Staking Mechanics**              | ✅ 95%  | Full stake lifecycle; treasury-backed payouts                |

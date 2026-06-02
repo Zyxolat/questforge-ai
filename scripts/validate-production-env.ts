@@ -320,19 +320,33 @@ async function main() {
 
   // API Keys
   console.log('\n🔑 API KEYS...\n');
-  const openaiKey = process.env.OPENAI_API_KEY?.trim() || null;
-  if (!openaiKey) {
-    recordResult('OPENAI_API_KEY', 'fail', 'Missing OpenAI key');
-  } else if (isDeferredReference(openaiKey)) {
+  const groqKey = process.env.GROQ_API_KEY?.trim() || null;
+  const groqModel = process.env.GROQ_MODEL?.trim() || null;
+  if (!groqKey) {
+    recordResult('GROQ_API_KEY', 'warning', 'Missing Groq key; deterministic fallback quests remain enabled');
+  } else if (isDeferredReference(groqKey)) {
     recordResult(
-      'OPENAI_API_KEY',
+      'GROQ_API_KEY',
       'fail',
       'Still contains a Railway-style placeholder in the loaded environment; set the actual secret in the deployed service'
     );
-  } else if (openaiKey.startsWith('sk-')) {
-    recordResult('OPENAI_API_KEY', 'pass', 'Valid OpenAI key format');
+  } else if (!/\s/.test(groqKey)) {
+    recordResult('GROQ_API_KEY', 'pass', 'Groq key configured');
   } else {
-    recordResult('OPENAI_API_KEY', 'fail', 'Invalid OpenAI key format');
+    recordResult('GROQ_API_KEY', 'fail', 'Invalid Groq key format');
+  }
+  if (!groqModel) {
+    recordResult('GROQ_MODEL', 'warning', 'Missing Groq model; backend will default to llama-3.3-70b-versatile');
+  } else if (isDeferredReference(groqModel)) {
+    recordResult(
+      'GROQ_MODEL',
+      'fail',
+      'Still contains a Railway-style placeholder in the loaded environment; set the concrete Groq model name'
+    );
+  } else if (!/\s/.test(groqModel)) {
+    recordResult('GROQ_MODEL', 'pass', `Groq model configured: ${groqModel}`);
+  } else {
+    recordResult('GROQ_MODEL', 'fail', 'Invalid Groq model format');
   }
 
   // JWT Configuration

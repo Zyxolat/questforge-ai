@@ -35,7 +35,7 @@
 
 - [ ] Private key stored in secure secrets manager (not in .env)
 - [ ] Database credentials not in version control
-- [ ] API keys (OpenAI) rotated recently
+- [ ] API keys (Groq AI) rotated recently
 - [ ] JWT_SECRET is 32+ characters
 - [ ] All environment variables reviewed
 - [ ] Firewall rules configured (only necessary ports open)
@@ -399,12 +399,12 @@ grep "Too many requests" /var/log/questforge-backend.log
 
 ```typescript
 // In backend/src/index.ts
-import Sentry from '@sentry/node';
+import Sentry from "@sentry/node";
 
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
-  environment: 'production',
-  tracesSampleRate: 0.1
+  environment: "production",
+  tracesSampleRate: 0.1,
 });
 
 app.use(Sentry.Handlers.requestHandler());
@@ -445,22 +445,22 @@ AlertRules:
     Condition: error_rate > 5%
     Action: Page oncall engineer
     Severity: Critical
-  
+
   - Name: SlowAPIResponse
     Condition: response_time_p95 > 1000ms
     Action: Alert to Slack
     Severity: Warning
-  
+
   - Name: DBConnectionPoolExhausted
     Condition: db_pool_usage > 90%
     Action: Page oncall engineer
     Severity: Critical
-  
+
   - Name: CircuitBreakerTriggered
     Condition: reward_system_healthy == false
     Action: Page oncall engineer + broadcast announcement
     Severity: Critical
-  
+
   - Name: IndexerLag
     Condition: indexer_lag_seconds > 300
     Action: Alert to Slack
@@ -476,6 +476,7 @@ AlertRules:
 **Symptoms:** API returning 500 errors
 
 **Solutions:**
+
 1. Check logs: `tail -f /var/log/questforge-backend.log`
 2. Verify environment variables: `printenv | grep QUEST`
 3. Check database connection: `psql -U questforge -d questforge_prod -c "SELECT 1"`
@@ -487,6 +488,7 @@ AlertRules:
 **Symptoms:** "migration pending" error
 
 **Solutions:**
+
 1. Check migration status: `npx prisma migrate status`
 2. View migration logs: `npx prisma migrate resolve --rolled-back <migration_name>`
 3. Manual rollback if needed: `psql -f rollback.sql`
@@ -497,6 +499,7 @@ AlertRules:
 **Symptoms:** Legitimate users getting 429 errors
 
 **Solutions:**
+
 1. Check Redis: `redis-cli ping`
 2. Adjust limits in .env: `QUEST_GENERATION_RATE_LIMIT=100`
 3. Whitelist high-value players (optional)
@@ -507,6 +510,7 @@ AlertRules:
 **Symptoms:** Quests created but not appearing in DB
 
 **Solutions:**
+
 1. Check indexer logs: `grep -i "indexer" /var/log/questforge-backend.log`
 2. Verify RPC connection: `curl https://forno.celo.org -X POST`
 3. Check last processed block: `psql -c "SELECT * FROM indexer_state"`
@@ -517,6 +521,7 @@ AlertRules:
 **Symptoms:** Backend crashes with OOM
 
 **Solutions:**
+
 1. Increase Node.js heap: `NODE_OPTIONS=--max_old_space_size=2048`
 2. Check memory leaks: `node --inspect dist/index.js`
 3. Enable clustering for multi-core
@@ -566,6 +571,7 @@ psql -U questforge -d questforge_prod -c "SELECT COUNT(*) FROM \"Quest\";"
 **Note: Smart contracts cannot be directly rolled back**
 
 Options:
+
 1. Redeploy previous contract version at new address
 2. Update environment variables to point to old contract
 3. Use proxy pattern (UUPS) for future upgrades
@@ -576,22 +582,26 @@ Options:
 ## Post-Launch Maintenance
 
 ### Daily Tasks
+
 - Monitor error logs
 - Check health endpoints
 - Verify database backups
 
 ### Weekly Tasks
+
 - Review performance metrics
 - Check security logs
 - Test disaster recovery
 
 ### Monthly Tasks
+
 - Review rate limit effectiveness
 - Audit contract state
 - Update dependencies
 - Security audit
 
 ### Quarterly Tasks
+
 - Full security audit
 - Load testing
 - Disaster recovery drill
@@ -641,7 +651,7 @@ Options:
 ✅ >60% quest completion rate  
 ✅ No critical security issues  
 ✅ All rate limits enforced  
-✅ Circuit breaker operational  
+✅ Circuit breaker operational
 
 ---
 

@@ -56,7 +56,7 @@
 - [ ] All environment variables set in production
 - [ ] Database connection validated
 - [ ] Redis connection validated (if ENABLE_EVENT_STREAM=true)
-- [ ] OpenAI API key validated (if OPENAI_API_KEY set)
+- [ ] Groq AI API key validated (if GROQ_API_KEY set)
 - [ ] RPC endpoint responding
 - [ ] Contract addresses accessible
 - [ ] Health check endpoint responds
@@ -408,9 +408,9 @@ We'll follow up with full details.
 
 After 24 hours of monitoring, complete this sign-off:
 
-**Deployment Date:** ******\_\_\_******  
-**Deployed By:** ******\_\_\_******  
-**Reviewed By:** ******\_\_\_******
+**Deployment Date:** **\*\***\_\_\_**\*\***  
+**Deployed By:** **\*\***\_\_\_**\*\***  
+**Reviewed By:** **\*\***\_\_\_**\*\***
 
 ### All Systems Healthy?
 
@@ -420,25 +420,25 @@ After 24 hours of monitoring, complete this sign-off:
 ### Any Critical Issues?
 
 - [ ] No critical issues
-- [ ] Issues found: ****\_\_**** (describe and action)
+- [ ] Issues found: \***\*\_\_\*\*** (describe and action)
 
 ### User Feedback?
 
 - [ ] No user reports
-- [ ] User feedback: ****\_\_**** (summarize)
+- [ ] User feedback: \***\*\_\_\*\*** (summarize)
 
 ### Performance?
 
 - [ ] Within expected baseline
-- [ ] Degradation: ****\_\_**** (describe)
+- [ ] Degradation: \***\*\_\_\*\*** (describe)
 
 ### Ready for Next Deployment?
 
 - [ ] YES - Can deploy related changes
 - [ ] NO - Wait 48 hours; investigate issues first
 
-**Sign-Off:** ******\_\_\_******  
-**Date/Time:** ******\_\_\_******
+**Sign-Off:** **\*\***\_\_\_**\*\***  
+**Date/Time:** **\*\***\_\_\_**\*\***
 
 ---
 

@@ -15,8 +15,8 @@ Three **critical blockers** prevent submission:
    - All on-chain operations will fail
    - Fix: `npm --prefix contracts run deploy:celo` (30 min)
 
-2. **OpenAI API key not configured in Railway**
-   - Shows as `${{OPENAI_API_KEY}}` placeholder
+2. **Groq AI API key not configured in Railway**
+   - Shows as `${{GROQ_API_KEY}}` placeholder
    - Will use fallback deterministic quests
    - Fix: Set in Railway Variables (5 min)
 
@@ -29,18 +29,18 @@ Three **critical blockers** prevent submission:
 
 ## WHAT'S READY ✅
 
-| Component               | Status           | Evidence                                          |
-| ----------------------- | ---------------- | ------------------------------------------------- |
-| **Code Quality**        | ✅ PASS          | Zero TypeScript errors                            |
-| **Quest Generation**    | ✅ READY         | aiOpenAIClient + questNarrativeEngine implemented |
-| **AI Integration**      | ✅ CODED         | Retry logic, telemetry, fallback all present      |
-| **Smart Contracts**     | ✅ IMPLEMENTED   | 4 contracts compiled, tested on localhost         |
-| **Verification System** | ✅ COMPLETE      | Worker implemented, roles defined                 |
-| **Gameplay Flow**       | ✅ CODE COMPLETE | All 8 steps implemented end-to-end                |
-| **MiniPay Support**     | ✅ READY         | Mobile UI, wallet detection, TX submission        |
-| **Reward Payout**       | ✅ CODE READY    | Treasury contract + payout logic verified         |
-| **NFT Minting**         | ✅ IMPLEMENTED   | RewardNFT contract ready                          |
-| **Leaderboards**        | ✅ IMPLEMENTED   | Real-time (disabled) or refresh-based             |
+| Component               | Status           | Evidence                                           |
+| ----------------------- | ---------------- | -------------------------------------------------- |
+| **Code Quality**        | ✅ PASS          | Zero TypeScript errors                             |
+| **Quest Generation**    | ✅ READY         | aiGroq AIClient + questNarrativeEngine implemented |
+| **AI Integration**      | ✅ CODED         | Retry logic, telemetry, fallback all present       |
+| **Smart Contracts**     | ✅ IMPLEMENTED   | 4 contracts compiled, tested on localhost          |
+| **Verification System** | ✅ COMPLETE      | Worker implemented, roles defined                  |
+| **Gameplay Flow**       | ✅ CODE COMPLETE | All 8 steps implemented end-to-end                 |
+| **MiniPay Support**     | ✅ READY         | Mobile UI, wallet detection, TX submission         |
+| **Reward Payout**       | ✅ CODE READY    | Treasury contract + payout logic verified          |
+| **NFT Minting**         | ✅ IMPLEMENTED   | RewardNFT contract ready                           |
+| **Leaderboards**        | ✅ IMPLEMENTED   | Real-time (disabled) or refresh-based              |
 
 ---
 
@@ -49,7 +49,7 @@ Three **critical blockers** prevent submission:
 | Risk                     | Severity    | Impact                  | Fix Time |
 | ------------------------ | ----------- | ----------------------- | -------- |
 | No mainnet contracts     | 🔴 CRITICAL | Complete system failure | 30 min   |
-| No OpenAI API key        | 🔴 CRITICAL | No AI generation        | 5 min    |
+| No Groq AI API key       | 🔴 CRITICAL | No AI generation        | 5 min    |
 | No database              | 🔴 CRITICAL | Backend crash           | 15 min   |
 | Event streaming disabled | 🟡 HIGH     | Leaderboard delays      | 10 min   |
 | No verifier wallet       | 🟡 HIGH     | Can't verify quests     | 10 min   |
@@ -74,7 +74,7 @@ Three **critical blockers** prevent submission:
 
 - [ ] Smart contracts deployed to Celo mainnet
 - [ ] Railway database configured
-- [ ] OpenAI API key set in Railway
+- [ ] Groq AI API key set in Railway
 - [ ] Verifier wallet private key configured
 - [ ] Backend service deployed
 - [ ] Frontend deployed
@@ -97,7 +97,7 @@ npm --prefix contracts run deploy:celo
 # REPUTATION_ADDRESS=0x...
 
 # 3. Set these in Railway Variables (encrypted):
-# OPENAI_API_KEY=sk-proj-...
+# GROQ_API_KEY=gsk_...
 # VERIFIER_PRIVATE_KEY=0x...
 # DATABASE_URL=${{Postgres.DATABASE_URL}}
 # JWT_SECRET=<random 32+ chars>
@@ -113,7 +113,7 @@ npm run validate:gameplay
 
 ## SECTION AUDIT RESULTS
 
-### 1. OpenAI Production Verification
+### 1. Groq AI Production Verification
 
 ✅ **Code:** Fully implemented  
 ✅ **Retry Logic:** 3 attempts with exponential backoff  
@@ -171,7 +171,7 @@ npm run validate:gameplay
 
 ### Architecture (Verified)
 
-- ✅ Quest generation: Deterministic fallback + live OpenAI
+- ✅ Quest generation: Deterministic fallback + live Groq AI
 - ✅ Verification: Async worker with deterministic rules
 - ✅ Payments: Treasury with role-based access
 - ✅ NFTs: ERC721 with quest metadata
@@ -196,12 +196,12 @@ npm run validate:gameplay
 ### Blockers: 3 (All Infrastructure-Related)
 
 1. Contract deployment
-2. OpenAI key configuration
+2. Groq AI key configuration
 3. Database setup
 
 ### Time to Submission: 1-2 hours
 
-(Assuming Celo RPC, Railway account, OpenAI key available)
+(Assuming Celo RPC, Railway account, Groq AI key available)
 
 ### Recommendation: ✅ APPROVE FOR DEPLOYMENT
 

@@ -22,8 +22,8 @@ export type AppEnv = {
   NODE_ENV: string;
   PORT: number;
   DATABASE_URL: string;
-  OPENAI_API_KEY: string;
-  OPENAI_MODEL: string;
+  GROQ_API_KEY: string;
+  GROQ_MODEL: string;
   ALLOW_AI_FALLBACK: boolean;
   FRONTEND_URL: string;
   FRONTEND_ORIGIN: string;
@@ -210,11 +210,7 @@ function parseOptionalPrivateKey(name: string, raw: string | undefined) {
   return new ethers.Wallet(raw).privateKey;
 }
 
-function parseOpenAIAPIKey(name: string, raw: string) {
-  if (!raw.startsWith('sk-')) {
-    throw new Error(`${name} must start with sk-`);
-  }
-
+function parseGroqAPIKey(name: string, raw: string) {
   if (/\s/.test(raw)) {
     throw new Error(`${name} must not contain whitespace`);
   }
@@ -352,21 +348,28 @@ export function validateEnvironment(): EnvValidationResult {
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
   const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
-  const openAIModel = optionalEnv('OPENAI_MODEL') || 'gpt-4o-mini';
-  const allowAIFallback = parseBoolean('ALLOW_AI_FALLBACK', optionalEnv('ALLOW_AI_FALLBACK'), nodeEnv !== 'production');
-  const openAIAPIKeyRaw = optionalEnv('OPENAI_API_KEY');
-  let openAIAPIKey: string | undefined;
-  if (openAIAPIKeyRaw) {
+  const groqModel = optionalEnv('GROQ_MODEL') || 'llama-3.3-70b-versatile';
+  const allowAIFallback = parseBoolean('ALLOW_AI_FALLBACK', optionalEnv('ALLOW_AI_FALLBACK'), true);
+  const groqAPIKeyRaw = optionalEnv('GROQ_API_KEY');
+  let groqAPIKey: string | undefined;
+  if (groqAPIKeyRaw) {
     try {
-      openAIAPIKey = parseOpenAIAPIKey('OPENAI_API_KEY', openAIAPIKeyRaw);
+      groqAPIKey = parseGroqAPIKey('GROQ_API_KEY', groqAPIKeyRaw);
     } catch (error) {
       addIssue(
-        nodeEnv === 'production' ? errors : warnings,
+        warnings,
         'AI Generation',
-        'OPENAI_API_KEY',
-        error instanceof Error ? error.message : String(error)
+        'GROQ_API_KEY',
+        `${error instanceof Error ? error.message : String(error)}. Ignoring value.`
       );
     }
+  } else {
+    addIssue(
+      warnings,
+      'AI Generation',
+      'GROQ_API_KEY',
+      'not configured; deterministic fallback quests remain enabled'
+    );
   }
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
@@ -451,24 +454,6 @@ export function validateEnvironment(): EnvValidationResult {
     );
   }
 
-  if (nodeEnv === 'production' && !openAIAPIKeyRaw) {
-    addIssue(
-      errors,
-      'AI Generation',
-      'OPENAI_API_KEY',
-      'is required in production because QuestForge production readiness depends on live OpenAI quest generation'
-    );
-  }
-
-  if (nodeEnv === 'production' && allowAIFallback) {
-    addIssue(
-      errors,
-      'AI Generation',
-      'ALLOW_AI_FALLBACK',
-      'must be false in production so OpenAI outages cannot silently degrade into deterministic fallback content'
-    );
-  }
-
   const authUriRaw = optionalEnv('AUTH_URI') || frontendUrl?.toString();
   let authUri: URL | undefined;
   if (authUriRaw) {
@@ -532,8 +517,8 @@ export function validateEnvironment(): EnvValidationResult {
         NODE_ENV: nodeEnv,
         PORT: parsePort('PORT', optionalEnv('PORT'), 4000),
         DATABASE_URL: databaseUrl!,
-        OPENAI_API_KEY: openAIAPIKey || '',
-        OPENAI_MODEL: openAIModel,
+        GROQ_API_KEY: groqAPIKey || '',
+        GROQ_MODEL: groqModel,
         ALLOW_AI_FALLBACK: allowAIFallback,
         FRONTEND_URL: frontendUrl!.toString(),
         FRONTEND_ORIGIN: frontendUrl!.origin,

@@ -22,16 +22,18 @@
 ## Pre-Deployment Checklist
 
 ### Security Review
+
 - [ ] All environment variables reviewed
 - [ ] Private keys stored in secure secrets manager (not .env)
 - [ ] Database credentials validated
-- [ ] API keys rotated (OpenAI, Sentry, etc.)
+- [ ] API keys rotated (Groq AI, Sentry, etc.)
 - [ ] JWT_SECRET is 32+ characters
 - [ ] No hardcoded secrets in code
 - [ ] Firewall rules configured
 - [ ] SSL/TLS certificates ready
 
 ### Code Review
+
 - [ ] All tests passing: `npm run test:contracts`
 - [ ] No console.log in production code
 - [ ] Linting passes
@@ -40,6 +42,7 @@
 - [ ] No TODO/FIXME comments in critical code
 
 ### Infrastructure
+
 - [ ] PostgreSQL 14+ running and tested
 - [ ] Redis instance running (optional but recommended)
 - [ ] Celo RPC endpoint verified
@@ -49,6 +52,7 @@
 - [ ] Monitoring tools configured (Sentry, DataDog, etc.)
 
 ### Contract Verification
+
 - [ ] Contracts compile without errors
 - [ ] All tests passing
 - [ ] Gas estimates reviewed
@@ -70,6 +74,7 @@ nano .env.production
 ```
 
 **Required variables:**
+
 ```
 NODE_ENV=production
 CELO_RPC_URL=https://forno.celo.org
@@ -77,7 +82,7 @@ PRIVATE_KEY=0x...          # From secure secrets manager
 DATABASE_URL=postgresql://...
 FRONTEND_URL=https://questforge.example.com
 API_URL=https://api.questforge.example.com
-OPENAI_API_KEY=sk-...      # From secure secrets manager
+GROQ_API_KEY=sk-...      # From secure secrets manager
 JWT_SECRET=...             # Min 32 chars
 ```
 

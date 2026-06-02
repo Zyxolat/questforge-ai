@@ -5,7 +5,7 @@ QuestForge AI is a premium onchain fantasy RPG platform built for hackathons. Pl
 ## Project Structure
 
 - `frontend/` — Vite + React + TypeScript + Tailwind + Framer Motion.
-- `backend/` — Express + TypeScript + Prisma + PostgreSQL + OpenAI integration.
+- `backend/` — Express + TypeScript + Prisma + PostgreSQL + Groq AI integration.
 - `contracts/` — Solidity smart contracts with Hardhat, ERC20 reward support, ERC721 achievement NFTs, treasury, reputation, and quest management.
 
 ## Highlights
@@ -69,7 +69,7 @@ Set the deployed contract addresses in `frontend/.env` before launching the app.
 ## Deployment
 
 - Frontend: Vercel deploy from `frontend/`, use `VITE_API_BASE_URL` in environment variables.
-- Backend: Railway deploy from `backend/`, use `DATABASE_URL`, `OPENAI_API_KEY`, `PRIVATE_KEY`, and contract address variables from `.env.example`.
+- Backend: Railway deploy from `backend/`, use `DATABASE_URL`, `GROQ_API_KEY`, `GROQ_MODEL`, `PRIVATE_KEY`, and contract address variables from `.env.example`.
 - Contracts: deploy with Hardhat and set `FORGE_QUEST_MANAGER_ADDRESS`, `REWARD_NFT_ADDRESS`, `REPUTATION_ADDRESS`, and `TREASURY_ADDRESS` in backend and frontend env files.
 
 ## Notes

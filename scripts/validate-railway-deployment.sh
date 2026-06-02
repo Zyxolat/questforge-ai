@@ -154,10 +154,16 @@ else
   check_warn "Event streaming disabled (ENABLE_EVENT_STREAM not set to true)"
 fi
 
-if [ -n "$OPENAI_API_KEY" ]; then
-  check_pass "OpenAI API configured"
+if [ -n "$GROQ_API_KEY" ]; then
+  check_pass "Groq API configured"
 else
-  check_warn "OpenAI API not configured (AI quest generation disabled)"
+  check_warn "Groq API not configured (deterministic fallback quests enabled)"
+fi
+
+if [ -n "$GROQ_MODEL" ]; then
+  check_pass "Groq model configured: $GROQ_MODEL"
+else
+  check_warn "GROQ_MODEL not set (backend defaults to llama-3.3-70b-versatile)"
 fi
 
 echo ""

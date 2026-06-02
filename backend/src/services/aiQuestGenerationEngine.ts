@@ -41,7 +41,7 @@ type UserWithRelations = User & {
 class AIQuestGenerationEngine {
   private diagnostics = {
     generatedCount: 0,
-    openAIGeneratedCount: 0,
+    aiGeneratedCount: 0,
     fallbackGeneratedCount: 0,
     escalatedCount: 0,
     validationFailures: 0,
@@ -264,8 +264,8 @@ class AIQuestGenerationEngine {
     });
 
     this.diagnostics.generatedCount += 1;
-    if (validated.generation.source === 'openai') {
-      this.diagnostics.openAIGeneratedCount += 1;
+    if (validated.generation.source === 'groq') {
+      this.diagnostics.aiGeneratedCount += 1;
     } else {
       this.diagnostics.fallbackGeneratedCount += 1;
     }
@@ -300,9 +300,9 @@ class AIQuestGenerationEngine {
       totalTokens: validated.generation.totalTokens,
       attemptCount: validated.generation.attemptCount,
       totalGenerated: this.diagnostics.generatedCount,
-      openAICount: this.diagnostics.openAIGeneratedCount,
+      aiCount: this.diagnostics.aiGeneratedCount,
       fallbackCount: this.diagnostics.fallbackGeneratedCount,
-      openAIRate: ((this.diagnostics.openAIGeneratedCount / this.diagnostics.generatedCount) * 100).toFixed(1) + '%',
+      aiRate: ((this.diagnostics.aiGeneratedCount / this.diagnostics.generatedCount) * 100).toFixed(1) + '%',
       escalated,
       escalatedTotal: this.diagnostics.escalatedCount
     });

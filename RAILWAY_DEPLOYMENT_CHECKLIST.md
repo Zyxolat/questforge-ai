@@ -148,9 +148,10 @@ openssl rand -hex 32
 - [ ] Must be a 32-byte hex private key: `0x` followed by 64 hex characters
 - [ ] Do not use the public wallet address, mnemonic phrase, placeholder text, or `${{...}}` template
 
-#### OPENAI_API_KEY (required in production)
+#### GROQ_API_KEY (required in production)
 
-- [ ] OPENAI_API_KEY = sk-proj-... (for AI quest generation)
+- [ ] GROQ*API_KEY = gsk*... (for AI quest generation)
+- [ ] GROQ_MODEL = llama-3.3-70b-versatile
 - [ ] Leave blank only for non-production development
 
 ### 5d. Frontend URLs (update after frontend deployment)

@@ -27,7 +27,7 @@ import { logger } from './services/logger';
 type StartupServiceKey =
   | 'websocket'
   | 'database'
-  | 'openai'
+  | 'groq'
   | 'worldState'
   | 'proofVerificationWorker'
   | 'eventQueue'
@@ -138,7 +138,7 @@ async function bootstrap() {
   const { prisma } = await import('./services/chain');
   const { assertAuthStorageReady } = await import('./services/auth');
   const { aiQuestGenerationEngine } = await import('./services/aiQuestGenerationEngine');
-  const { aiOpenAIClient } = await import('./services/aiOpenAIClient');
+  const { aiGroqClient } = await import('./services/aiGroqClient');
   const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
   const { startProofVerificationWorker, stopProofVerificationWorker } = await import('./services/verification');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
@@ -160,7 +160,7 @@ async function bootstrap() {
     services: {
       websocket: createServiceState(true),
       database: createServiceState(false),
-      openai: createServiceState(true),
+      groq: createServiceState(true),
       worldState: createServiceState(false),
       proofVerificationWorker: createServiceState(true),
       eventQueue: createServiceState(false),
@@ -297,8 +297,6 @@ async function bootstrap() {
   };
 
   const initializeOptionalRuntimeServices = async (attempt: number) => {
-    const openAIOptional = env.ALLOW_AI_FALLBACK;
-
     if (!env.WEBSOCKET_ENABLED) {
       markServiceSkipped('websocket', 'WEBSOCKET_ENABLED=false');
     } else if (startupState.services.websocket.status !== 'ready') {
@@ -316,21 +314,21 @@ async function bootstrap() {
       );
     }
 
-    if (!env.OPENAI_API_KEY) {
-      markServiceSkipped('openai', 'OPENAI_API_KEY not configured; deterministic fallbacks remain enabled');
+    if (!env.GROQ_API_KEY) {
+      markServiceSkipped('groq', 'GROQ_API_KEY not configured; deterministic fallbacks remain enabled');
       return;
     }
 
-    if (startupState.services.openai.status !== 'ready') {
+    if (startupState.services.groq.status !== 'ready') {
       await runStartupStep(
-        'openai',
+        'groq',
         attempt,
         async () => {
-          await aiOpenAIClient.validateModelAccess(env.OPENAI_MODEL);
+          await aiGroqClient.validateModelAccess(env.GROQ_MODEL);
         },
         {
-          optional: openAIOptional,
-          swallowFailure: openAIOptional,
+          optional: true,
+          swallowFailure: true,
           timeoutMs: 15000
         }
       );
@@ -533,7 +531,7 @@ async function bootstrap() {
       const rpcHealth = await rpcFailoverManager.getHealthStatus();
       const worldDiagnostics = worldStateCoordinator.getDiagnostics();
       const questDiagnostics = aiQuestGenerationEngine.getDiagnostics();
-      const openAIHealth = aiOpenAIClient.getHealthStatus();
+      const groqHealth = aiGroqClient.getHealthStatus();
 
       res.status(200).json({
         timestamp: new Date().toISOString(),
@@ -542,7 +540,7 @@ async function bootstrap() {
         worker: workerStatus,
         queue: queueStats,
         websocket: wsStats,
-        openai: openAIHealth,
+        groq: groqHealth,
         rpc: {
           endpoints: rpcHealth,
           lastSuccessful: rpcFailoverManager.getLastSuccessfulEndpoint(),
@@ -556,7 +554,6 @@ async function bootstrap() {
         },
         healthy:
           startupState.servicesReady &&
-          (env.ALLOW_AI_FALLBACK || openAIHealth.validated) &&
           ingestorStatus.running &&
           workerStatus.running &&
           (queueStats?.healthy ?? false) &&

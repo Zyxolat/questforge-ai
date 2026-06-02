@@ -10,7 +10,7 @@
 
 ### Status: ⚠️ CRITICAL ISSUES FOUND - DO NOT SUBMIT
 
-**Finding:** Production deployment has **NOT been executed on Celo mainnet yet**. The system is fully developed but **contract addresses, database connections, and OpenAI API key have NOT been deployed/configured to production**.
+**Finding:** Production deployment has **NOT been executed on Celo mainnet yet**. The system is fully developed but **contract addresses, database connections, and Groq AI API key have NOT been deployed/configured to production**.
 
 **Readiness:** Development/Staging - Ready to Deploy (once production environment is set up)
 
@@ -67,50 +67,50 @@ TREASURY_ADDRESS=0xEdFdE2946D0D31a636CE115d0026Ce6096957D5B          # Not mainn
 
 ---
 
-### 🔴 CRITICAL-2: OpenAI API Key Configuration Incomplete
+### 🔴 CRITICAL-2: Groq AI API Key Configuration Incomplete
 
 **File:** [.env.production](./.env.production)  
 **Evidence:** Line 27
 
 ```
-OPENAI_API_KEY=${{OPENAI_API_KEY}}
+GROQ_API_KEY=${{GROQ_API_KEY}}
 ```
 
 **Root Cause:** Railway reference variable placeholder, not actual API key. Must be set in Railway dashboard.
 
 **Verification:**
 
-- Backend code checks for OPENAI_API_KEY at startup [backend/src/config/env.ts:400]
-- Production validation requires real key: "is required in production because QuestForge production readiness depends on live OpenAI quest generation"
-- Current status: Will use deterministic fallback (no live OpenAI responses)
+- Backend code checks for GROQ_API_KEY at startup [backend/src/config/env.ts:400]
+- Production validation requires real key: "is required in production because QuestForge production readiness depends on live Groq AI quest generation"
+- Current status: Will use deterministic fallback (no live Groq AI responses)
 
 **Impact:**
 
 - Judges will see deterministic fallback quests, not AI-generated content
 - Narrative variety will be limited
-- No telemetry for OpenAI token usage/latency
+- No telemetry for Groq AI token usage/latency
 - Falls back to template-based generation
 
 **Evidence from Code:**
 
 ```typescript
 // backend/src/config/env.ts:400-407
-if (nodeEnv === "production" && !optionalEnv("OPENAI_API_KEY")) {
+if (nodeEnv === "production" && !optionalEnv("GROQ_API_KEY")) {
   addIssue(
     errors,
     "AI Generation",
-    "OPENAI_API_KEY",
-    "is required in production because QuestForge production readiness depends on live OpenAI quest generation",
+    "GROQ_API_KEY",
+    "is required in production because QuestForge production readiness depends on live Groq AI quest generation",
   );
 }
 ```
 
 **Fix:**
 
-1. Obtain valid OpenAI API key (sk-proj-...)
-2. Set in Railway dashboard → Variables → OPENAI_API_KEY (encrypted)
+1. Obtain valid Groq AI API key (gsk\_...)
+2. Set in Railway dashboard → Variables → GROQ_API_KEY (encrypted)
 3. Restart backend service
-4. Verify with health endpoint: GET /health/events → check openai.available
+4. Verify with health endpoint: GET /health/events → check Groq.available
 
 **Timeline:** 5 minutes
 
@@ -152,7 +152,7 @@ ENABLE_EVENT_STREAM=false
 
 ---
 
-## SECTION 1: OpenAI Production Verification
+## SECTION 1: Groq AI Production Verification
 
 ### Quest Generation Flow - Code Verified ✅
 
@@ -166,12 +166,12 @@ POST /api/quests/generate
 [aiQuestGenerationEngine.generateQuest]
   ↓
 [questNarrativeEngine.generateQuestNarrative]
-  ├─ Check: aiOpenAIClient.isAvailable()
-  ├─ If YES: aiOpenAIClient.createChatCompletion()
+  ├─ Check: aiGroq AIClient.isAvailable()
+  ├─ If YES: aiGroq AIClient.createChatCompletion()
   │   └─ Retry logic: 3 attempts, exponential backoff
   │   └─ Token tracking: promptTokens, completionTokens
   │   └─ Latency tracking: latencyMs
-  │   └─ Source: "openai"
+  │   └─ Source: "Groq"
   └─ If NO: buildDeterministicNarrative()
       └─ Source: "deterministic_fallback"
   ↓
@@ -182,29 +182,29 @@ POST /api/quests/generate
 
 **Files Involved:**
 
-- [backend/src/services/aiOpenAIClient.ts](backend/src/services/aiOpenAIClient.ts) - OpenAI wrapper with retry
+- [backend/src/services/aiGroq AIClient.ts](backend/src/services/aiGroq AIClient.ts) - Groq AI wrapper with retry
 - [backend/src/services/questNarrativeEngine.ts](backend/src/services/questNarrativeEngine.ts) - Generation orchestration
 - [backend/src/controllers/questController.ts](backend/src/controllers/questController.ts#L152) - API endpoint
 - [backend/src/services/aiQuestGenerationEngine.ts](backend/src/services/aiQuestGenerationEngine.ts) - Diagnostics tracking
 
-### OpenAI API Key Verification - BLOCKED 🔴
+### Groq AI API Key Verification - BLOCKED 🔴
 
 **Current Status:**
 
-- ✅ Code: Ready to use live OpenAI
+- ✅ Code: Ready to use live Groq AI
 - ✅ Retry logic: Implemented (3 attempts, 800ms → 2s → 5s backoff)
 - ✅ Telemetry: Tracking latency and tokens
-- ❌ Configuration: ${{OPENAI_API_KEY}} not set in Railway
+- ❌ Configuration: ${{GROQ_API_KEY}} not set in Railway
 - ❌ Production: Will default to deterministic fallback
 
-**Evidence from aiOpenAIClient:**
+**Evidence from aiGroq AIClient:**
 
 ```typescript
-// backend/src/services/aiOpenAIClient.ts:74-96
-if (env.OPENAI_API_KEY) {
-  this.client = new OpenAI({ apiKey: env.OPENAI_API_KEY });
+// backend/src/services/aiGroq AIClient.ts:74-96
+if (env.GROQ_API_KEY) {
+  this.client = new Groq AI({ apiKey: env.GROQ_API_KEY });
   this.isConfigured = true;
-  logger.info("[OPENAI-CLIENT] OpenAI client initialized successfully", {
+  logger.info("[OPENAI-CLIENT] Groq AI client initialized successfully", {
     configured: true,
     keyPresent: true,
   });
@@ -212,7 +212,7 @@ if (env.OPENAI_API_KEY) {
   this.client = null;
   this.isConfigured = false;
   logger.warn(
-    "[OPENAI-CLIENT] OpenAI API key not configured - fallback mode enabled",
+    "[OPENAI-CLIENT] Groq AI API key not configured - fallback mode enabled",
     {
       configured: false,
       keyPresent: false,
@@ -223,7 +223,7 @@ if (env.OPENAI_API_KEY) {
 
 ### Real Quests Generation Test - CANNOT RUN YET 🔴
 
-**Blocker:** OpenAI API key not configured
+**Blocker:** Groq AI API key not configured
 
 **Test Command (when ready):**
 
@@ -231,13 +231,13 @@ if (env.OPENAI_API_KEY) {
 npm run validate:ai-generation
 ```
 
-**Expected Results (when OPENAI_API_KEY is set):**
+**Expected Results (when GROQ_API_KEY is set):**
 
 - 5 quests generated
 - ✓ Unique titles (>80% variety)
 - ✓ Unique descriptions
-- ✓ generation.source === "openai" (>95%)
-- ✓ generation.model === "gpt-4o-mini"
+- ✓ generation.source === "groq" (>95%)
+- ✓ generation.model === "llama-3.3-70b-versatile"
 - ✓ Telemetry: latencyMs, promptTokens, completionTokens all present
 - ✓ fallbackGeneratedCount === 0
 
@@ -249,11 +249,11 @@ npm run validate:ai-generation
 // backend/src/services/aiQuestGenerationEngine.ts:42-58
 private diagnostics = {
   generatedCount: 0,              // Will increment per quest
-  openAIGeneratedCount: 0,        // Will track live OpenAI
+  aiGeneratedCount: 0,        // Will track live Groq AI
   fallbackGeneratedCount: 0,      // Will track fallback
-  lastGenerationSource: null,     // "openai" or "deterministic_fallback"
-  lastPromptTokens: null,         // From OpenAI response
-  lastCompletionTokens: null,     // From OpenAI response
+  lastGenerationSource: null,     // "Groq" or "deterministic_fallback"
+  lastPromptTokens: null,         // From Groq AI response
+  lastCompletionTokens: null,     // From Groq AI response
   lastTotalTokens: null,          // Sum
   lastLatencyMs: null,            // Request duration
   lastFallbackReason: null        // Why fallback activated
@@ -659,7 +659,7 @@ Provider: {
 
 ---
 
-#### 🔴 CRITICAL-2: OpenAI API Key Not Set in Production
+#### 🔴 CRITICAL-2: Groq AI API Key Not Set in Production
 
 | Factor      | Assessment                                                   |
 | ----------- | ------------------------------------------------------------ |
@@ -771,7 +771,7 @@ SMART CONTRACTS
 
 RAILWAY ENVIRONMENT VARIABLES (Critical)
 [ ] DATABASE_URL → Railway Postgres reference
-[ ] OPENAI_API_KEY → Real sk-proj-... key
+[ ] GROQ_API_KEY -> Real gsk_... key
 [ ] VERIFIER_PRIVATE_KEY → Signer wallet private key
 [ ] JWT_SECRET → 32+ char random value
 [ ] FORGE_QUEST_MANAGER_ADDRESS → Mainnet address
@@ -819,7 +819,7 @@ VALIDATION
 
 - ❌ Smart contracts on Celo mainnet
 - ❌ Production database connection
-- ❌ OpenAI API key in Railway
+- ❌ Groq AI API key in Railway
 - ❌ Verifier signer wallet configured
 - ❌ Live application instance
 
@@ -850,7 +850,7 @@ VALIDATION
 1. Smart contracts deployed to Celo mainnet
 2. Railway environment variables configured
 3. Production database created
-4. OpenAI API key set
+4. Groq AI API key set
 5. Verifier wallet configured
 
 ### 🚀 DEPLOYMENT PATH
@@ -867,7 +867,7 @@ VALIDATION
 - [.env.production](./.env.production) - Configuration template
 - [backend/src/config/env.ts](backend/src/config/env.ts) - Env validation
 - [contracts/deployments/celo-addresses.json](contracts/deployments/celo-addresses.json) - Local contract addresses
-- [backend/src/services/aiOpenAIClient.ts](backend/src/services/aiOpenAIClient.ts) - OpenAI integration
+- [backend/src/services/aiGroq AIClient.ts](backend/src/services/aiGroq AIClient.ts) - Groq AI integration
 - [backend/src/services/verification.ts](backend/src/services/verification.ts) - Verification worker
 - [backend/src/services/questNarrativeEngine.ts](backend/src/services/questNarrativeEngine.ts) - Quest generation
 - [contracts/contracts/ForgeQuestManager.sol](contracts/contracts/ForgeQuestManager.sol) - Quest contract

@@ -56,15 +56,16 @@ The server listens on `http://localhost:4000` by default.
 
 ### Optional Variables
 
-| Variable               | Default              | Description                                                                                                                  |
-| ---------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`                 | `4000`               | TCP port the server binds to. Railway sets this automatically.                                                               |
-| `OPENAI_API_KEY`       | —                    | Required in production. Leave unset in development to disable AI features.                                                   |
-| `REDIS_URL`            | —                    | Redis connection string for rate limiting. Falls back to in-memory if unset. Required only when `ENABLE_EVENT_STREAM=true`.  |
-| `VERIFIER_PRIVATE_KEY` | —                    | Required in production. Private key for the wallet holding `VERIFIER_ROLE` on the contracts. Also accepted as `PRIVATE_KEY`. |
-| `ENABLE_EVENT_STREAM`  | `false`              | Master switch for the blockchain event streaming system. Enable only after `REDIS_URL` is configured.                        |
-| `WEBSOCKET_ENABLED`    | `true`               | Enable Socket.IO for real-time frontend updates.                                                                             |
-| `AUTH_COOKIE_SECURE`   | `true` in production | Set to `true` when serving over HTTPS (required in production).                                                              |
+| Variable               | Default                   | Description                                                                                                                  |
+| ---------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                 | `4000`                    | TCP port the server binds to. Railway sets this automatically.                                                               |
+| `GROQ_API_KEY`         | —                         | Optional. Leave unset to use deterministic fallback quests.                                                                  |
+| `GROQ_MODEL`           | `llama-3.3-70b-versatile` | Groq chat model used for live quest generation.                                                                              |
+| `REDIS_URL`            | —                         | Redis connection string for rate limiting. Falls back to in-memory if unset. Required only when `ENABLE_EVENT_STREAM=true`.  |
+| `VERIFIER_PRIVATE_KEY` | —                         | Required in production. Private key for the wallet holding `VERIFIER_ROLE` on the contracts. Also accepted as `PRIVATE_KEY`. |
+| `ENABLE_EVENT_STREAM`  | `false`                   | Master switch for the blockchain event streaming system. Enable only after `REDIS_URL` is configured.                        |
+| `WEBSOCKET_ENABLED`    | `true`                    | Enable Socket.IO for real-time frontend updates.                                                                             |
+| `AUTH_COOKIE_SECURE`   | `true` in production      | Set to `true` when serving over HTTPS (required in production).                                                              |
 
 See [`.env.example`](.env.example) for the full list of variables with descriptions and default values.
 
@@ -74,7 +75,7 @@ See [`.env.example`](.env.example) for the full list of variables with descripti
 | -------------------------- | --------------------------------------- | -------------------------------------------------------------------------------------- |
 | `ENABLE_EVENT_STREAM=true` | `REDIS_URL`                             | Required for the BullMQ queue and worker. Without Redis, startup validation will fail. |
 | Production verifier wallet | `VERIFIER_PRIVATE_KEY` or `PRIVATE_KEY` | Required in production. Must be a raw `0x` + 64 hex character private key.             |
-| Production AI generation   | `OPENAI_API_KEY`                        | Required in production because OpenAI fallback is disabled there.                      |
+| Production AI generation   | `GROQ_API_KEY`                          | Optional; missing or unhealthy Groq enables deterministic fallback quests.             |
 
 ## Health Checks
 
