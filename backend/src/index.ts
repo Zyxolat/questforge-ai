@@ -354,6 +354,8 @@ async function bootstrap() {
     });
 
     try {
+      await initializeOptionalRuntimeServices(attempt);
+
       await runStartupStep('database', attempt, async () => {
         await prisma.$queryRaw`SELECT 1`;
         await assertAuthStorageReady(prisma);
@@ -624,9 +626,6 @@ async function bootstrap() {
       websocketEnabled: env.WEBSOCKET_ENABLED
     });
 
-    void initializeOptionalRuntimeServices(startupState.initializationAttempts + 1).catch((error) => {
-      logger.error('[STARTUP] Optional runtime service initialization failed', error);
-    });
     void initializeBackgroundServices();
   });
 }

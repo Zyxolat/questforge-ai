@@ -363,7 +363,7 @@ class AIOpenAIClient {
         lastError: message
       };
 
-      logger.error('[OPENAI-CLIENT] OpenAI connectivity probe failed', error, {
+      logger.error(`[OPENAI-CLIENT] OpenAI connectivity probe failed: ${message}`, error, {
         model
       });
       throw error;
