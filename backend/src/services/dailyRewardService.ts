@@ -10,6 +10,7 @@ const DAILY_REWARD_AMOUNT_CELO = '0.0001';
 const DAILY_REWARD_AMOUNT_WEI = ethers.parseEther(DAILY_REWARD_AMOUNT_CELO);
 const PROCESSING_LOCK_WINDOW_MS = 10 * 60 * 1000;
 const DUPLICATE_MESSAGE = "You have already claimed today's reward. Come back tomorrow.";
+const DAILY_REWARD_PRIORITY_FEE_CAP_WEI = ethers.parseUnits('0.5', 'gwei');
 
 type DailyRewardClaimRow = {
   id: string;
@@ -35,6 +36,8 @@ type DailyRewardUserRow = {
 };
 
 export class DailyRewardAlreadyClaimedError extends Error {
+  readonly statusCode = 409;
+
   constructor() {
     super(DUPLICATE_MESSAGE);
     this.name = 'DailyRewardAlreadyClaimedError';
@@ -42,9 +45,14 @@ export class DailyRewardAlreadyClaimedError extends Error {
 }
 
 export class DailyRewardPayoutError extends Error {
-  constructor(message: string) {
+  readonly statusCode: number;
+  readonly details?: Record<string, unknown>;
+
+  constructor(message: string, statusCode = 503, details?: Record<string, unknown>) {
     super(message);
     this.name = 'DailyRewardPayoutError';
+    this.statusCode = statusCode;
+    this.details = details;
   }
 }
 
@@ -70,7 +78,9 @@ function wasYesterdayUtc(previous: Date | null, claimDate: string) {
 async function estimateTransferCost(to: string) {
   const signer = contracts.dailyRewardSigner;
   if (!signer) {
-    throw new DailyRewardPayoutError('Daily reward treasury signer is not configured');
+    throw new DailyRewardPayoutError('Daily reward treasury signer is not configured', 503, {
+      step: 'signer_configuration'
+    });
   }
 
   const [balance, gasLimit, feeData] = await Promise.all([
@@ -78,8 +88,22 @@ async function estimateTransferCost(to: string) {
     signer.estimateGas({ to, value: DAILY_REWARD_AMOUNT_WEI }),
     contracts.provider.getFeeData()
   ]);
-  const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas ?? 0n;
-  const estimatedGasCost = gasLimit * gasPrice;
+  const legacyGasPrice = feeData.gasPrice ?? 0n;
+  const suggestedPriorityFee = feeData.maxPriorityFeePerGas ?? legacyGasPrice;
+  const priorityFeePerGas =
+    suggestedPriorityFee > DAILY_REWARD_PRIORITY_FEE_CAP_WEI ? DAILY_REWARD_PRIORITY_FEE_CAP_WEI : suggestedPriorityFee;
+  const suggestedMaxFee = feeData.maxFeePerGas ?? (legacyGasPrice > 0n ? legacyGasPrice * 2n : priorityFeePerGas);
+  const maxFeePerGas = suggestedMaxFee < priorityFeePerGas ? priorityFeePerGas : suggestedMaxFee;
+  const usesEip1559Fees = feeData.maxFeePerGas != null || feeData.maxPriorityFeePerGas != null;
+  const txFeeOverrides = usesEip1559Fees
+    ? {
+        maxPriorityFeePerGas: priorityFeePerGas,
+        maxFeePerGas
+      }
+    : {
+        gasPrice: legacyGasPrice > 0n ? legacyGasPrice : maxFeePerGas
+      };
+  const estimatedGasCost = gasLimit * (usesEip1559Fees ? maxFeePerGas : legacyGasPrice || maxFeePerGas);
   const requiredBalance = DAILY_REWARD_AMOUNT_WEI + estimatedGasCost;
 
   return {
@@ -87,9 +111,274 @@ async function estimateTransferCost(to: string) {
     treasuryWallet: signer.address,
     balance,
     gasLimit,
-    gasPrice,
+    txFeeOverrides,
     estimatedGasCost,
+    feeMode: usesEip1559Fees ? 'eip1559' : 'legacy',
+    priorityFeePerGas: usesEip1559Fees ? priorityFeePerGas : null,
+    maxFeePerGas: usesEip1559Fees ? maxFeePerGas : null,
     requiredBalance
+  };
+}
+
+async function findDailyRewardClaim(wallet: string, claimDate: string) {
+  const [claim] = await prisma.$queryRaw<DailyRewardClaimRow[]>`
+    SELECT
+      id,
+      "userId",
+      wallet,
+      "claimDate",
+      "amountCelo",
+      "txHash",
+      status,
+      "processingStartedAt",
+      "paidAt",
+      "failureReason",
+      "createdAt",
+      "updatedAt"
+    FROM "DailyRewardClaim"
+    WHERE wallet = ${wallet}
+      AND "claimDate" = ${claimDate}
+    LIMIT 1
+  `;
+
+  return claim ?? null;
+}
+
+async function markClaimFailed(
+  claimId: string,
+  error: unknown,
+  txHash?: string,
+  options?: { confirmedOnchainFailure?: boolean }
+) {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (txHash && options?.confirmedOnchainFailure) {
+    await prisma.$executeRaw`
+      UPDATE "DailyRewardClaim"
+      SET
+        status = 'FAILED'::"DailyRewardClaimStatus",
+        "txHash" = NULL,
+        "failureReason" = ${`Confirmed onchain failure: ${message}`},
+        "updatedAt" = ${new Date()}
+      WHERE id = ${claimId}
+    `;
+    return;
+  }
+
+  if (txHash) {
+    await prisma.$executeRaw`
+      UPDATE "DailyRewardClaim"
+      SET
+        "txHash" = ${txHash},
+        "failureReason" = ${`Confirmation pending or failed: ${message}`},
+        "updatedAt" = ${new Date()}
+      WHERE id = ${claimId}
+    `;
+    return;
+  }
+
+  await prisma.$executeRaw`
+    UPDATE "DailyRewardClaim"
+    SET
+      status = 'FAILED'::"DailyRewardClaimStatus",
+      "txHash" = NULL,
+      "failureReason" = ${message},
+      "updatedAt" = ${new Date()}
+    WHERE id = ${claimId}
+  `;
+}
+
+async function resumeExistingClaimIfPossible(input: {
+  claim: DailyRewardClaimRow;
+  claimDate: string;
+  nextAvailableAt: Date;
+}) {
+  if (!input.claim.txHash) {
+    if (input.claim.status === 'PROCESSING') {
+      const claimAgeMs = Date.now() - input.claim.processingStartedAt.getTime();
+      if (claimAgeMs < PROCESSING_LOCK_WINDOW_MS) {
+        throw new DailyRewardPayoutError('A daily reward claim is already in progress. Please try again shortly.', 202, {
+          claimId: input.claim.id,
+          claimDate: input.claimDate,
+          nextAvailableAt: input.nextAvailableAt.toISOString(),
+          state: 'processing'
+        });
+      }
+    }
+    return null;
+  }
+
+  const receipt = await contracts.provider.getTransactionReceipt(input.claim.txHash);
+  if (!receipt) {
+    throw new DailyRewardPayoutError('Previous daily reward payout is still pending onchain. Please try again later.', 202, {
+      claimId: input.claim.id,
+      claimDate: input.claimDate,
+      nextAvailableAt: input.nextAvailableAt.toISOString(),
+      txHash: input.claim.txHash,
+      state: 'pending'
+    });
+  }
+
+  if (receipt.status !== 1) {
+    await markClaimFailed(input.claim.id, new Error('Previous payout transaction reverted onchain'), input.claim.txHash, {
+      confirmedOnchainFailure: true
+    });
+    logger.warn('[DAILY-REWARD] Existing broadcast claim failed onchain and was reset for retry', {
+      claimId: input.claim.id,
+      wallet: input.claim.wallet,
+      claimDate: input.claimDate,
+      txHash: input.claim.txHash,
+      blockNumber: receipt.blockNumber
+    });
+    return null;
+  }
+
+  const [user] = await prisma.$queryRaw<DailyRewardUserRow[]>`
+    SELECT
+      id,
+      wallet,
+      "lastDailyClaimAt",
+      "dailyClaimStreak",
+      "totalClaimedCelo"
+    FROM "User"
+    WHERE id = ${input.claim.userId}
+    LIMIT 1
+  `;
+
+  if (!user) {
+    throw new DailyRewardPayoutError('Daily reward user record was not available during claim recovery', 503, {
+      claimId: input.claim.id,
+      claimDate: input.claimDate,
+      txHash: input.claim.txHash ?? 'unknown'
+    });
+  }
+
+  const paidAt = new Date();
+  const confirmedTxHash = input.claim.txHash;
+  if (!confirmedTxHash) {
+    throw new DailyRewardPayoutError('Recovered daily reward claim was missing its transaction hash', 503, {
+      claimId: input.claim.id,
+      claimDate: input.claimDate
+    });
+  }
+  const finalized = await prisma.$transaction(
+    async (txClient) => {
+      const [updatedClaim] = await txClient.$queryRaw<DailyRewardClaimRow[]>`
+        UPDATE "DailyRewardClaim"
+        SET
+          status = 'PAID'::"DailyRewardClaimStatus",
+          "paidAt" = ${paidAt},
+          "failureReason" = NULL,
+          "updatedAt" = ${paidAt}
+        WHERE
+          id = ${input.claim.id}
+          AND "txHash" = ${confirmedTxHash}
+          AND status IN ('PROCESSING'::"DailyRewardClaimStatus", 'FAILED'::"DailyRewardClaimStatus")
+        RETURNING *
+      `;
+
+      if (!updatedClaim) {
+        const [existingClaim] = await txClient.$queryRaw<DailyRewardClaimRow[]>`
+          SELECT *
+          FROM "DailyRewardClaim"
+          WHERE id = ${input.claim.id}
+          LIMIT 1
+        `;
+        if (existingClaim?.status === 'PAID') {
+          throw new DailyRewardAlreadyClaimedError();
+        }
+        throw new DailyRewardPayoutError('Daily reward claim was no longer available to finalize', 503, {
+          claimId: input.claim.id,
+          claimDate: input.claimDate,
+            txHash: confirmedTxHash
+          });
+        }
+
+      const newStreak = wasYesterdayUtc(user.lastDailyClaimAt, input.claimDate) ? user.dailyClaimStreak + 1 : 1;
+
+      const [updatedUser] = await txClient.$queryRaw<DailyRewardUserRow[]>`
+        UPDATE "User"
+        SET
+          "lastDailyClaimAt" = ${paidAt},
+          "dailyClaimStreak" = ${newStreak},
+          "totalClaimedCelo" = "totalClaimedCelo" + ${Number(DAILY_REWARD_AMOUNT_CELO)},
+          "updatedAt" = ${paidAt}
+        WHERE id = ${user.id}
+        RETURNING
+          id,
+          wallet,
+          "lastDailyClaimAt",
+          "dailyClaimStreak",
+          "totalClaimedCelo"
+      `;
+      if (!updatedUser) {
+        throw new DailyRewardPayoutError('Daily reward user record was not updated during claim recovery', 503, {
+          claimId: input.claim.id,
+          claimDate: input.claimDate,
+          txHash: confirmedTxHash
+        });
+      }
+
+      await txClient.reward.create({
+        data: {
+          userId: user.id,
+          type: 'daily_celo',
+          amount: Number(DAILY_REWARD_AMOUNT_CELO),
+          tokenTx: confirmedTxHash
+        }
+      });
+
+      await txClient.transaction.create({
+        data: {
+          userId: user.id,
+          wallet: user.wallet,
+          type: 'daily_reward_payout',
+          chainId: env.CELO_CHAIN_ID,
+          txHash: confirmedTxHash,
+          details: {
+            claimId: input.claim.id,
+            claimDate: input.claimDate,
+            amountCelo: DAILY_REWARD_AMOUNT_CELO,
+            treasuryWallet: contracts.dailyRewardSigner?.address ?? 'unknown'
+          }
+        }
+      });
+
+      return { updatedClaim, updatedUser };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
+  );
+
+  logger.info('[DAILY-REWARD] Existing payout transaction finalized on retry', {
+    userId: user.id,
+    wallet: user.wallet,
+    claimId: input.claim.id,
+    claimDate: input.claimDate,
+    txHash: confirmedTxHash,
+    blockNumber: receipt.blockNumber,
+    dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+    totalClaimedCelo: finalized.updatedUser.totalClaimedCelo
+  });
+
+  return {
+    success: true,
+    message: 'Daily CELO reward claimed!',
+    reward: {
+      amountCelo: DAILY_REWARD_AMOUNT_CELO,
+      txHash: finalized.updatedClaim.txHash!,
+      claimedAt: finalized.updatedClaim.paidAt!.toISOString(),
+      claimDate: input.claimDate,
+      nextAvailableAt: input.nextAvailableAt.toISOString(),
+      dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+      totalClaimedCelo: Number(finalized.updatedUser.totalClaimedCelo.toFixed(4))
+    },
+    user: {
+      id: finalized.updatedUser.id,
+      wallet: finalized.updatedUser.wallet,
+      dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+      totalClaimedCelo: Number(finalized.updatedUser.totalClaimedCelo.toFixed(4)),
+      lastDailyClaimAt: finalized.updatedUser.lastDailyClaimAt?.toISOString() ?? null
+    }
   };
 }
 
@@ -186,35 +475,12 @@ async function reserveDailyClaim(wallet: string, claimDate: string) {
   );
 }
 
-async function markClaimFailed(claimId: string, error: unknown, txHash?: string) {
-  const message = error instanceof Error ? error.message : String(error);
-
-  if (txHash) {
-    await prisma.$executeRaw`
-      UPDATE "DailyRewardClaim"
-      SET
-        "txHash" = ${txHash},
-        "failureReason" = ${`Confirmation pending or failed: ${message}`},
-        "updatedAt" = ${new Date()}
-      WHERE id = ${claimId}
-    `;
-    return;
-  }
-
-  await prisma.$executeRaw`
-    UPDATE "DailyRewardClaim"
-    SET
-      status = 'FAILED'::"DailyRewardClaimStatus",
-      "failureReason" = ${message},
-      "updatedAt" = ${new Date()}
-    WHERE id = ${claimId}
-  `;
-}
-
 export async function claimDailyCeloReward(input: { wallet: string }) {
   const wallet = normalizeWallet(input.wallet);
   const claimDate = getUtcClaimDate();
   const nextAvailableAt = getNextUtcMidnight();
+  let user: DailyRewardUserRow | null = null;
+  let claim: DailyRewardClaimRow | null = null;
 
   logger.info('[DAILY-REWARD] Claim requested', {
     wallet,
@@ -222,13 +488,36 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
     amountCelo: DAILY_REWARD_AMOUNT_CELO
   });
 
-  const { user, claim } = await reserveDailyClaim(wallet, claimDate);
+  const existingClaim = await findDailyRewardClaim(wallet, claimDate);
+  if (existingClaim) {
+    if (existingClaim.status === 'PAID') {
+      throw new DailyRewardAlreadyClaimedError();
+    }
+
+    const recovered = await resumeExistingClaimIfPossible({
+      claim: existingClaim,
+      claimDate,
+      nextAvailableAt
+    });
+    if (recovered) {
+      return recovered;
+    }
+  }
+
+  const reservation = await reserveDailyClaim(wallet, claimDate);
+  user = reservation.user;
+  claim = reservation.claim;
   let txHash: string | undefined;
+  let claimFailurePersisted = false;
 
   try {
     const transferCost = await estimateTransferCost(wallet);
     if (transferCost.balance < transferCost.requiredBalance) {
-      throw new DailyRewardPayoutError('Daily reward treasury balance is insufficient for payout and gas');
+      throw new DailyRewardPayoutError('Daily reward treasury balance is insufficient for payout and gas', 503, {
+        step: 'balance_check',
+        balanceWei: transferCost.balance.toString(),
+        requiredBalanceWei: transferCost.requiredBalance.toString()
+      });
     }
 
     logger.info('[DAILY-REWARD] Treasury balance verified', {
@@ -238,14 +527,19 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
       claimDate,
       treasuryWallet: transferCost.treasuryWallet,
       amountCelo: DAILY_REWARD_AMOUNT_CELO,
+      feeMode: transferCost.feeMode,
       balanceWei: transferCost.balance.toString(),
       requiredBalanceWei: transferCost.requiredBalance.toString(),
-      estimatedGasCostWei: transferCost.estimatedGasCost.toString()
+      estimatedGasCostWei: transferCost.estimatedGasCost.toString(),
+      maxFeePerGasWei: transferCost.maxFeePerGas?.toString() ?? null,
+      priorityFeePerGasWei: transferCost.priorityFeePerGas?.toString() ?? null
     });
 
     const tx = await transferCost.signer.sendTransaction({
       to: wallet,
-      value: DAILY_REWARD_AMOUNT_WEI
+      value: DAILY_REWARD_AMOUNT_WEI,
+      gasLimit: transferCost.gasLimit,
+      ...transferCost.txFeeOverrides
     });
     txHash = tx.hash;
     await prisma.$executeRaw`
@@ -268,16 +562,28 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
 
     const receipt = await tx.wait(1);
     if (!receipt || receipt.status !== 1) {
-      throw new DailyRewardPayoutError('Daily reward payout transaction was not confirmed successfully');
+      await markClaimFailed(claim.id, new Error('Daily reward payout transaction was not confirmed successfully'), txHash, {
+        confirmedOnchainFailure: true
+      });
+      claimFailurePersisted = true;
+      throw new DailyRewardPayoutError('Daily reward payout transaction was not confirmed successfully', 502, {
+        step: 'confirmation',
+        claimId: claim.id,
+        txHash,
+        claimStateUpdate: 'persisted'
+      });
     }
     if (!txHash) {
-      throw new DailyRewardPayoutError('Daily reward payout transaction hash was missing after confirmation');
+      throw new DailyRewardPayoutError('Daily reward payout transaction hash was missing after confirmation', 503, {
+        step: 'confirmation',
+        claimId: claim.id
+      });
     }
     const confirmedTxHash = txHash;
 
-    const paidAt = new Date();
-    const result = await prisma.$transaction(
+    const finalized = await prisma.$transaction(
       async (txClient) => {
+        const paidAt = new Date();
         const [updatedClaim] = await txClient.$queryRaw<DailyRewardClaimRow[]>`
           UPDATE "DailyRewardClaim"
           SET
@@ -287,8 +593,8 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
             "updatedAt" = ${paidAt}
           WHERE
             id = ${claim.id}
-            AND status = 'PROCESSING'::"DailyRewardClaimStatus"
             AND "txHash" = ${confirmedTxHash}
+            AND status IN ('PROCESSING'::"DailyRewardClaimStatus", 'FAILED'::"DailyRewardClaimStatus")
           RETURNING *
         `;
 
@@ -302,7 +608,11 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
           if (existingClaim?.status === 'PAID') {
             throw new DailyRewardAlreadyClaimedError();
           }
-          throw new DailyRewardPayoutError('Daily reward claim was no longer available to finalize');
+          throw new DailyRewardPayoutError('Daily reward claim was no longer available to finalize', 503, {
+            step: 'finalize',
+            claimId: claim.id,
+            txHash: confirmedTxHash
+          });
         }
 
         const [currentUser] = await txClient.$queryRaw<DailyRewardUserRow[]>`
@@ -317,11 +627,13 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
           LIMIT 1
         `;
         if (!currentUser) {
-          throw new DailyRewardPayoutError('Daily reward user record was not available during finalization');
+          throw new DailyRewardPayoutError('Daily reward user record was not available during finalization', 503, {
+            step: 'finalize_user_lookup',
+            claimId: claim.id,
+            txHash: confirmedTxHash
+          });
         }
-        const newStreak = wasYesterdayUtc(currentUser.lastDailyClaimAt, claimDate)
-          ? currentUser.dailyClaimStreak + 1
-          : 1;
+        const newStreak = wasYesterdayUtc(currentUser.lastDailyClaimAt, claimDate) ? currentUser.dailyClaimStreak + 1 : 1;
 
         const [updatedUser] = await txClient.$queryRaw<DailyRewardUserRow[]>`
           UPDATE "User"
@@ -339,7 +651,11 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
             "totalClaimedCelo"
         `;
         if (!updatedUser) {
-          throw new DailyRewardPayoutError('Daily reward user record was not updated');
+          throw new DailyRewardPayoutError('Daily reward user record was not updated', 503, {
+            step: 'finalize_user_update',
+            claimId: claim.id,
+            txHash: confirmedTxHash
+          });
         }
 
         await txClient.reward.create({
@@ -362,12 +678,15 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
               claimId: claim.id,
               claimDate,
               amountCelo: DAILY_REWARD_AMOUNT_CELO,
-              treasuryWallet: transferCost.treasuryWallet
+              treasuryWallet: transferCost.treasuryWallet,
+              feeMode: transferCost.feeMode,
+              maxFeePerGasWei: transferCost.maxFeePerGas?.toString() ?? null,
+              priorityFeePerGasWei: transferCost.priorityFeePerGas?.toString() ?? null
             }
           }
         });
 
-        return { updatedClaim, updatedUser };
+        return { updatedClaim, updatedUser, paidAt };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
     );
@@ -380,8 +699,9 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
       txHash,
       blockNumber: receipt.blockNumber,
       amountCelo: DAILY_REWARD_AMOUNT_CELO,
-      dailyClaimStreak: result.updatedUser.dailyClaimStreak,
-      totalClaimedCelo: result.updatedUser.totalClaimedCelo
+      feeMode: transferCost.feeMode,
+      dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+      totalClaimedCelo: finalized.updatedUser.totalClaimedCelo
     });
 
     return {
@@ -389,29 +709,39 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
       message: 'Daily CELO reward claimed!',
       reward: {
         amountCelo: DAILY_REWARD_AMOUNT_CELO,
-        txHash: result.updatedClaim.txHash!,
-        claimedAt: result.updatedClaim.paidAt!.toISOString(),
+        txHash: finalized.updatedClaim.txHash!,
+        claimedAt: finalized.paidAt.toISOString(),
         claimDate,
         nextAvailableAt: nextAvailableAt.toISOString(),
-        dailyClaimStreak: result.updatedUser.dailyClaimStreak,
-        totalClaimedCelo: Number(result.updatedUser.totalClaimedCelo.toFixed(4))
+        dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+        totalClaimedCelo: Number(finalized.updatedUser.totalClaimedCelo.toFixed(4))
       },
       user: {
-        id: result.updatedUser.id,
-        wallet: result.updatedUser.wallet,
-        dailyClaimStreak: result.updatedUser.dailyClaimStreak,
-        totalClaimedCelo: Number(result.updatedUser.totalClaimedCelo.toFixed(4)),
-        lastDailyClaimAt: result.updatedUser.lastDailyClaimAt?.toISOString() ?? null
+        id: finalized.updatedUser.id,
+        wallet: finalized.updatedUser.wallet,
+        dailyClaimStreak: finalized.updatedUser.dailyClaimStreak,
+        totalClaimedCelo: Number(finalized.updatedUser.totalClaimedCelo.toFixed(4)),
+        lastDailyClaimAt: finalized.updatedUser.lastDailyClaimAt?.toISOString() ?? null
       }
     };
   } catch (error) {
-    await markClaimFailed(claim.id, error, txHash);
+    const shouldSkipPersistence =
+      error instanceof DailyRewardPayoutError && (error.statusCode === 202 || error.details?.claimStateUpdate === 'persisted');
+
+    if (!shouldSkipPersistence && !claimFailurePersisted && claim) {
+      await markClaimFailed(claim.id, error, txHash);
+    }
     logger.error('[DAILY-REWARD] Claim payout failed', error, {
-      userId: user.id,
+      userId: user?.id ?? null,
       wallet,
-      claimId: claim.id,
+      claimId: claim?.id ?? null,
       claimDate,
       txHash: txHash ?? null,
+      state: claimFailurePersisted
+        ? 'persisted'
+        : error instanceof DailyRewardPayoutError && error.statusCode === 202
+          ? 'pending'
+          : 'rolled_back',
       amountCelo: DAILY_REWARD_AMOUNT_CELO
     });
     throw error;

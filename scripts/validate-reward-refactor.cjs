@@ -147,6 +147,12 @@ function createFakePrisma() {
         return [byClaimId(values[0])].filter(Boolean);
       }
 
+      if (/FROM "DailyRewardClaim"/.test(sql) && /WHERE wallet =/.test(sql) && /claimDate/.test(sql)) {
+        const [wallet, claimDate] = values;
+        const claim = [...state.claims.values()].find((row) => row.wallet === wallet && row.claimDate === claimDate) || null;
+        return [claim].filter(Boolean);
+      }
+
       if (/UPDATE "User"/.test(sql) && /RETURNING/.test(sql)) {
         const [paidAt, dailyClaimStreak, amountCelo, updatedAt, id] = values;
         const user = state.users.get(id);
@@ -167,7 +173,7 @@ function createFakePrisma() {
     async $executeRaw(strings, ...values) {
       const sql = strings.join(' ');
 
-      if (/UPDATE "DailyRewardClaim"/.test(sql) && /"txHash"/.test(sql)) {
+      if (/UPDATE "DailyRewardClaim"/.test(sql) && /"txHash"/.test(sql) && !/status = 'FAILED'/.test(sql)) {
         const txHash = values[0];
         const failureReason = values.length === 4 ? values[1] : null;
         const updatedAt = values.length === 4 ? values[2] : values[1];
@@ -199,7 +205,8 @@ function createFakeContracts() {
   const state = {
     balance: 10n ** 18n,
     waitMode: 'success',
-    sendCount: 0
+    sendCount: 0,
+    receipts: new Map()
   };
 
   const signer = {
@@ -216,6 +223,7 @@ function createFakeContracts() {
           if (state.waitMode === 'timeout') {
             throw new Error('RPC timeout while waiting for confirmation');
           }
+          state.receipts.set(hash, { hash, status: 1, blockNumber: 123, logs: [] });
           return { status: 1, blockNumber: 123 };
         }
       };
@@ -232,6 +240,9 @@ function createFakeContracts() {
         },
         async getFeeData() {
           return { gasPrice: 1n };
+        },
+        async getTransactionReceipt(hash) {
+          return state.receipts.get(hash) || null;
         }
       }
     }
@@ -292,6 +303,7 @@ function resetDailyState() {
   fakeContracts.state.balance = 10n ** 18n;
   fakeContracts.state.waitMode = 'success';
   fakeContracts.state.sendCount = 0;
+  fakeContracts.state.receipts.clear();
 }
 
 function narrativeContext() {
@@ -415,9 +427,34 @@ async function testSubmittedHashDoesNotResendOnRetry() {
   fakeContracts.state.waitMode = 'success';
   await assert.rejects(
     () => claimDailyCeloReward({ wallet: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }),
-    DailyRewardAlreadyClaimedError
+    (error) => {
+      assert.equal(error.name, 'DailyRewardPayoutError');
+      assert.equal(error.statusCode, 202);
+      assert.match(error.message, /pending onchain/i);
+      return true;
+    }
   );
   assert.equal(fakeContracts.state.sendCount, 1);
+}
+
+async function testPendingClaimCanFinalizeWithoutResend() {
+  resetDailyState();
+  fakeContracts.state.waitMode = 'timeout';
+
+  await assert.rejects(
+    () => claimDailyCeloReward({ wallet: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }),
+    /RPC timeout/
+  );
+
+  const claim = [...fakePrisma.state.claims.values()][0];
+  fakeContracts.state.receipts.set(claim.txHash, { hash: claim.txHash, status: 1, blockNumber: 123, logs: [] });
+  fakeContracts.state.waitMode = 'success';
+
+  const resumed = await claimDailyCeloReward({ wallet: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' });
+  assert.equal(resumed.success, true);
+  assert.equal(fakeContracts.state.sendCount, 1);
+  assert.equal(fakePrisma.state.rewards.length, 1);
+  assert.equal(fakePrisma.state.transactions.length, 1);
 }
 
 async function testQuestNarrativeFallbackAndGroq() {
@@ -493,6 +530,7 @@ function testDailyXpCopyRemoved() {
   await testDailyRewardSuccessAndDuplicate();
   await testTreasuryFailureDoesNotUpdateUser();
   await testSubmittedHashDoesNotResendOnRetry();
+  await testPendingClaimCanFinalizeWithoutResend();
   await testQuestNarrativeFallbackAndGroq();
   testDailyXpCopyRemoved();
   console.log('Reward refactor validation passed');

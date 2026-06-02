@@ -729,7 +729,7 @@ function computeVerificationHash(wallet: string, proofTxHash: string, playerNonc
 async function markProofResult(input: {
   proofSubmissionId: string;
   questId: string;
-  result: 'approved' | 'rejected';
+  result: 'VERIFIED' | 'REJECTED';
   reason: string;
   verificationTx?: string;
 }) {
@@ -744,10 +744,10 @@ async function markProofResult(input: {
 
   await updateQuestSubmissionState({
     questId: input.questId,
-    status: input.result === 'approved' ? 'VERIFIED' : 'FAILED',
+    status: input.result === 'VERIFIED' ? 'VERIFIED' : 'FAILED',
     verificationTx: input.verificationTx,
-    completedAt: input.result === 'approved' ? now : null,
-    failedAt: input.result === 'rejected' ? now : null
+    completedAt: input.result === 'VERIFIED' ? now : null,
+    failedAt: input.result === 'REJECTED' ? now : null
   });
 }
 
@@ -772,7 +772,7 @@ async function settleVerificationSuccess(input: {
   await markProofResult({
     proofSubmissionId,
     questId: quest.id,
-    result: 'approved',
+    result: 'VERIFIED',
     reason: verificationReason,
     verificationTx: verificationTxHash
   });
@@ -812,7 +812,7 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
     await markProofResult({
       proofSubmissionId,
       questId: quest.id,
-      result: 'rejected',
+      result: 'REJECTED',
       reason: verificationReason
     });
     return;
@@ -836,13 +836,13 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
   await markProofResult({
     proofSubmissionId,
     questId: quest.id,
-    result: 'rejected',
+    result: 'REJECTED',
     reason: verificationReason,
     verificationTx: verificationTxHash
   });
 
   await publishVerificationRealtimeEvent({
-    replayKey: `verification-failure-claimed:${quest.id}:${verificationTxHash ?? 'rejected'}`,
+    replayKey: `verification-failure-claimed:${quest.id}:${verificationTxHash ?? 'REJECTED'}`,
     eventName: 'reward:claimed',
     quest,
     payload: {
@@ -877,7 +877,7 @@ async function verifyQueuedProof(proofSubmissionId: string) {
   if (!quest || !quest.playerId || !quest.playerWallet || !quest.chainQuestId) {
     await updateProofSubmission({
       id: proof.id,
-      verificationResult: 'rejected',
+      verificationResult: 'REJECTED',
       verificationReason: 'Quest context is incomplete for deterministic verification',
       verifiedAt: new Date()
     });
@@ -889,6 +889,7 @@ async function verifyQueuedProof(proofSubmissionId: string) {
     chainQuestId: quest.chainQuestId.toString(),
     wallet: quest.playerWallet,
     proofSubmissionId: proof.id,
+    proofId: proof.id,
     proofReceivedAt: proof.submittedAt.toISOString()
   });
 
@@ -907,6 +908,7 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       chainQuestId: quest.chainQuestId.toString(),
       wallet: quest.playerWallet,
       proofSubmissionId: proof.id,
+      proofId: proof.id,
       proofTxHash,
       submissionTxHash
     });
@@ -955,6 +957,7 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       chainQuestId: quest.chainQuestId.toString(),
       wallet: quest.playerWallet,
       proofSubmissionId: proof.id,
+      proofId: proof.id,
       proofTxHash,
       submissionTxHash,
       validationDurationMs: elapsedMs(verificationStartedAtMs)
@@ -972,7 +975,8 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       chainQuestId: quest.chainQuestId.toString(),
       wallet: quest.playerWallet,
       proofSubmissionId: proof.id,
-      result: 'approved',
+      proofId: proof.id,
+      verificationResult: 'VERIFIED',
       durationMs: elapsedMs(verificationStartedAtMs)
     });
   } catch (error) {
@@ -983,7 +987,8 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       chainQuestId: quest.chainQuestId.toString(),
       wallet: quest.playerWallet,
       proofSubmissionId: proof.id,
-      result: 'rejected',
+      proofId: proof.id,
+      verificationResult: 'REJECTED',
       reason,
       durationMs: elapsedMs(verificationStartedAtMs)
     });
@@ -1024,13 +1029,18 @@ export async function queueProofVerification(params: {
   }
 
   if (existingProof) {
+    if (existingProof.verificationResult && !['pending', 'processing'].includes(existingProof.verificationResult)) {
+      throw new Error(`Proof has already been ${existingProof.verificationResult.toLowerCase()}`);
+    }
+
     proofSubmissionId = existingProof.id;
-    await updateProofSubmission({
-      id: existingProof.id,
-      proofUri: canonicalProofTxHash,
-      verificationResult: 'pending',
-      verificationReason: 'Queued for deterministic verification',
-      verifiedAt: null
+    logger.info('Proof verification request deduplicated', {
+      questId: params.questId,
+      proofSubmissionId,
+      proofId: proofSubmissionId,
+      proofTxHash: canonicalProofTxHash,
+      submissionTxHash: normalizedSubmissionTxHash,
+      currentVerificationResult: existingProof.verificationResult
     });
   } else {
     proofSubmissionId = await insertProofSubmission({

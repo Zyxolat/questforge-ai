@@ -1099,7 +1099,7 @@ class AuthoritativeEventProjector {
         where: { proofHash },
         data: {
           verifiedAt: event.blockTimestamp,
-          verificationResult: success ? 'approved' : 'rejected',
+          verificationResult: success ? 'VERIFIED' : 'REJECTED',
           verificationReason: success ? 'verified_onchain' : 'rejected_onchain'
         }
       });

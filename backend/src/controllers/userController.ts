@@ -4,6 +4,7 @@ import { normalizeWallet } from '../services/chain';
 import {
   claimDailyCeloReward,
   DailyRewardAlreadyClaimedError,
+  DailyRewardPayoutError,
   dailyRewardContract
 } from '../services/dailyRewardService';
 import { logger } from '../services/logger';
@@ -56,9 +57,26 @@ export async function claimDailyLoginBonus(req: Request, res: Response) {
         wallet: normalizeWallet(address),
         claimDate: dailyRewardContract.getUtcClaimDate()
       });
-      return res.json({
+      return res.status(error.statusCode).json({
         success: false,
-        message: dailyRewardContract.duplicateMessage
+        message: dailyRewardContract.duplicateMessage,
+        nextAvailableAt: dailyRewardContract.getNextUtcMidnight().toISOString()
+      });
+    }
+
+    if (error instanceof DailyRewardPayoutError) {
+      logger.warn('[DAILY-REWARD] Claim rejected with explicit payout error', {
+        wallet: normalizeWallet(address),
+        claimDate: dailyRewardContract.getUtcClaimDate(),
+        statusCode: error.statusCode,
+        message: error.message,
+        details: error.details ?? null
+      });
+
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message,
+        details: error.details ?? null
       });
     }
 
