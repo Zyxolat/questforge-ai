@@ -142,15 +142,16 @@ openssl rand -hex 32
 
 - [ ] JWT_SECRET = (your 32-char hex string)
 
-#### VERIFIER_PRIVATE_KEY (optional)
+#### VERIFIER_PRIVATE_KEY (required in production)
 
-- [ ] VERIFIER_PRIVATE_KEY = (if you want on-chain verification)
-- [ ] Leave blank if not using on-chain verification
+- [ ] VERIFIER_PRIVATE_KEY = (raw private key for wallet with `VERIFIER_ROLE`)
+- [ ] Must be a 32-byte hex private key: `0x` followed by 64 hex characters
+- [ ] Do not use the public wallet address, mnemonic phrase, placeholder text, or `${{...}}` template
 
-#### OPENAI_API_KEY (optional)
+#### OPENAI_API_KEY (required in production)
 
 - [ ] OPENAI_API_KEY = sk-proj-... (for AI quest generation)
-- [ ] Leave blank to disable AI features
+- [ ] Leave blank only for non-production development
 
 ### 5d. Frontend URLs (update after frontend deployment)
 

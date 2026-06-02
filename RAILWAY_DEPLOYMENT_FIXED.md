@@ -92,16 +92,16 @@ CORS_ORIGIN=https://your-frontend.railway.app
 API_URL=${{Railway.PublicUrl}}
 ```
 
-#### OpenAI (OPTIONAL - Quest Generation)
+#### OpenAI (Required in production)
 
 ```
 OPENAI_API_KEY=sk-proj-<your-openai-key>
 ```
 
-#### Verifier Key (OPTIONAL - On-chain verification)
+#### Verifier Key (Required in production)
 
 ```
-VERIFIER_PRIVATE_KEY=<wallet-private-key-with-verifier-role>
+VERIFIER_PRIVATE_KEY=<0x-prefixed-32-byte-private-key-for-wallet-with-verifier-role>
 ```
 
 #### Optional Features

@@ -313,6 +313,39 @@ function captureOptional<T>(
   }
 }
 
+function captureVerifierPrivateKey(nodeEnv: string, errors: EnvIssue[], warnings: EnvIssue[]) {
+  const name = optionalEnv('VERIFIER_PRIVATE_KEY') ? 'VERIFIER_PRIVATE_KEY' : 'PRIVATE_KEY';
+  const raw = optionalEnv(name);
+
+  if (!raw) {
+    if (nodeEnv === 'production') {
+      addIssue(
+        errors,
+        'Proof Verification',
+        'VERIFIER_PRIVATE_KEY',
+        'is required in production because submitted quests cannot be verified, paid, or minted without a verifier signer'
+      );
+    }
+    return undefined;
+  }
+
+  try {
+    return parseOptionalPrivateKey(name, raw);
+  } catch (error) {
+    addIssue(
+      nodeEnv === 'production' ? errors : warnings,
+      'Proof Verification',
+      name,
+      nodeEnv === 'production'
+        ? error instanceof Error
+          ? error.message
+          : String(error)
+        : `${error instanceof Error ? error.message : String(error)}. Ignoring value.`
+    );
+    return undefined;
+  }
+}
+
 export function validateEnvironment(): EnvValidationResult {
   const errors: EnvIssue[] = [];
   const warnings: EnvIssue[] = [];
@@ -398,12 +431,7 @@ export function validateEnvironment(): EnvValidationResult {
   const redisUrl = captureOptional('REDIS_URL', 'Optional Services', warnings, (raw) =>
     parseUrl('REDIS_URL', raw).toString()
   );
-  const verifierPrivateKey = captureOptional(
-    optionalEnv('VERIFIER_PRIVATE_KEY') ? 'VERIFIER_PRIVATE_KEY' : 'PRIVATE_KEY',
-    'Optional Services',
-    warnings,
-    (raw) => parseOptionalPrivateKey('VERIFIER_PRIVATE_KEY', raw)
-  );
+  const verifierPrivateKey = captureVerifierPrivateKey(nodeEnv, errors, warnings);
 
   if (enableEventStream && !redisUrl) {
     addIssue(
@@ -438,15 +466,6 @@ export function validateEnvironment(): EnvValidationResult {
       'AI Generation',
       'ALLOW_AI_FALLBACK',
       'must be false in production so OpenAI outages cannot silently degrade into deterministic fallback content'
-    );
-  }
-
-  if (nodeEnv === 'production' && !verifierPrivateKey) {
-    addIssue(
-      errors,
-      'Proof Verification',
-      'VERIFIER_PRIVATE_KEY',
-      'is required in production because submitted quests cannot be verified, paid, or minted without a verifier signer'
     );
   }
 
