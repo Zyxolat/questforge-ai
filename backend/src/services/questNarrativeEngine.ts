@@ -262,6 +262,7 @@ class QuestNarrativeEngine {
   }
 
   async generateQuestNarrative(context: NarrativeContext): Promise<QuestNarrativeDraft> {
+    const generationStartedAt = Date.now();
     const prompt = buildAIQuestPrompt(context);
     const promptHash = hashPrompt(prompt);
     const promptSummary = promptPreview(prompt);
@@ -284,20 +285,30 @@ class QuestNarrativeEngine {
         promptHash
       });
 
+      const latencyMs = Date.now() - generationStartedAt;
       const fallback = this.buildFallbackNarrative(context, {
         source: 'deterministic_fallback',
-        provider: 'deterministic',
+        provider: 'fallback',
         model: null,
         promptHash,
         promptPreview: promptSummary,
         fallbackReason: 'GROQ_API_KEY not configured',
         generatedAt: new Date().toISOString(),
         requestId: null,
-        latencyMs: null,
+        latencyMs,
         promptTokens: null,
         completionTokens: null,
         totalTokens: null,
         attemptCount: null
+      });
+
+      logger.info('[QUEST-AI-GENERATION] Deterministic fallback quest generated', {
+        wallet: context.wallet,
+        provider: fallback.generation.provider,
+        source: fallback.generation.source,
+        fallbackReason: fallback.generation.fallbackReason,
+        latencyMs,
+        promptHash
       });
 
       return fallback;
@@ -306,7 +317,7 @@ class QuestNarrativeEngine {
     // Build fallback for potential use
     const baseFallbackGeneration = {
       source: 'deterministic_fallback' as const,
-      provider: 'deterministic' as const,
+      provider: 'fallback' as const,
       model: null as null,
       promptHash,
       promptPreview: promptSummary,
@@ -372,7 +383,8 @@ class QuestNarrativeEngine {
         return this.buildFallbackNarrative(context, {
           ...baseFallbackGeneration,
           fallbackReason: 'Response parsing failed',
-          generatedAt: new Date().toISOString()
+          generatedAt: new Date().toISOString(),
+          latencyMs: Date.now() - generationStartedAt
         });
       }
 
@@ -429,7 +441,8 @@ class QuestNarrativeEngine {
       return this.buildFallbackNarrative(context, {
         ...baseFallbackGeneration,
         fallbackReason: errorMessage,
-        generatedAt: new Date().toISOString()
+        generatedAt: new Date().toISOString(),
+        latencyMs: Date.now() - generationStartedAt
       });
     }
   }
@@ -709,9 +722,19 @@ class QuestNarrativeEngine {
   ): QuestNarrativeDraft {
     const worldTheme = context.worldState.questThemes[0] ?? 'stabilize an unstable frontier';
     const seasonalHook = context.worldState.seasonalContent[0] ?? context.worldState.season.theme;
-    const primaryFaction = context.worldState.factions[0];
+    const primaryFaction = context.worldState.factions[0] ?? {
+      id: 'forge-keepers',
+      name: 'Forge Keepers',
+      status: 'stable' as const,
+      influence: 0,
+      alignment: 'ally' as const,
+      conflictScore: 0,
+      narrativeHooks: []
+    };
     const opposingFaction =
-      context.worldState.factions.find((faction) => faction.alignment === 'rival') ?? context.worldState.factions[1];
+      context.worldState.factions.find((faction) => faction.alignment === 'rival') ??
+      context.worldState.factions.find((faction) => faction.id !== primaryFaction.id) ??
+      primaryFaction;
     const riskLevel =
       context.difficulty >= 5 ? 'extreme' : context.difficulty >= 4 ? 'high' : context.difficulty >= 3 ? 'moderate' : 'low';
     const primaryInteraction = this.pickPrimaryInteraction(context);

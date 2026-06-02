@@ -39,6 +39,7 @@ export type AppEnv = {
   INDEXER_POLL_INTERVAL_MS: number;
   REDIS_URL?: string;
   VERIFIER_PRIVATE_KEY?: string;
+  DAILY_REWARD_TREASURY_PRIVATE_KEY?: string;
   VERIFICATION_WORKER_INTERVAL_MS: number;
   VERIFICATION_BATCH_SIZE: number;
   AUTH_DOMAIN: string;
@@ -435,6 +436,12 @@ export function validateEnvironment(): EnvValidationResult {
     parseUrl('REDIS_URL', raw).toString()
   );
   const verifierPrivateKey = captureVerifierPrivateKey(nodeEnv, errors, warnings);
+  const dailyRewardTreasuryPrivateKey = captureOptional(
+    'DAILY_REWARD_TREASURY_PRIVATE_KEY',
+    'Daily Rewards',
+    warnings,
+    (raw) => parseOptionalPrivateKey('DAILY_REWARD_TREASURY_PRIVATE_KEY', raw)
+  );
 
   if (enableEventStream && !redisUrl) {
     addIssue(
@@ -537,6 +544,7 @@ export function validateEnvironment(): EnvValidationResult {
         ),
         REDIS_URL: redisUrl,
         VERIFIER_PRIVATE_KEY: verifierPrivateKey,
+        DAILY_REWARD_TREASURY_PRIVATE_KEY: dailyRewardTreasuryPrivateKey,
         VERIFICATION_WORKER_INTERVAL_MS: parsePositiveInt(
           'VERIFICATION_WORKER_INTERVAL_MS',
           optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '2000'

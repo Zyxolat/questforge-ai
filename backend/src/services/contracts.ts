@@ -3,6 +3,9 @@ import { env } from '../config/env';
 
 const provider = new ethers.JsonRpcProvider(env.CELO_RPC_URL, env.CELO_CHAIN_ID);
 const verifierSigner = env.VERIFIER_PRIVATE_KEY ? new ethers.Wallet(env.VERIFIER_PRIVATE_KEY, provider) : null;
+const dailyRewardSigner = env.DAILY_REWARD_TREASURY_PRIVATE_KEY
+  ? new ethers.Wallet(env.DAILY_REWARD_TREASURY_PRIVATE_KEY, provider)
+  : verifierSigner;
 
 const forgeQuestManagerAddress = env.FORGE_QUEST_MANAGER_ADDRESS;
 const rewardNFTAddress = env.REWARD_NFT_ADDRESS;
@@ -50,6 +53,7 @@ const forgeQuestManager = new ethers.Contract(forgeQuestManagerAddress, ForgeQue
 export const contracts = {
   provider,
   verifierSigner,
+  dailyRewardSigner,
   forgeQuestManager,
   forgeQuestManagerWrite: verifierSigner ? (forgeQuestManager.connect(verifierSigner) as ethers.Contract) : null,
   rewardNFT: new ethers.Contract(rewardNFTAddress, RewardNFTABI, provider),

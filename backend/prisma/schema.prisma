@@ -22,6 +22,9 @@ model User {
   lastFailedAt           DateTime?
   totalQuestsCompleted   Int                   @default(0)
   totalQuestsFailed      Int                   @default(0)
+  lastDailyClaimAt       DateTime?
+  dailyClaimStreak       Int                   @default(0)
+  totalClaimedCelo       Float                 @default(0)
 
   // AI Agent & Clan relationships
   agent                  AgentIdentity?        @relation(fields: [agentId], references: [id], onDelete: SetNull)
@@ -51,6 +54,7 @@ model User {
   narrativeState         PlayerNarrativeState?
   factionStandings       FactionStanding[]
   memoryLedger           MemoryLedgerEntry[]
+  dailyRewardClaims      DailyRewardClaim[]
 }
 
 model Quest {
@@ -151,6 +155,32 @@ model Reward {
   amount      Float
   tokenTx     String?
   createdAt   DateTime @default(now())
+}
+
+enum DailyRewardClaimStatus {
+  PROCESSING
+  PAID
+  FAILED
+}
+
+model DailyRewardClaim {
+  id                  String                 @id @default(cuid())
+  user                User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId              String
+  wallet              String
+  claimDate           String                 // UTC YYYY-MM-DD
+  amountCelo          Float
+  txHash              String?                @unique
+  status              DailyRewardClaimStatus @default(PROCESSING)
+  processingStartedAt DateTime               @default(now())
+  paidAt              DateTime?
+  failureReason       String?
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@unique([userId, claimDate])
+  @@index([wallet, claimDate])
+  @@index([status, claimDate])
 }
 
 model NFT {

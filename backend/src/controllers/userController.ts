@@ -1,19 +1,12 @@
 import { Request, Response } from 'express';
 import { prisma } from '../services/chain';
 import { normalizeWallet } from '../services/chain';
+import {
+  claimDailyCeloReward,
+  DailyRewardAlreadyClaimedError,
+  dailyRewardContract
+} from '../services/dailyRewardService';
 import { logger } from '../services/logger';
-
-const DAILY_LOGIN_BONUSES = [
-  { day: 1, xp: 100 },
-  { day: 2, xp: 150 },
-  { day: 3, xp: 200 },
-  { day: 7, xp: 500 },
-];
-
-function getLoginBonusForDay(day: number) {
-  // Find bonus for this day, or use the highest available if day exceeds all tiers
-  return DAILY_LOGIN_BONUSES.find(b => b.day === day) || DAILY_LOGIN_BONUSES[DAILY_LOGIN_BONUSES.length - 1];
-}
 
 export async function getPlayerStats(req: Request, res: Response) {
   const wallet = req.query.wallet?.toString();
@@ -55,92 +48,24 @@ export async function claimDailyLoginBonus(req: Request, res: Response) {
   if (!address) return res.status(401).json({ error: 'Unauthorized' });
 
   try {
-    const normalized = normalizeWallet(address);
-    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-
-    // Check if user already claimed bonus today
-    const todayActivity = await prisma.dailyActivity.findUnique({
-      where: { userId_date: { userId: address, date: today } },
-    }).catch(() => null);
-
-    if (todayActivity?.rewardsEarned !== undefined && todayActivity.rewardsEarned > 0) {
-      // Already claimed today
-      return res.status(400).json({
-        error: 'Already claimed daily bonus',
-        message: 'Return tomorrow for your next bonus',
-        nextAvailable: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-      });
-    }
-
-    // Get or create user
-    let user = await prisma.user.findUnique({ where: { wallet: normalized } });
-    if (!user) {
-      user = await prisma.user.create({
-        data: { wallet: normalized }
-      });
-    }
-
-    // Calculate streak - check if last completion was yesterday
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-    
-    const yesterdayActivity = await prisma.dailyActivity.findUnique({
-      where: { userId_date: { userId: user.id, date: yesterdayStr } }
-    }).catch(() => null);
-
-    let newStreak = user.streak + 1;
-    if (!yesterdayActivity) {
-      newStreak = 1; // Streak broken, restart
-    }
-
-    // Get bonus XP based on current streak
-    const bonus = getLoginBonusForDay(newStreak);
-    const xpReward = bonus.xp;
-
-    // Update or create daily activity
-    await prisma.dailyActivity.upsert({
-      where: { userId_date: { userId: user.id, date: today } },
-      create: {
-        userId: user.id,
-        date: today,
-        xpEarned: xpReward,
-        rewardsEarned: 0.05, // Small token reward to mark bonus claimed
-        questsAttempted: 0,
-        questsCompleted: 0
-      },
-      update: {
-        xpEarned: xpReward,
-        rewardsEarned: 0.05
-      }
-    });
-
-    // Update user XP and streak
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        xp: { increment: xpReward },
-        streak: newStreak,
-        lastQuestCompletedAt: new Date()
-      }
-    });
-
-    res.json({
-      success: true,
-      message: `Daily login bonus claimed!`,
-      bonus: {
-        xp: xpReward,
-        streak: newStreak,
-        nextDay: newStreak + 1
-      },
-      user: {
-        xp: updatedUser.xp,
-        streak: updatedUser.streak,
-        level: updatedUser.level
-      }
-    });
+    const result = await claimDailyCeloReward({ wallet: address });
+    res.json(result);
   } catch (error) {
-    logger.error('Failed to claim daily login bonus', error, { address });
-    res.status(500).json({ error: 'Unable to claim bonus' });
+    if (error instanceof DailyRewardAlreadyClaimedError) {
+      logger.warn('[DAILY-REWARD] Duplicate claim rejected by controller', {
+        wallet: normalizeWallet(address),
+        claimDate: dailyRewardContract.getUtcClaimDate()
+      });
+      return res.json({
+        success: false,
+        message: dailyRewardContract.duplicateMessage
+      });
+    }
+
+    logger.error('Failed to claim daily CELO reward', error, { address });
+    res.status(500).json({
+      success: false,
+      message: 'Unable to claim daily CELO reward.'
+    });
   }
 }

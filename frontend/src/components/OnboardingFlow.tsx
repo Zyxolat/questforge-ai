@@ -41,11 +41,11 @@ const steps: Record<OnboardingStep, { title: string; description: string; icon: 
   },
   rewards: {
     title: '🏆 Build Your Legend',
-    description: 'Daily streaks boost your earning multiplier. The longer you play, the more you earn. Complete daily quests to unlock bonus XP and exclusive rewards.',
+    description: 'Daily streaks keep your progress alive. Claim the daily reward to receive a backend-verified CELO payout directly to your wallet.',
     icon: '🔥',
     tips: [
-      'Daily login bonuses start at +100 XP',
-      'Build 7-day streaks for special rewards',
+      'Daily claims pay 0.0001 CELO once per UTC day',
+      'Confirmed payouts include an on-chain transaction hash',
       'Leaderboard rankings update in real-time'
     ]
   },

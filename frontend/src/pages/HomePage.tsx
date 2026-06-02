@@ -33,12 +33,12 @@ const SAMPLE_QUESTS = [
   }
 ];
 
-// Daily login bonuses
-const LOGIN_BONUSES = [
-  { day: 1, xp: 100, bonus: 'Welcome Boost' },
-  { day: 2, xp: 150, bonus: 'Momentum +25%' },
-  { day: 3, xp: 200, bonus: 'Streak Unlocked' },
-  { day: 7, xp: 500, bonus: 'Weekly Champion' },
+// Daily CELO reward milestones
+const DAILY_REWARD_MILESTONES = [
+  { day: 1, amount: '0.0001 CELO', bonus: 'First claim' },
+  { day: 2, amount: '0.0001 CELO', bonus: 'Streak active' },
+  { day: 3, amount: '0.0001 CELO', bonus: 'Momentum built' },
+  { day: 7, amount: '0.0001 CELO', bonus: 'Weekly streak' },
 ];
 
 function SampleQuestCard({ quest }: { quest: typeof SAMPLE_QUESTS[0] }) {
@@ -142,14 +142,14 @@ export default function HomePage() {
         </motion.div>
       </section>
 
-      {/* Daily Login Bonuses Section */}
+      {/* Daily Rewards Section */}
       <section className="space-y-6">
         <div>
           <h2 className="text-3xl font-bold text-white">Daily Rewards & Retention</h2>
-          <p className="mt-2 text-slate-400">Log in daily to unlock bonus XP and special rewards</p>
+          <p className="mt-2 text-slate-400">Claim a real CELO payout once per UTC day and build your streak</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {LOGIN_BONUSES.map((bonus, idx) => (
+          {DAILY_REWARD_MILESTONES.map((bonus, idx) => (
             <motion.div
               key={bonus.day}
               initial={{ opacity: 0, y: 20 }}
@@ -162,7 +162,7 @@ export default function HomePage() {
                 {bonus.day === 7 && <span className="text-2xl">👑</span>}
               </div>
               <p className="mt-3 text-sm text-slate-300">{bonus.bonus}</p>
-              <p className="mt-2 text-lg font-bold text-green-400">+{bonus.xp} XP</p>
+              <p className="mt-2 text-lg font-bold text-green-400">+{bonus.amount}</p>
             </motion.div>
           ))}
         </div>
@@ -235,7 +235,7 @@ export default function HomePage() {
             {
               step: '5',
               title: 'Build Your Streak',
-              description: 'Return daily to build streaks. Longer streaks = higher multipliers = bigger rewards. Daily bonuses accelerate your progression.',
+              description: 'Return daily to build streaks and claim a backend-verified CELO payout once per UTC day.',
               icon: '🔥'
             },
             {

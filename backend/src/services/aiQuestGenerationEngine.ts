@@ -291,6 +291,7 @@ class AIQuestGenerationEngine {
       orchestrationId: validated.orchestrationId,
       difficulty: validated.difficulty,
       rewardAmount: validated.rewardAmount,
+      provider: validated.generation.provider,
       generationSource: validated.generation.source,
       generationProvider: validated.generation.provider,
       generationModel: validated.generation.model,

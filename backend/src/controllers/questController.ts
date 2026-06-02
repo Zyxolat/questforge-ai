@@ -227,7 +227,11 @@ export async function generateQuest(req: Request, res: Response) {
       userId: user.id,
       questId: generated.quest.id,
       orchestrationId: generated.quest.orchestrationId,
-      rewardAmount: generated.quest.rewardAmount
+      rewardAmount: generated.quest.rewardAmount,
+      provider: generated.quest.generation.provider,
+      source: generated.quest.generation.source,
+      fallbackReason: generated.quest.generation.fallbackReason,
+      latencyMs: generated.quest.generation.latencyMs
     });
 
     res.json({

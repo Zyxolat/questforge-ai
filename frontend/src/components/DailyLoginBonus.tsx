@@ -1,11 +1,13 @@
 import { motion } from 'framer-motion';
 import { useState } from 'react';
 import { claimDailyLoginBonus } from '../lib/api';
+import { env } from '../lib/env';
 
 interface DailyBonusData {
-  xp: number;
-  streak: number;
-  nextDay: number;
+  amountCelo: string;
+  txHash: string;
+  dailyClaimStreak: number;
+  totalClaimedCelo: number;
 }
 
 interface DailyLoginBonusProps {
@@ -25,7 +27,7 @@ export default function DailyLoginBonus({ onBonusClaimed }: DailyLoginBonusProps
     try {
       const response = await claimDailyLoginBonus();
       if (response.data.success) {
-        const data = response.data.bonus as DailyBonusData;
+        const data = response.data.reward as DailyBonusData;
         setBonusData(data);
         setClaimed(true);
         onBonusClaimed?.(data);
@@ -34,6 +36,8 @@ export default function DailyLoginBonus({ onBonusClaimed }: DailyLoginBonusProps
         setTimeout(() => {
           setClaimed(false);
         }, 5000);
+      } else {
+        setError(response.data.message || "You have already claimed today's reward. Come back tomorrow.");
       }
     } catch (err: unknown) {
       const responseError = err as { response?: { data?: { message?: string } } };
@@ -45,6 +49,8 @@ export default function DailyLoginBonus({ onBonusClaimed }: DailyLoginBonusProps
   };
 
   if (claimed && bonusData) {
+    const explorerUrl = `${env.CELO_EXPLORER_BASE_URL}/tx/${bonusData.txHash}`;
+
     return (
       <motion.div
         initial={{ opacity: 0, scale: 0.8 }}
@@ -64,9 +70,17 @@ export default function DailyLoginBonus({ onBonusClaimed }: DailyLoginBonusProps
           >
             🎁
           </motion.div>
-          <h2 className="text-3xl font-black text-glowyellow">Daily Bonus Claimed!</h2>
-          <p className="mt-4 text-2xl font-bold text-white">+{bonusData.xp} XP</p>
-          <p className="mt-2 text-lg text-slate-300">Streak: {bonusData.streak} days 🔥</p>
+          <h2 className="text-3xl font-black text-glowyellow">Daily Reward Claimed!</h2>
+          <p className="mt-4 text-2xl font-bold text-white">+{bonusData.amountCelo} CELO</p>
+          <p className="mt-2 text-lg text-slate-300">Streak: {bonusData.dailyClaimStreak} days</p>
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-2 block max-w-sm break-all text-xs text-green-300 underline decoration-green-300/40 underline-offset-4"
+          >
+            Tx: {bonusData.txHash}
+          </a>
           <p className="mt-4 text-sm text-slate-400">Keep the streak alive!</p>
         </motion.div>
       </motion.div>
@@ -81,8 +95,8 @@ export default function DailyLoginBonus({ onBonusClaimed }: DailyLoginBonusProps
     >
       <div className="flex items-center justify-between gap-4">
         <div className="flex-1">
-          <p className="text-sm font-semibold uppercase tracking-[0.1em] text-green-400">Daily Login Bonus</p>
-          <p className="mt-2 text-slate-300">Log in daily to build streaks and earn bonus XP</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.1em] text-green-400">Daily CELO Reward</p>
+          <p className="mt-2 text-slate-300">Claim 0.0001 CELO once per UTC day and build your streak</p>
           {error && <p className="mt-2 text-sm text-amber-400">{error}</p>}
         </div>
         <motion.button

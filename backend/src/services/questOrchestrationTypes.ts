@@ -154,7 +154,7 @@ export interface QuestChainInteractionPattern {
 
 export interface QuestGenerationDiagnostics {
   source: 'groq' | 'deterministic_fallback';
-  provider: 'groq' | 'deterministic';
+  provider: 'groq' | 'fallback';
   model: string | null;
   promptHash: string;
   promptPreview: string;

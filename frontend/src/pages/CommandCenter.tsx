@@ -1318,13 +1318,7 @@ export default function CommandCenter() {
         ) : null}
 
         {authStatus === 'authenticated' && (
-          <DailyLoginBonus
-            onBonusClaimed={(data) => {
-              if (player) {
-                player.xp = (player.xp || 0) + data.xp;
-              }
-            }}
-          />
+          <DailyLoginBonus />
         )}
 
         <div className="grid gap-8 lg:grid-cols-3">
