@@ -2,7 +2,6 @@ import hre from 'hardhat';
 import '@nomicfoundation/hardhat-ethers';
 import {
   ForgeQuestManager__factory,
-  MockERC20__factory,
   Reputation__factory,
   RewardNFT__factory,
   Treasury__factory
@@ -83,11 +82,6 @@ function resolveInitialNativeRewardPool(networkName: string) {
   return ethers.parseEther(DEFAULT_LOCAL_NATIVE_REWARD_POOL);
 }
 
-function isTruthyEnv(value: string | undefined) {
-  if (!value) return false;
-  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
-}
-
 function requireValidPrivateKey(name: string) {
   const value = readOptionalEnv(name);
   if (!value) {
@@ -103,23 +97,8 @@ function requireValidPrivateKey(name: string) {
   }
 }
 
-function shouldUseExistingRewardToken(networkName: string) {
-  return networkName === 'celo' || isTruthyEnv(readOptionalEnv('USE_EXISTING_REWARD_TOKEN'));
-}
-
 function validateCeloPrerequisites() {
   requireValidPrivateKey('PRIVATE_KEY');
-
-  const rewardTokenAddress = readOptionalEnv('REWARD_TOKEN_ADDRESS');
-  if (!rewardTokenAddress) {
-    throw new Error('REWARD_TOKEN_ADDRESS is required for Celo deployments.');
-  }
-
-  try {
-    ethers.getAddress(rewardTokenAddress);
-  } catch (error) {
-    throw createErrorWithCause(`REWARD_TOKEN_ADDRESS is invalid: ${getErrorMessage(error)}`, error);
-  }
 }
 
 function getRequiredConfirmations() {
@@ -278,28 +257,6 @@ async function main() {
     throw new Error(`Wrong chainId: ${chainId}`);
   }
 
-  /* -------------------------
-     TOKEN
-  -------------------------- */
-
-  let rewardTokenAddress = shouldUseExistingRewardToken(networkName)
-    ? readOptionalEnv('REWARD_TOKEN_ADDRESS')
-    : undefined;
-
-  if (!rewardTokenAddress) {
-    if (networkName === 'celo') {
-      throw new Error('REWARD_TOKEN_ADDRESS required on mainnet');
-    }
-
-    const mock = await deployContract('MockERC20', async () => {
-      return new MockERC20__factory(deployer).deploy();
-    });
-
-    rewardTokenAddress = mock.address;
-  } else {
-    rewardTokenAddress = requireNormalizedAddress('REWARD_TOKEN_ADDRESS');
-  }
-
   const verifierAddress =
     readOptionalEnv('VERIFIER_ADDRESS')
       ? requireNormalizedAddress('VERIFIER_ADDRESS')
@@ -316,7 +273,7 @@ async function main() {
   });
 
   const treasury = await deployContract('Treasury', async () => {
-    return new Treasury__factory(deployer).deploy(rewardTokenAddress);
+    return new Treasury__factory(deployer).deploy();
   });
 
   const reputation = await deployContract('Reputation', async () => {
@@ -381,7 +338,6 @@ async function main() {
     TREASURY_ADDRESS: treasury.address,
     REPUTATION_ADDRESS: reputation.address,
     FORGE_QUEST_MANAGER_ADDRESS: forgeQuestManager.address,
-    REWARD_TOKEN_ADDRESS: rewardTokenAddress,
     VERIFIER_ADDRESS: verifierAddress,
     DEPLOYER_ADDRESS: deployerAddress,
     NETWORK: networkName,

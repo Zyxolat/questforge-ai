@@ -84,7 +84,7 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
     },
     verifier: {
       ok: Boolean(contracts.verifierSigner),
-      required: false,
+      required: env.NODE_ENV === 'production',
       message: contracts.verifierSigner ? 'Verifier signer configured' : 'Verifier signer not configured'
     },
     memory: {

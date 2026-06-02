@@ -33,9 +33,7 @@ export interface TreasuryInterface extends Interface {
       | "availableNativeWithdrawalBalance"
       | "availableRewardLiquidity"
       | "emergencyWithdrawNative"
-      | "emergencyWithdrawRewardToken"
       | "fundNativeRewardPool"
-      | "fundRewardTokenPool"
       | "getRoleAdmin"
       | "grantRole"
       | "hasRole"
@@ -53,7 +51,6 @@ export interface TreasuryInterface extends Interface {
       | "reserveReward"
       | "revokeRole"
       | "rewardReserveCap"
-      | "rewardToken"
       | "setPayoutCaps"
       | "settleQuestPayout"
       | "stakeLockCap"
@@ -77,7 +74,6 @@ export interface TreasuryInterface extends Interface {
       | "RewardRefunded"
       | "RewardReleased"
       | "RewardReserved"
-      | "RewardTokenPoolFunded"
       | "RoleAdminChanged"
       | "RoleGranted"
       | "RoleRevoked"
@@ -114,16 +110,8 @@ export interface TreasuryInterface extends Interface {
     values: [AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
-    functionFragment: "emergencyWithdrawRewardToken",
-    values: [AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "fundNativeRewardPool",
     values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "fundRewardTokenPool",
-    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getRoleAdmin",
@@ -176,10 +164,6 @@ export interface TreasuryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "rewardReserveCap",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "rewardToken",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -245,15 +229,7 @@ export interface TreasuryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "emergencyWithdrawRewardToken",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "fundNativeRewardPool",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "fundRewardTokenPool",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -292,10 +268,6 @@ export interface TreasuryInterface extends Interface {
   decodeFunctionResult(functionFragment: "revokeRole", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "rewardReserveCap",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "rewardToken",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -540,19 +512,6 @@ export namespace RewardReservedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace RewardTokenPoolFundedEvent {
-  export type InputTuple = [funder: AddressLike, amount: BigNumberish];
-  export type OutputTuple = [funder: string, amount: bigint];
-  export interface OutputObject {
-    funder: string;
-    amount: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace RoleAdminChangedEvent {
   export type InputTuple = [
     role: BytesLike,
@@ -709,19 +668,7 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
 
-  emergencyWithdrawRewardToken: TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
   fundNativeRewardPool: TypedContractMethod<[], [void], "payable">;
-
-  fundRewardTokenPool: TypedContractMethod<
-    [amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
 
   getRoleAdmin: TypedContractMethod<[role: BytesLike], [string], "view">;
 
@@ -806,8 +753,6 @@ export interface Treasury extends BaseContract {
 
   rewardReserveCap: TypedContractMethod<[], [bigint], "view">;
 
-  rewardToken: TypedContractMethod<[], [string], "view">;
-
   setPayoutCaps: TypedContractMethod<
     [
       newRewardReserveCap: BigNumberish,
@@ -885,18 +830,8 @@ export interface Treasury extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "emergencyWithdrawRewardToken"
-  ): TypedContractMethod<
-    [recipient: AddressLike, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
     nameOrSignature: "fundNativeRewardPool"
   ): TypedContractMethod<[], [void], "payable">;
-  getFunction(
-    nameOrSignature: "fundRewardTokenPool"
-  ): TypedContractMethod<[amount: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "getRoleAdmin"
   ): TypedContractMethod<[role: BytesLike], [string], "view">;
@@ -997,9 +932,6 @@ export interface Treasury extends BaseContract {
   getFunction(
     nameOrSignature: "rewardReserveCap"
   ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "rewardToken"
-  ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "setPayoutCaps"
   ): TypedContractMethod<
@@ -1114,13 +1046,6 @@ export interface Treasury extends BaseContract {
     RewardReservedEvent.InputTuple,
     RewardReservedEvent.OutputTuple,
     RewardReservedEvent.OutputObject
-  >;
-  getEvent(
-    key: "RewardTokenPoolFunded"
-  ): TypedContractEvent<
-    RewardTokenPoolFundedEvent.InputTuple,
-    RewardTokenPoolFundedEvent.OutputTuple,
-    RewardTokenPoolFundedEvent.OutputObject
   >;
   getEvent(
     key: "RoleAdminChanged"
@@ -1267,17 +1192,6 @@ export interface Treasury extends BaseContract {
       RewardReservedEvent.InputTuple,
       RewardReservedEvent.OutputTuple,
       RewardReservedEvent.OutputObject
-    >;
-
-    "RewardTokenPoolFunded(address,uint256)": TypedContractEvent<
-      RewardTokenPoolFundedEvent.InputTuple,
-      RewardTokenPoolFundedEvent.OutputTuple,
-      RewardTokenPoolFundedEvent.OutputObject
-    >;
-    RewardTokenPoolFunded: TypedContractEvent<
-      RewardTokenPoolFundedEvent.InputTuple,
-      RewardTokenPoolFundedEvent.OutputTuple,
-      RewardTokenPoolFundedEvent.OutputObject
     >;
 
     "RoleAdminChanged(bytes32,bytes32,bytes32)": TypedContractEvent<

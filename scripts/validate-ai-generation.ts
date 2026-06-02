@@ -30,6 +30,11 @@ if (fs.existsSync(envPath)) {
   dotenv.config({ path: envPath });
 }
 
+type SignableWallet = {
+  address: string;
+  signMessage(message: string | Uint8Array): Promise<string>;
+};
+
 type QuestGenerationPayload = {
   quest: {
     id: string;
@@ -131,7 +136,7 @@ async function fetchJson<T>(url: string, init?: RequestInit) {
   return JSON.parse(text) as T;
 }
 
-async function authenticateWallet(apiUrl: string, wallet: Wallet, chainId: number) {
+async function authenticateWallet(apiUrl: string, wallet: SignableWallet, chainId: number) {
   const noncePayload = await fetchJson<AuthNoncePayload>(`${apiUrl}/auth/nonce`, {
     method: 'POST',
     body: JSON.stringify({

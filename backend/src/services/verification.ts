@@ -1115,7 +1115,11 @@ export function startProofVerificationWorker() {
   }
 
   if (!env.VERIFIER_PRIVATE_KEY) {
-    logger.warn('Proof verification worker disabled: VERIFIER_PRIVATE_KEY is not configured');
+    const message = 'Proof verification worker disabled: VERIFIER_PRIVATE_KEY is not configured';
+    if (env.NODE_ENV === 'production') {
+      throw new Error(message);
+    }
+    logger.warn(message);
     return;
   }
 

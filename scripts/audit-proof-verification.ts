@@ -50,7 +50,7 @@ type ActiveQuestSnapshot = {
 type DeploymentAddresses = {
   FORGE_QUEST_MANAGER_ADDRESS: string;
   TREASURY_ADDRESS: string;
-  REWARD_TOKEN_ADDRESS: string;
+  VALIDATION_TOKEN_ADDRESS?: string;
 };
 
 const AUTH_CHAIN_ID = Number(process.env.AUTH_CHAIN_ID || '42220');
@@ -237,8 +237,16 @@ async function createValidProofTransaction(input: {
   const minimumValue = ethers.parseEther(Math.max(0, minValueCelo).toFixed(18));
 
   if (input.verification?.requireContractCall || input.verification?.requireTokenApproval) {
+    const validationTokenAddress =
+      process.env.VALIDATION_TOKEN_ADDRESS?.trim() || input.deployment.VALIDATION_TOKEN_ADDRESS;
+    if (!validationTokenAddress) {
+      throw new Error(
+        'Quest proof requires a contract/token approval transaction. Set VALIDATION_TOKEN_ADDRESS to an ERC20 on the target network; REWARD_TOKEN_ADDRESS is not used for CELO rewards.'
+      );
+    }
+
     const rewardToken = new ethers.Contract(
-      input.deployment.REWARD_TOKEN_ADDRESS,
+      validationTokenAddress,
       ['function approve(address spender,uint256 value) external returns (bool)'],
       input.signer
     );

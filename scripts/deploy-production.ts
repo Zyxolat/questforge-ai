@@ -377,7 +377,7 @@ async function main() {
 
     console.log('\n📋 NEXT STEPS:\n');
     console.log('  1. Review deployment report: cat deployment-report.json');
-    console.log('  2. Fund Treasury with reward tokens');
+    console.log('  2. Fund Treasury with native CELO');
     console.log('  3. Run gameplay validation: npm run test:gameplay');
     console.log('  4. Monitor backend logs after deployment');
     console.log('  5. Verify contracts on Celoscan');

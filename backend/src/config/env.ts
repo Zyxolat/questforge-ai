@@ -210,6 +210,18 @@ function parseOptionalPrivateKey(name: string, raw: string | undefined) {
   return new ethers.Wallet(raw).privateKey;
 }
 
+function parseOpenAIAPIKey(name: string, raw: string) {
+  if (!raw.startsWith('sk-')) {
+    throw new Error(`${name} must start with sk-`);
+  }
+
+  if (/\s/.test(raw)) {
+    throw new Error(`${name} must not contain whitespace`);
+  }
+
+  return raw;
+}
+
 function parseBoolean(name: string, raw: string | undefined, fallback: boolean) {
   if (!raw) return fallback;
   const normalized = raw.trim().toLowerCase();
@@ -309,6 +321,20 @@ export function validateEnvironment(): EnvValidationResult {
   const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
   const openAIModel = optionalEnv('OPENAI_MODEL') || 'gpt-4o-mini';
   const allowAIFallback = parseBoolean('ALLOW_AI_FALLBACK', optionalEnv('ALLOW_AI_FALLBACK'), nodeEnv !== 'production');
+  const openAIAPIKeyRaw = optionalEnv('OPENAI_API_KEY');
+  let openAIAPIKey: string | undefined;
+  if (openAIAPIKeyRaw) {
+    try {
+      openAIAPIKey = parseOpenAIAPIKey('OPENAI_API_KEY', openAIAPIKeyRaw);
+    } catch (error) {
+      addIssue(
+        nodeEnv === 'production' ? errors : warnings,
+        'AI Generation',
+        'OPENAI_API_KEY',
+        error instanceof Error ? error.message : String(error)
+      );
+    }
+  }
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
@@ -397,7 +423,7 @@ export function validateEnvironment(): EnvValidationResult {
     );
   }
 
-  if (nodeEnv === 'production' && !optionalEnv('OPENAI_API_KEY')) {
+  if (nodeEnv === 'production' && !openAIAPIKeyRaw) {
     addIssue(
       errors,
       'AI Generation',
@@ -412,6 +438,15 @@ export function validateEnvironment(): EnvValidationResult {
       'AI Generation',
       'ALLOW_AI_FALLBACK',
       'must be false in production so OpenAI outages cannot silently degrade into deterministic fallback content'
+    );
+  }
+
+  if (nodeEnv === 'production' && !verifierPrivateKey) {
+    addIssue(
+      errors,
+      'Proof Verification',
+      'VERIFIER_PRIVATE_KEY',
+      'is required in production because submitted quests cannot be verified, paid, or minted without a verifier signer'
     );
   }
 
@@ -478,7 +513,7 @@ export function validateEnvironment(): EnvValidationResult {
         NODE_ENV: nodeEnv,
         PORT: parsePort('PORT', optionalEnv('PORT'), 4000),
         DATABASE_URL: databaseUrl!,
-        OPENAI_API_KEY: optionalEnv('OPENAI_API_KEY') || '',
+        OPENAI_API_KEY: openAIAPIKey || '',
         OPENAI_MODEL: openAIModel,
         ALLOW_AI_FALLBACK: allowAIFallback,
         FRONTEND_URL: frontendUrl!.toString(),

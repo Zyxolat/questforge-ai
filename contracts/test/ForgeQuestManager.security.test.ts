@@ -3,12 +3,10 @@ import { ethers } from 'hardhat';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
   ForgeQuestManager__factory,
-  MockERC20__factory,
   Reputation__factory,
   RewardNFT__factory,
   Treasury__factory,
   type ForgeQuestManager,
-  type MockERC20,
   type Reputation,
   type RewardNFT,
   type Treasury,
@@ -19,7 +17,6 @@ describe('ForgeQuestManager Security', () => {
   let rewardNFT: RewardNFT;
   let reputation: Reputation;
   let treasury: Treasury;
-  let rewardToken: MockERC20;
   let owner: SignerWithAddress;
   let player1: SignerWithAddress;
   let player2: SignerWithAddress;
@@ -32,10 +29,6 @@ describe('ForgeQuestManager Security', () => {
   beforeEach(async () => {
     [owner, player1, player2, verifier, guardian] = await ethers.getSigners();
 
-    const MockERC20Factory = new MockERC20__factory(owner);
-    rewardToken = await MockERC20Factory.deploy();
-    await rewardToken.waitForDeployment();
-
     const RewardNFTFactory = new RewardNFT__factory(owner);
     rewardNFT = await RewardNFTFactory.deploy(owner.address);
     await rewardNFT.waitForDeployment();
@@ -45,7 +38,7 @@ describe('ForgeQuestManager Security', () => {
     await reputation.waitForDeployment();
 
     const TreasuryFactory = new Treasury__factory(owner);
-    treasury = await TreasuryFactory.deploy(await rewardToken.getAddress());
+    treasury = await TreasuryFactory.deploy();
     await treasury.waitForDeployment();
     await treasury.fundNativeRewardPool({ value: ethers.parseEther('1') });
 

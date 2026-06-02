@@ -287,8 +287,16 @@ async function main() {
   console.log('\n🔐 PRIVATE KEYS...\n');
   const verifierPrivateKey = process.env.VERIFIER_PRIVATE_KEY?.trim() || process.env.PRIVATE_KEY?.trim() || null;
   if (verifierPrivateKey) {
-    recordResult('VERIFIER_PRIVATE_KEY', isDeferredReference(verifierPrivateKey) ? 'warning' : 'pass', isDeferredReference(verifierPrivateKey) ? 'Set as a Railway reference placeholder and will resolve at deploy time' : 'Set');
-    await validatePrivateKey('VERIFIER_PRIVATE_KEY', verifierPrivateKey);
+    if (isDeferredReference(verifierPrivateKey)) {
+      recordResult(
+        'VERIFIER_PRIVATE_KEY',
+        'fail',
+        'Still contains a Railway-style placeholder in the loaded environment; set the actual secret in the deployed service'
+      );
+    } else {
+      recordResult('VERIFIER_PRIVATE_KEY', 'pass', 'Set');
+      await validatePrivateKey('VERIFIER_PRIVATE_KEY', verifierPrivateKey);
+    }
   } else {
     recordResult('VERIFIER_PRIVATE_KEY', 'fail', 'Missing VERIFIER_PRIVATE_KEY / PRIVATE_KEY');
   }
@@ -299,22 +307,32 @@ async function main() {
   await validateEthereumAddress('REPUTATION_ADDRESS', requireEnv('REPUTATION_ADDRESS'));
   await validateEthereumAddress('REWARD_NFT_ADDRESS', requireEnv('REWARD_NFT_ADDRESS'));
   await validateEthereumAddress('TREASURY_ADDRESS', requireEnv('TREASURY_ADDRESS'));
-  optionalEnv('REWARD_TOKEN_ADDRESS');
+  const rewardTokenAddress = process.env.REWARD_TOKEN_ADDRESS?.trim();
+  if (rewardTokenAddress) {
+    recordResult(
+      'REWARD_TOKEN_ADDRESS',
+      'fail',
+      'Remove stale REWARD_TOKEN_ADDRESS from production; QuestForge rewards settle through native CELO treasury liquidity'
+    );
+  } else {
+    recordResult('REWARD_TOKEN_ADDRESS', 'pass', 'Unset for CELO-only rewards');
+  }
 
   // API Keys
   console.log('\n🔑 API KEYS...\n');
-  const openaiKey = optionalEnv('OPENAI_API_KEY');
-  if (openaiKey && isDeferredReference(openaiKey)) {
-    recordResult('OPENAI_API_KEY', 'warning', 'Deferred Railway reference cannot be validated locally');
-  } else if (openaiKey && openaiKey.startsWith('sk-')) {
+  const openaiKey = process.env.OPENAI_API_KEY?.trim() || null;
+  if (!openaiKey) {
+    recordResult('OPENAI_API_KEY', 'fail', 'Missing OpenAI key');
+  } else if (isDeferredReference(openaiKey)) {
+    recordResult(
+      'OPENAI_API_KEY',
+      'fail',
+      'Still contains a Railway-style placeholder in the loaded environment; set the actual secret in the deployed service'
+    );
+  } else if (openaiKey.startsWith('sk-')) {
     recordResult('OPENAI_API_KEY', 'pass', 'Valid OpenAI key format');
-  } else if (!openaiKey) {
-    recordResult('OPENAI_API_KEY', 'warning', 'Not set (quest generation may fail)');
   } else {
     recordResult('OPENAI_API_KEY', 'fail', 'Invalid OpenAI key format');
-  }
-  if (openaiKey) {
-    validateNotPlaceholder('OPENAI_API_KEY', openaiKey);
   }
 
   // JWT Configuration

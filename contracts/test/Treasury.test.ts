@@ -2,9 +2,7 @@ import { expect } from 'chai';
 import hre from 'hardhat';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
-  MockERC20__factory,
   Treasury__factory,
-  type MockERC20,
   type Treasury,
 } from '../typechain-types';
 
@@ -12,7 +10,6 @@ const { ethers } = hre;
 
 describe('Treasury', function () {
   let treasury: Treasury;
-  let rewardToken: MockERC20;
   let owner: SignerWithAddress;
   let questManager: SignerWithAddress;
   let guardian: SignerWithAddress;
@@ -25,13 +22,8 @@ describe('Treasury', function () {
   beforeEach(async function () {
     [owner, questManager, guardian, player, other] = await ethers.getSigners();
 
-    const MockERC20Factory = new MockERC20__factory(owner);
-    rewardToken = await MockERC20Factory.deploy();
-    await rewardToken.waitForDeployment();
-    await rewardToken.mint(owner.address, ethers.parseEther('1000'));
-
     const TreasuryFactory = new Treasury__factory(owner);
-    treasury = await TreasuryFactory.deploy(await rewardToken.getAddress());
+    treasury = await TreasuryFactory.deploy();
     await treasury.waitForDeployment();
 
     const questManagerRole = await treasury.QUEST_MANAGER_ROLE();
@@ -43,15 +35,9 @@ describe('Treasury', function () {
   });
 
   describe('deployment', function () {
-    it('stores the reward token and starts solvent', async function () {
-      expect(await treasury.rewardToken()).to.equal(await rewardToken.getAddress());
+    it('starts solvent with native CELO reward liquidity', async function () {
       expect(await treasury.isSolvent()).to.equal(true);
       expect(await ethers.provider.getBalance(await treasury.getAddress())).to.equal(ethers.parseEther('1'));
-    });
-
-    it('rejects a zero token address', async function () {
-      const TreasuryFactory = await ethers.getContractFactory('Treasury', owner);
-      await expect(TreasuryFactory.deploy(ethers.ZeroAddress)).to.be.revertedWith('Invalid token address');
     });
   });
 
@@ -224,16 +210,9 @@ describe('Treasury', function () {
       expect(await treasury.isSolvent()).to.equal(true);
     });
 
-    it('uses SafeERC20 for reward-token funding and emergency withdrawal', async function () {
-      await rewardToken.approve(await treasury.getAddress(), ethers.parseEther('10'));
-      await treasury.fundRewardTokenPool(ethers.parseEther('10'));
-      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('10'));
-
-      await treasury.pause();
-      await treasury.emergencyWithdrawRewardToken(other.address, ethers.parseEther('4'));
-
-      expect(await rewardToken.balanceOf(other.address)).to.equal(ethers.parseEther('4'));
-      expect(await rewardToken.balanceOf(await treasury.getAddress())).to.equal(ethers.parseEther('6'));
+    it('does not expose ERC20 reward-token funding on the CELO-only treasury', async function () {
+      expect('fundRewardTokenPool' in treasury).to.equal(false);
+      expect('emergencyWithdrawRewardToken' in treasury).to.equal(false);
     });
   });
 });

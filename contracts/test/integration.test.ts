@@ -3,12 +3,10 @@ import hre from 'hardhat';
 import type { SignerWithAddress } from '@nomicfoundation/hardhat-ethers/signers';
 import {
   ForgeQuestManager__factory,
-  MockERC20__factory,
   Reputation__factory,
   RewardNFT__factory,
   Treasury__factory,
   type ForgeQuestManager,
-  type MockERC20,
   type Reputation,
   type RewardNFT,
   type Treasury,
@@ -21,7 +19,6 @@ describe('Smart Contracts Integration', function () {
   let rewardNFT: RewardNFT;
   let reputation: Reputation;
   let treasury: Treasury;
-  let rewardToken: MockERC20;
   let owner: SignerWithAddress;
   let verifier: SignerWithAddress;
   let player: SignerWithAddress;
@@ -32,16 +29,12 @@ describe('Smart Contracts Integration', function () {
   beforeEach(async function () {
     [owner, verifier, player] = await ethers.getSigners();
 
-    const MockERC20Factory = new MockERC20__factory(owner);
-    rewardToken = await MockERC20Factory.deploy();
-    await rewardToken.waitForDeployment();
-
     const RewardNFTFactory = new RewardNFT__factory(owner);
     rewardNFT = await RewardNFTFactory.deploy(owner.address);
     await rewardNFT.waitForDeployment();
 
     const TreasuryFactory = new Treasury__factory(owner);
-    treasury = await TreasuryFactory.deploy(await rewardToken.getAddress());
+    treasury = await TreasuryFactory.deploy();
     await treasury.waitForDeployment();
     await treasury.fundNativeRewardPool({ value: ethers.parseEther('5') });
 
@@ -134,7 +127,8 @@ describe('Smart Contracts Integration', function () {
     expect(verifiedQuest.status).to.equal(3);
     expect(questFund.state).to.equal(3);
     expect(await rewardNFT.balanceOf(player.address)).to.equal(1);
-    expect(await rewardNFT.tokenURI(1)).to.equal(proofUri);
+    // proofUri is a hash, not a valid http/https URI, so it falls back to metadataUri
+    expect(await rewardNFT.tokenURI(1)).to.equal('ipfs://metadata');
     expect(profile.xp).to.equal(1000);
     expect(profile.questCount).to.equal(1);
     expect(await ethers.provider.getBalance(await forgeQuestManager.getAddress())).to.equal(0);

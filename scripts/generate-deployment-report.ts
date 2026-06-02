@@ -10,7 +10,6 @@ type DeploymentAddresses = {
   TREASURY_ADDRESS: string;
   REPUTATION_ADDRESS: string;
   FORGE_QUEST_MANAGER_ADDRESS: string;
-  REWARD_TOKEN_ADDRESS?: string;
   VERIFIER_ADDRESS?: string;
   DEPLOYER_ADDRESS?: string;
   NETWORK?: string;

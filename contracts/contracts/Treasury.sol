@@ -5,12 +5,8 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
-    using SafeERC20 for IERC20;
-
     bytes32 public constant QUEST_MANAGER_ROLE = keccak256("QUEST_MANAGER_ROLE");
     bytes32 public constant GUARDIAN_ROLE = keccak256("GUARDIAN_ROLE");
     bytes32 public constant WITHDRAW_ROLE = keccak256("WITHDRAW_ROLE");
@@ -30,8 +26,6 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         QuestFundState state;
     }
 
-    IERC20 public immutable rewardToken;
-
     uint256 public rewardReserveCap = 0.5 ether;
     uint256 public stakeLockCap = 10 ether;
     uint256 public payoutCap = 10.5 ether;
@@ -41,7 +35,6 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
     mapping(uint256 => QuestFund) public questFunds;
 
     event NativeRewardPoolFunded(address indexed funder, uint256 amount);
-    event RewardTokenPoolFunded(address indexed funder, uint256 amount);
     event RewardReserved(
         uint256 indexed questId,
         address indexed creator,
@@ -84,11 +77,7 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
     event CircuitBreakerTriggered(address indexed operator, string reason);
     event PayoutCapsUpdated(uint256 rewardReserveCap, uint256 stakeLockCap, uint256 payoutCap);
 
-    constructor(address tokenAddress) {
-        require(tokenAddress != address(0), "Invalid token address");
-
-        rewardToken = IERC20(tokenAddress);
-
+    constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(GUARDIAN_ROLE, msg.sender);
         _grantRole(WITHDRAW_ROLE, msg.sender);
@@ -210,12 +199,6 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         emit NativeRewardPoolFunded(msg.sender, msg.value);
     }
 
-    function fundRewardTokenPool(uint256 amount) external onlyOwner whenNotPaused {
-        require(amount > 0, "Invalid fund amount");
-        rewardToken.safeTransferFrom(msg.sender, address(this), amount);
-        emit RewardTokenPoolFunded(msg.sender, amount);
-    }
-
     function setPayoutCaps(
         uint256 newRewardReserveCap,
         uint256 newStakeLockCap,
@@ -258,20 +241,6 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         _safeNativeTransfer(recipient, amount, "Emergency withdrawal failed");
 
         emit EmergencyWithdrawal(msg.sender, recipient, address(0), amount);
-    }
-
-    function emergencyWithdrawRewardToken(address recipient, uint256 amount)
-        external
-        onlyRole(WITHDRAW_ROLE)
-        whenPaused
-        nonReentrant
-    {
-        require(recipient != address(0), "Invalid recipient");
-        require(amount > 0, "Invalid withdrawal amount");
-
-        rewardToken.safeTransfer(recipient, amount);
-
-        emit EmergencyWithdrawal(msg.sender, recipient, address(rewardToken), amount);
     }
 
     function obligations() public view returns (uint256) {

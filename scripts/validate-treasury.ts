@@ -24,24 +24,21 @@ if (fs.existsSync(envPath)) {
 
 // Contract ABIs
 const TREASURY_ABI = [
-  'function getTreasuryStats() public view returns (uint256 nativeBalance, uint256 tokenBalance, uint256 totalPaidOut)',
-  'function getRewardPool() public view returns (uint256)',
-  'function getNativeRewardPool() public view returns (uint256)',
-  'function getSolvency() public view returns (bool)',
-  'function isPaused() public view returns (bool)',
-  'function getMaxRewardPerQuest() public view returns (uint256)',
-  'function getMaxRewardPerDay() public view returns (uint256)',
-  'function canPayout(uint256 amount) public view returns (bool)',
+  'function paused() public view returns (bool)',
+  'function isSolvent() public view returns (bool)',
+  'function availableRewardLiquidity() public view returns (uint256)',
+  'function obligations() public view returns (uint256)',
+  'function rewardReserveCap() public view returns (uint256)',
+  'function stakeLockCap() public view returns (uint256)',
+  'function payoutCap() public view returns (uint256)',
   'function owner() public view returns (address)',
 ];
 
 const FORGE_QUEST_MANAGER_ABI = [
-  'function getRewardPoolSize() public view returns (uint256)',
-  'function getMaxSingleReward() public view returns (uint256)',
-  'function getMaxSingleStake() public view returns (uint256)',
-  'function getTreasuryAddress() public view returns (address)',
-  'function isHealthy() public view returns (bool)',
-  'function getCircuitBreakerStatus() public view returns (bool, uint256, uint256)',
+  'function treasury() public view returns (address)',
+  'function rewardSystemHealthy() public view returns (bool)',
+  'function MAX_SINGLE_REWARD() public view returns (uint256)',
+  'function MAX_SINGLE_STAKE() public view returns (uint256)',
 ];
 
 interface TreasuryHealth {
@@ -100,7 +97,7 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
     // Check 1: Treasury Pause Status
     try {
-      const isPaused = await treasury.isPaused();
+      const isPaused = await treasury.paused();
       checks.push({
         name: 'Emergency Pause',
         passed: !isPaused,
@@ -149,7 +146,7 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
     // Check 3: Solvency
     try {
-      const isSolvent = await treasury.getSolvency();
+      const isSolvent = await treasury.isSolvent();
       checks.push({
         name: 'Solvency',
         passed: isSolvent,
@@ -172,7 +169,9 @@ async function validateTreasury(): Promise<TreasuryHealth> {
     try {
       // Test if treasury can payout small amount (0.1 CELO)
       const testAmount = ethers.parseEther('0.1');
-      const canPayout = await treasury.canPayout(testAmount);
+      const availableRewardLiquidity = await treasury.availableRewardLiquidity();
+      const obligations = await treasury.obligations();
+      const canPayout = availableRewardLiquidity >= testAmount;
       checks.push({
         name: 'Payout Capability (0.1 CELO)',
         passed: canPayout,
@@ -182,6 +181,8 @@ async function validateTreasury(): Promise<TreasuryHealth> {
         value: canPayout ? 'CAPABLE' : 'INCAPABLE',
       });
       metrics.canPayout = canPayout;
+      metrics.availableRewardLiquidity = ethers.formatEther(availableRewardLiquidity);
+      metrics.obligations = ethers.formatEther(obligations);
 
       if (!canPayout) status = 'critical';
     } catch (e) {
@@ -195,21 +196,24 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
     // Check 5: Reward Pool Size
     try {
-      const maxRewardPerQuest = await treasury.getMaxRewardPerQuest();
-      const maxRewardPerDay = await treasury.getMaxRewardPerDay();
+      const maxRewardPerQuest = await treasury.rewardReserveCap();
+      const maxStakePerQuest = await treasury.stakeLockCap();
+      const payoutCap = await treasury.payoutCap();
       
       const perQuestEth = ethers.formatEther(maxRewardPerQuest);
-      const perDayEth = ethers.formatEther(maxRewardPerDay);
+      const maxStakeEth = ethers.formatEther(maxStakePerQuest);
+      const payoutCapEth = ethers.formatEther(payoutCap);
 
       checks.push({
         name: 'Reward Limits',
         passed: true,
-        message: `Per quest: ${perQuestEth} CELO, Per day: ${perDayEth} CELO`,
-        value: `${perQuestEth} / ${perDayEth}`,
+        message: `Reward cap: ${perQuestEth} CELO, stake cap: ${maxStakeEth} CELO, payout cap: ${payoutCapEth} CELO`,
+        value: `${perQuestEth} / ${maxStakeEth} / ${payoutCapEth}`,
       });
 
       metrics.maxRewardPerQuest = perQuestEth;
-      metrics.maxRewardPerDay = perDayEth;
+      metrics.maxStakePerQuest = maxStakeEth;
+      metrics.payoutCap = payoutCapEth;
     } catch (e) {
       checks.push({
         name: 'Reward Limits',
@@ -221,7 +225,9 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
     // Check 6: Quest Manager Health
     try {
-      const isHealthy = await forgeQuestManager.isHealthy();
+      const rewardSystemHealthy = await forgeQuestManager.rewardSystemHealthy();
+      const linkedTreasury = await forgeQuestManager.treasury();
+      const isHealthy = rewardSystemHealthy && linkedTreasury.toLowerCase() === treasuryAddress.toLowerCase();
       checks.push({
         name: 'Quest Manager Health',
         passed: isHealthy,
@@ -231,6 +237,8 @@ async function validateTreasury(): Promise<TreasuryHealth> {
         value: isHealthy ? 'HEALTHY' : 'UNHEALTHY',
       });
       metrics.questManagerHealthy = isHealthy;
+      metrics.rewardSystemHealthy = rewardSystemHealthy;
+      metrics.linkedTreasury = linkedTreasury;
 
       if (!isHealthy) status = 'warning';
     } catch (e) {
@@ -242,31 +250,25 @@ async function validateTreasury(): Promise<TreasuryHealth> {
       status = 'warning';
     }
 
-    // Check 7: Circuit Breaker Status
+    // Check 7: Contract Reward Caps
     try {
-      const [cbActive, usedAmount, maxAmount] = await forgeQuestManager.getCircuitBreakerStatus();
-      const usedCelo = ethers.formatEther(usedAmount);
-      const maxCelo = ethers.formatEther(maxAmount);
-      const usage = (Number(usedCelo) / Number(maxCelo) * 100).toFixed(1);
+      const maxSingleReward = await forgeQuestManager.MAX_SINGLE_REWARD();
+      const maxSingleStake = await forgeQuestManager.MAX_SINGLE_STAKE();
 
       checks.push({
-        name: 'Circuit Breaker',
-        passed: !cbActive,
-        message: cbActive 
-          ? `Circuit breaker is ACTIVE (${usage}% utilization)`
-          : `Circuit breaker is inactive (${usage}% utilization)`,
-        value: `${usage}%`,
+        name: 'Quest Manager Caps',
+        passed: true,
+        message: `Max reward ${ethers.formatEther(maxSingleReward)} CELO, max stake ${ethers.formatEther(maxSingleStake)} CELO`,
+        value: `${ethers.formatEther(maxSingleReward)} / ${ethers.formatEther(maxSingleStake)}`,
       });
 
-      metrics.circuitBreakerActive = cbActive;
-      metrics.circuitBreakerUsagePercent = usage;
-
-      if (cbActive) status = 'warning';
+      metrics.managerMaxSingleReward = ethers.formatEther(maxSingleReward);
+      metrics.managerMaxSingleStake = ethers.formatEther(maxSingleStake);
     } catch (e) {
       checks.push({
-        name: 'Circuit Breaker',
+        name: 'Quest Manager Caps',
         passed: false,
-        message: `Failed to check circuit breaker: ${e instanceof Error ? e.message : String(e)}`,
+        message: `Failed to check quest manager caps: ${e instanceof Error ? e.message : String(e)}`,
       });
       status = 'warning';
     }
@@ -282,7 +284,7 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
       metrics.treasuryLink = `https://celoscan.io/address/${treasuryAddress}`;
       metrics.questManagerLink = `https://celoscan.io/address/${forgeQuestManagerAddress}`;
-    } catch (e) {
+    } catch {
       // Not critical
     }
 

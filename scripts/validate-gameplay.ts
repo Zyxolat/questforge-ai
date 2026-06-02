@@ -56,27 +56,28 @@ type SignableWallet = {
   signMessage(message: string | Uint8Array): Promise<string>;
 };
 
+type QuestVerificationMetadata = {
+  minValueCelo?: number;
+  allowContractTarget?: boolean;
+  requireContractCall?: boolean;
+  requireTokenApproval?: boolean;
+};
+
 type GeneratedQuestPayload = {
   quest: {
     id: string;
     orchestrationId?: string;
     title: string;
     metadataUri: string;
-    metadata?: Record<string, unknown>;
+    metadata?: Record<string, unknown> & {
+      verification?: QuestVerificationMetadata;
+    };
     generation?: {
       source?: string;
       provider?: string;
       model?: string | null;
       promptHash?: string;
       fallbackReason?: string | null;
-    };
-    metadata?: {
-      verification?: {
-        minValueCelo?: number;
-        allowContractTarget?: boolean;
-        requireContractCall?: boolean;
-        requireTokenApproval?: boolean;
-      };
     };
     stakeAmount: string | number;
     rewardAmount: string | number;
@@ -91,13 +92,19 @@ type DeploymentAddresses = {
   REWARD_NFT_ADDRESS: string;
   REPUTATION_ADDRESS: string;
   TREASURY_ADDRESS: string;
-  REWARD_TOKEN_ADDRESS: string;
+  VALIDATION_TOKEN_ADDRESS?: string;
 };
 
 type ActiveQuestSnapshot = {
   id?: string;
   chainQuestId?: string | number | null;
   status?: string | null;
+  verificationTx?: string | null;
+  treasuryPayout?: {
+    status?: string | null;
+  } | null;
+  completedAt?: string | null;
+  failedAt?: string | null;
   [key: string]: unknown;
 };
 
@@ -218,18 +225,22 @@ async function submitProofTransaction(params: {
   signer: ethers.Signer;
   signerAddress: string;
   deployment: DeploymentAddresses;
-  verification?: {
-    minValueCelo?: number;
-    requireContractCall?: boolean;
-    requireTokenApproval?: boolean;
-  };
+  verification?: QuestVerificationMetadata;
 }) {
   const minValueCelo = Number(params.verification?.minValueCelo ?? 0);
   const minimumValue = ethers.parseEther(Math.max(0, minValueCelo).toFixed(18));
 
   if (params.verification?.requireContractCall || params.verification?.requireTokenApproval) {
+    const validationTokenAddress =
+      process.env.VALIDATION_TOKEN_ADDRESS?.trim() || params.deployment.VALIDATION_TOKEN_ADDRESS;
+    if (!validationTokenAddress) {
+      throw new Error(
+        'Quest proof requires a contract/token approval transaction. Set VALIDATION_TOKEN_ADDRESS to an ERC20 on the target network; REWARD_TOKEN_ADDRESS is not used for CELO rewards.'
+      );
+    }
+
     const rewardToken = new ethers.Contract(
-      params.deployment.REWARD_TOKEN_ADDRESS,
+      validationTokenAddress,
       ['function approve(address spender,uint256 value) external returns (bool)'],
       params.signer
     );

@@ -252,7 +252,7 @@ async function main() {
   console.log('  ✓ MiniPay app is installed on test device');
   console.log('  ✓ Test wallet has sufficient CELO for gas fees');
   console.log('  ✓ Contracts are deployed on Celo Mainnet');
-  console.log('  ✓ Treasury is funded with reward tokens\n');
+  console.log('  ✓ Treasury is funded with native CELO\n');
 
   console.log('⏱️  ESTIMATED TEST TIME: 30-45 minutes\n');
 

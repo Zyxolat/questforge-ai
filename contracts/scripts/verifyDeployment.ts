@@ -11,7 +11,6 @@ type DeploymentAddresses = {
   TREASURY_ADDRESS: string;
   REPUTATION_ADDRESS: string;
   FORGE_QUEST_MANAGER_ADDRESS: string;
-  REWARD_TOKEN_ADDRESS: string;
   VERIFIER_ADDRESS: string;
   DEPLOYER_ADDRESS: string;
   NETWORK: string;
@@ -73,7 +72,6 @@ function loadDeploymentAddresses(networkName: string): DeploymentAddresses {
     'TREASURY_ADDRESS',
     'REPUTATION_ADDRESS',
     'FORGE_QUEST_MANAGER_ADDRESS',
-    'REWARD_TOKEN_ADDRESS',
     'VERIFIER_ADDRESS',
     'DEPLOYER_ADDRESS',
     'NETWORK',
@@ -100,7 +98,7 @@ function buildVerificationTargets(addresses: DeploymentAddresses): VerificationT
     {
       name: 'Treasury',
       address: addresses.TREASURY_ADDRESS,
-      constructorArguments: [addresses.REWARD_TOKEN_ADDRESS],
+      constructorArguments: [],
       contract: 'contracts/Treasury.sol:Treasury'
     },
     {
