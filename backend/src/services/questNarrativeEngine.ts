@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { env } from '../config/env';
-import { aiGroqClient } from './aiGroqClient';
+import { aiGroqClient, describeGroqError } from './aiGroqClient';
 import { aiValidator } from './aiSafety';
 import { logger } from './logger';
 import type {
@@ -57,6 +57,10 @@ type NarrativeResponseShape = {
 const MAX_ITEMS = 4;
 const RISK_LEVELS = new Set(['low', 'moderate', 'high', 'extreme']);
 const GROQ_MODEL = env.GROQ_MODEL;
+
+function getGroqModel() {
+  return typeof aiGroqClient.getActiveModel === 'function' ? aiGroqClient.getActiveModel() : GROQ_MODEL;
+}
 
 function extractJsonObject(value: string) {
   const sanitized = value
@@ -268,6 +272,8 @@ class QuestNarrativeEngine {
     const promptSummary = promptPreview(prompt);
 
     logger.info('[QUEST-AI-GENERATION] Initiating AI quest generation', {
+      provider: 'groq',
+      model: getGroqModel(),
       wallet: context.wallet,
       chain: context.chain,
       difficulty: context.difficulty,
@@ -280,6 +286,8 @@ class QuestNarrativeEngine {
 
     if (!aiGroqClient.isAvailable()) {
       logger.warn('[QUEST-AI-GENERATION] Groq not available - FALLBACK MODE ACTIVATED', {
+        provider: 'fallback',
+        model: getGroqModel(),
         wallet: context.wallet,
         reason: 'GROQ_API_KEY not configured',
         promptHash
@@ -335,7 +343,7 @@ class QuestNarrativeEngine {
       // Request with exponential backoff retry
       const result = await aiGroqClient.createChatCompletion(
         {
-          model: GROQ_MODEL,
+          model: getGroqModel(),
           messages: [
             {
               role: 'system',
@@ -348,8 +356,7 @@ class QuestNarrativeEngine {
             }
           ],
           temperature: 0.82, // Increased for more creativity
-          maxTokens: 1200,
-          responseFormat: { type: 'json_object' }
+          maxTokens: 1200
         },
         {
           maxAttempts: 3,
@@ -361,9 +368,10 @@ class QuestNarrativeEngine {
       );
 
       logger.info('[QUEST-AI-GENERATION] Groq request completed successfully', {
+        provider: 'groq',
+        model: result.telemetry.model,
         wallet: context.wallet,
         requestId: result.telemetry.requestId,
-        model: result.telemetry.model,
         promptTokens: result.telemetry.promptTokens,
         completionTokens: result.telemetry.completionTokens,
         totalTokens: result.telemetry.totalTokens,
@@ -376,9 +384,12 @@ class QuestNarrativeEngine {
       const parsed = safeJsonParse<NarrativeResponseShape>(result.content);
       if (!parsed) {
         logger.error('[QUEST-AI-GENERATION] Failed to parse Groq response as JSON', {
+          provider: 'groq',
+          model: result.telemetry.model,
           wallet: context.wallet,
           requestId: result.telemetry.requestId,
-          contentPreview: result.content.slice(0, 200)
+          contentPreview: result.content.slice(0, 200),
+          latencyMs: result.telemetry.latencyMs
         });
         return this.buildFallbackNarrative(context, {
           ...baseFallbackGeneration,
@@ -395,6 +406,8 @@ class QuestNarrativeEngine {
 
       if (hallCheck.isHallucinated) {
         logger.warn('[QUEST-AI-GENERATION] Hallucination detected in AI response', {
+          provider: 'groq',
+          model: result.telemetry.model,
           wallet: context.wallet,
           requestId: result.telemetry.requestId,
           hallucination: hallCheck.reason
@@ -407,7 +420,7 @@ class QuestNarrativeEngine {
       const merged = this.mergeWithFallback(parsed, this.buildDeterministicNarrative(context, baseFallbackGeneration), {
         source: 'groq',
         provider: 'groq',
-        model: GROQ_MODEL,
+        model: result.telemetry.model,
         promptHash,
         promptPreview: promptSummary,
         fallbackReason: hallCheck.isHallucinated ? `Hallucination detected: ${hallCheck.reason}` : null,
@@ -422,6 +435,8 @@ class QuestNarrativeEngine {
 
       logger.info('[QUEST-AI-GENERATION] AI-generated quest accepted and merged', {
         wallet: context.wallet,
+        provider: 'groq',
+        model: result.telemetry.model,
         requestId: result.telemetry.requestId,
         title: merged.title,
         riskLevel: merged.riskLevel
@@ -431,11 +446,23 @@ class QuestNarrativeEngine {
     } catch (error) {
       // Groq request failed - activate fallback
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const groqError = describeGroqError(error, {
+        model: getGroqModel(),
+        requestId: 'quest_generation_error',
+        attempt: 1,
+        latencyMs: Date.now() - generationStartedAt
+      });
       logger.error('[QUEST-AI-GENERATION] Groq request failed - FALLBACK ACTIVATED', {
+        provider: 'groq',
+        model: getGroqModel(),
         wallet: context.wallet,
         error: errorMessage,
         errorType: error instanceof Error ? error.constructor.name : typeof error,
-        promptHash
+        promptHash,
+        latencyMs: Date.now() - generationStartedAt,
+        statusCode: groqError.statusCode,
+        responseBody: groqError.responseBody,
+        sdkError: groqError.sdkError
       });
 
       return this.buildFallbackNarrative(context, {
@@ -449,9 +476,12 @@ class QuestNarrativeEngine {
 
   async generateNPCDialogue(context: NPCDialogueContext): Promise<string> {
     const fallback = `${context.npc.name} says: The sands of fate shift, ${context.playerName}. ${context.relationshipSummary[0] ?? 'Your path is marked.'}`;
+    const dialogueStartedAt = Date.now();
 
     if (!aiGroqClient.isAvailable()) {
       logger.debug('[NPC-DIALOGUE] Groq not available, using static fallback', {
+        provider: 'fallback',
+        model: getGroqModel(),
         npcId: context.npc.npcId,
         npcName: context.npc.name,
         playerName: context.playerName
@@ -461,6 +491,8 @@ class QuestNarrativeEngine {
 
     try {
       logger.info('[NPC-DIALOGUE] Generating AI dialogue', {
+        provider: 'groq',
+        model: getGroqModel(),
         npcId: context.npc.npcId,
         npcName: context.npc.name,
         npcRole: context.npc.role,
@@ -470,7 +502,7 @@ class QuestNarrativeEngine {
 
       const result = await aiGroqClient.createChatCompletion(
         {
-          model: GROQ_MODEL,
+          model: getGroqModel(),
           messages: [
             {
               role: 'system',
@@ -497,6 +529,8 @@ class QuestNarrativeEngine {
       const dialogue = normalizeString(result.content, fallback, 240);
 
       logger.info('[NPC-DIALOGUE] AI dialogue generated successfully', {
+        provider: 'groq',
+        model: result.telemetry.model,
         npcId: context.npc.npcId,
         requestId: result.telemetry.requestId,
         promptTokens: result.telemetry.promptTokens,
@@ -507,10 +541,22 @@ class QuestNarrativeEngine {
 
       return dialogue;
     } catch (error) {
+      const groqError = describeGroqError(error, {
+        model: getGroqModel(),
+        requestId: 'npc_dialogue_error',
+        attempt: 1,
+        latencyMs: 0
+      });
       logger.warn('[NPC-DIALOGUE] AI dialogue generation failed, using fallback', {
+        provider: 'groq',
+        model: getGroqModel(),
         npcId: context.npc.npcId,
         npcName: context.npc.name,
-        error: error instanceof Error ? error.message : 'Unknown error'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        latencyMs: Date.now() - dialogueStartedAt,
+        statusCode: groqError.statusCode,
+        responseBody: groqError.responseBody,
+        sdkError: groqError.sdkError
       });
       return fallback;
     }

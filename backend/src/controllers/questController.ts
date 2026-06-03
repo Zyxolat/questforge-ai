@@ -238,6 +238,8 @@ export async function generateQuest(req: Request, res: Response) {
       quest: {
         id: generated.quest.id,
         orchestrationId: generated.quest.orchestrationId,
+        source: generated.quest.generation.source,
+        provider: generated.quest.generation.provider,
         title: generated.quest.title,
         description: generated.quest.description,
         difficulty: generated.quest.difficulty,

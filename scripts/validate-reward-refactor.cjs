@@ -382,6 +382,19 @@ async function testDailyRewardSuccessAndDuplicate() {
   assert.match(result.reward.txHash, /^0x[0-9a-f]{64}$/);
   assert.equal(fakePrisma.state.rewards.length, 1);
   assert.equal(fakePrisma.state.transactions.length, 1);
+  console.log(
+    'DAILY_REWARD_SUCCESS',
+    JSON.stringify(
+      {
+        success: result.success,
+        message: result.message,
+        reward: result.reward,
+        user: result.user
+      },
+      null,
+      2
+    )
+  );
 
   await assert.rejects(
     () => claimDailyCeloReward({ wallet: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }),
@@ -389,6 +402,18 @@ async function testDailyRewardSuccessAndDuplicate() {
   );
   assert.equal(dailyRewardContract.duplicateMessage, "You have already claimed today's reward. Come back tomorrow.");
   assert.equal(fakeContracts.state.sendCount, 1);
+  console.log(
+    'DAILY_REWARD_DUPLICATE_RESPONSE',
+    JSON.stringify(
+      {
+        success: false,
+        message: dailyRewardContract.duplicateMessage,
+        nextAvailableAt: dailyRewardContract.getNextUtcMidnight().toISOString()
+      },
+      null,
+      2
+    )
+  );
 }
 
 async function testTreasuryFailureDoesNotUpdateUser() {
@@ -509,6 +534,25 @@ async function testQuestNarrativeFallbackAndGroq() {
   assert.equal(groq.generation.fallbackReason, null);
   assert.equal(groq.generation.latencyMs, 42);
   assert.equal(groq.title, 'The Ledger of Dawn');
+  console.log(
+    'QUEST_GENERATION_SUCCESS',
+    JSON.stringify(
+      {
+        title: groq.title,
+        source: groq.generation.source,
+        provider: groq.generation.provider,
+        model: groq.generation.model,
+        openingDialogue: groq.npc.openingDialogue,
+        missionStructure: groq.missionStructure,
+        txRequirements: groq.txRequirements?.map((requirement) => ({
+          stage: requirement.stage,
+          type: requirement.type
+        }))
+      },
+      null,
+      2
+    )
+  );
 }
 
 function testDailyXpCopyRemoved() {

@@ -242,6 +242,7 @@ async function resumeExistingClaimIfPossible(input: {
       "totalClaimedCelo"
     FROM "User"
     WHERE id = ${input.claim.userId}
+    FOR UPDATE
     LIMIT 1
   `;
 
@@ -290,9 +291,9 @@ async function resumeExistingClaimIfPossible(input: {
         throw new DailyRewardPayoutError('Daily reward claim was no longer available to finalize', 503, {
           claimId: input.claim.id,
           claimDate: input.claimDate,
-            txHash: confirmedTxHash
-          });
-        }
+          txHash: confirmedTxHash
+        });
+      }
 
       const newStreak = wasYesterdayUtc(user.lastDailyClaimAt, input.claimDate) ? user.dailyClaimStreak + 1 : 1;
 
@@ -401,6 +402,7 @@ async function reserveDailyClaim(wallet: string, claimDate: string) {
           "totalClaimedCelo"
         FROM "User"
         WHERE id = ${user.id}
+        FOR UPDATE
         LIMIT 1
       `;
 
@@ -464,7 +466,8 @@ async function reserveDailyClaim(wallet: string, claimDate: string) {
         logger.warn('[DAILY-REWARD] Duplicate or in-flight daily claim rejected', {
           userId: user.id,
           wallet,
-          claimDate
+          claimDate,
+          lastDailyClaimAt: rewardUser.lastDailyClaimAt?.toISOString() ?? null
         });
         throw new DailyRewardAlreadyClaimedError();
       }
@@ -624,6 +627,7 @@ export async function claimDailyCeloReward(input: { wallet: string }) {
             "totalClaimedCelo"
           FROM "User"
           WHERE id = ${user.id}
+          FOR UPDATE
           LIMIT 1
         `;
         if (!currentUser) {
