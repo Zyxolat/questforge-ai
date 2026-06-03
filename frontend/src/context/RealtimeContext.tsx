@@ -217,6 +217,34 @@ function pickActiveQuest(quests: QuestState[]) {
   return quests[0] ?? null;
 }
 
+function asRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function asString(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0 ? value : null;
+}
+
+function asQuestMatcher(payload: Record<string, unknown> | null) {
+  if (!payload) {
+    return {};
+  }
+
+  const id = asString(payload.questId) ?? asString(payload.id) ?? asString(payload.sourceId);
+  const chainQuestId =
+    asString(payload.chainQuestId) ??
+    (typeof payload.chainQuestId === 'number' || typeof payload.chainQuestId === 'bigint'
+      ? String(payload.chainQuestId)
+      : null);
+
+  return {
+    id: id ?? undefined,
+    chainQuestId: chainQuestId ?? undefined
+  };
+}
+
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { address } = useWallet();
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('idle');
@@ -243,8 +271,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       setHydrationStatus('loading');
       const res = await fetchRealtimeSync(lastEventId);
       if (res.data?.events) {
+        const events = res.data.events as RealtimeEventEnvelope[];
         setLastEventId(res.data.lastEventId ?? lastEventId);
-        setNotifications(prev => sortNotifications([...prev, ...res.data.events]));
+        setNotifications(prev => sortNotifications([...prev, ...events]));
+        events.forEach((event) => applyRealtimeQuestEvent(event));
       }
     } catch (err) {
       console.error('Sync failed:', err);
@@ -298,6 +328,62 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
   const setNpcDialogue = (npcName: string, dialogue: string) => {
     setNpcDialogues(prev => ({ ...prev, [npcName]: dialogue }));
+  };
+
+  const applyRealtimeQuestEvent = (event: RealtimeEventEnvelope) => {
+    const payload = asRecord(event.payload);
+    const matcher = asQuestMatcher(payload);
+
+    if (!matcher.id && !matcher.chainQuestId) {
+      return;
+    }
+
+    switch (event.eventName) {
+      case 'proof:submitted':
+        patchQuest(matcher, {
+          status: typeof payload?.status === 'string' ? payload.status : 'SUBMITTED',
+          proofTx: asString(payload?.proofTx),
+          proofTxHash: asString(payload?.proofTxHash),
+          verificationResult: asString(payload?.verificationResult) ?? 'pending',
+          verificationReason: asString(payload?.verificationReason) ?? 'Queued for deterministic verification'
+        });
+        break;
+      case 'reward:claimed': {
+        const claimData = asRecord(payload?.data);
+        const success = typeof claimData?.success === 'boolean' ? claimData.success : null;
+
+        patchQuest(matcher, {
+          status: success === false ? 'FAILED' : 'VERIFIED',
+          verificationTx: asString(payload?.verificationTx),
+          verificationResult: success === false ? 'REJECTED' : 'VERIFIED',
+          verificationReason: asString(payload?.verificationReason) ?? null
+        });
+        break;
+      }
+      case 'reward:refunded': {
+        const currentQuest = getQuest(matcher);
+        patchQuest(matcher, {
+          status: 'FAILED',
+          verificationTx: asString(payload?.verificationTx),
+          verificationReason: asString(payload?.verificationReason) ?? 'Deterministic verification rejected this proof.',
+          treasuryPayout: {
+            ...(currentQuest?.treasuryPayout && typeof currentQuest.treasuryPayout === 'object'
+              ? currentQuest.treasuryPayout
+              : {}),
+            ...(asRecord(payload?.treasuryPayout) ?? {}),
+            status: 'REFUNDED'
+          }
+        });
+        break;
+      }
+      case 'quest:started':
+        patchQuest(matcher, {
+          status: 'ACTIVE'
+        });
+        break;
+      default:
+        break;
+    }
   };
 
   useEffect(() => {
@@ -360,7 +446,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     socket.on('event', (event: RealtimeEventEnvelope) => {
       setNotifications(prev => sortNotifications([...prev, event]));
-      setLastEventId(Math.max(lastEventId, event.id ?? 0));
+      applyRealtimeQuestEvent(event);
+      setLastEventId((current) => Math.max(current, event.id ?? 0));
     });
 
     return () => {

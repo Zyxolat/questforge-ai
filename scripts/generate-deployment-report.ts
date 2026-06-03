@@ -100,25 +100,19 @@ function normalizeAddress(name: string, value: string | undefined) {
 }
 
 function loadDeploymentAddresses(): DeploymentAddresses {
-  const preferredFiles = ['celo-addresses.json', 'localhost-addresses.json', 'hardhat-addresses.json'];
-
-  for (const fileName of preferredFiles) {
-    const filePath = path.join(contractsDeploymentDir, fileName);
-    if (!fs.existsSync(filePath)) {
-      continue;
-    }
-
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DeploymentAddresses;
-    return {
-      ...parsed,
-      REWARD_NFT_ADDRESS: normalizeAddress('REWARD_NFT_ADDRESS', parsed.REWARD_NFT_ADDRESS),
-      TREASURY_ADDRESS: normalizeAddress('TREASURY_ADDRESS', parsed.TREASURY_ADDRESS),
-      REPUTATION_ADDRESS: normalizeAddress('REPUTATION_ADDRESS', parsed.REPUTATION_ADDRESS),
-      FORGE_QUEST_MANAGER_ADDRESS: normalizeAddress('FORGE_QUEST_MANAGER_ADDRESS', parsed.FORGE_QUEST_MANAGER_ADDRESS)
-    };
+  const filePath = path.join(contractsDeploymentDir, 'celo-addresses.json');
+  if (!fs.existsSync(filePath)) {
+    throw new Error(`Celo deployment artifact not found at ${filePath}. Run the mainnet deployment first.`);
   }
 
-  throw new Error('No deployment artifact found. Run the contract deployment first.');
+  const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as DeploymentAddresses;
+  return {
+    ...parsed,
+    REWARD_NFT_ADDRESS: normalizeAddress('REWARD_NFT_ADDRESS', parsed.REWARD_NFT_ADDRESS),
+    TREASURY_ADDRESS: normalizeAddress('TREASURY_ADDRESS', parsed.TREASURY_ADDRESS),
+    REPUTATION_ADDRESS: normalizeAddress('REPUTATION_ADDRESS', parsed.REPUTATION_ADDRESS),
+    FORGE_QUEST_MANAGER_ADDRESS: normalizeAddress('FORGE_QUEST_MANAGER_ADDRESS', parsed.FORGE_QUEST_MANAGER_ADDRESS)
+  };
 }
 
 function buildReport(addresses: DeploymentAddresses): DeploymentReport {

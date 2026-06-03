@@ -299,7 +299,7 @@ async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet)
 }
 
 async function main() {
-  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'http://localhost:4000';
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app';
   const { rootUrl, apiUrl } = resolveUrls(rawBase);
   const deployment = loadDeploymentAddresses();
   const validationPrivateKey = process.env.VALIDATION_PRIVATE_KEY?.trim();

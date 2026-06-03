@@ -178,7 +178,7 @@ async function readDiagnostics(rootUrl: string, apiUrl: string) {
 }
 
 async function main() {
-  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'http://127.0.0.1:4000';
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app';
   const { rootUrl, apiUrl } = resolveUrls(rawBase);
   const testsCount = Number(process.env.AI_VALIDATION_TESTS_COUNT || '5');
   const requireRealAI = parseBooleanEnv(process.env.AI_VALIDATION_REQUIRE_REAL_AI, true);

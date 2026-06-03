@@ -308,29 +308,30 @@ class QuestValidationEngine {
       version: metadata.version,
       orchestrationId: metadata.orchestrationId,
       title: metadata.title,
-      description: metadata.description,
-      difficulty: metadata.difficulty,
       questType: metadata.questType,
       objective: metadata.objective,
-      lore: metadata.lore,
-      validationRules: metadata.validationRules,
       chain: metadata.chain,
+      difficulty: metadata.difficulty,
       worldStateVersion: metadata.worldStateVersion,
       requiredTxTypes: metadata.requiredTxTypes,
       transactionCount: metadata.transactionCount,
+      verification:
+        metadata.verification && typeof metadata.verification === 'object' && !Array.isArray(metadata.verification)
+          ? {
+              type: (metadata.verification as Record<string, unknown>).type,
+              questType: (metadata.verification as Record<string, unknown>).questType,
+              minValueCelo: (metadata.verification as Record<string, unknown>).minValueCelo,
+              allowContractTarget: (metadata.verification as Record<string, unknown>).allowContractTarget,
+              requireContractCall: (metadata.verification as Record<string, unknown>).requireContractCall,
+              requireTokenApproval: (metadata.verification as Record<string, unknown>).requireTokenApproval
+            }
+          : undefined,
       generation: generation
         ? {
             source: generation.source,
             provider: generation.provider,
             model: generation.model,
-            promptHash: generation.promptHash,
-            fallbackReason: generation.fallbackReason ?? null,
-            requestId: generation.requestId ?? null,
-            latencyMs: generation.latencyMs ?? null,
-            promptTokens: generation.promptTokens ?? null,
-            completionTokens: generation.completionTokens ?? null,
-            totalTokens: generation.totalTokens ?? null,
-            attemptCount: generation.attemptCount ?? null
+            promptHash: generation.promptHash
           }
         : undefined,
       adaptive: adaptive
@@ -343,10 +344,10 @@ class QuestValidationEngine {
       orchestration: orchestration
         ? {
             riskLevel: orchestration.riskLevel,
-            txRequirements: orchestration.txRequirements,
-            faction: orchestration.faction,
-            npc: orchestration.npc,
-            validationWarnings: orchestration.validationWarnings
+            validationWarnings: orchestration.validationWarnings,
+            txRequirements: Array.isArray(orchestration.txRequirements)
+              ? orchestration.txRequirements.slice(0, 2)
+              : undefined
           }
         : undefined
     } satisfies Record<string, unknown>;

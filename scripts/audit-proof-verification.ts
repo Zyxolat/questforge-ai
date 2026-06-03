@@ -55,19 +55,12 @@ type DeploymentAddresses = {
 
 const AUTH_CHAIN_ID = Number(process.env.AUTH_CHAIN_ID || '42220');
 const RPC_CHAIN_ID = Number(process.env.RPC_CHAIN_ID || '42220');
-const API_ROOT = (process.env.API_URL || 'http://127.0.0.1:4000').replace(/\/$/, '');
+const API_ROOT = (process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app').replace(/\/$/, '');
 const API_BASE = API_ROOT.endsWith('/api') ? API_ROOT : `${API_ROOT}/api`;
-const RPC_URL = process.env.VALIDATION_RPC_URL || 'http://127.0.0.1:8545';
+const RPC_URL = process.env.VALIDATION_RPC_URL || process.env.CELO_RPC_URL || 'https://forno.celo.org';
 const DEPLOYMENT_FILE = process.env.DEPLOYMENT_ADDRESSES_FILE?.trim()
   ? path.resolve(process.cwd(), process.env.DEPLOYMENT_ADDRESSES_FILE.trim())
-  : path.join(process.cwd(), 'contracts/deployments/localhost-addresses.json');
-
-const PRIVATE_KEYS = {
-  alpha: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
-  beta: '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d',
-  gamma: '0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a',
-  delta: '0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6'
-} as const;
+  : path.join(process.cwd(), 'contracts/deployments/celo-addresses.json');
 
 const FORGE_QUEST_MANAGER_ABI = [
   'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
@@ -102,6 +95,15 @@ function sleep(ms: number) {
 
 function loadDeploymentAddresses(): DeploymentAddresses {
   return JSON.parse(fs.readFileSync(DEPLOYMENT_FILE, 'utf8')) as DeploymentAddresses;
+}
+
+function requirePrivateKey(name: string) {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+
+  return value;
 }
 
 async function authenticateWallet(wallet: ethers.Wallet) {
@@ -297,13 +299,11 @@ async function main() {
   const provider = new ethers.JsonRpcProvider(RPC_URL, RPC_CHAIN_ID);
 
   const wallets = {
-    alpha: new ethers.Wallet(PRIVATE_KEYS.alpha, provider),
-    beta: new ethers.Wallet(PRIVATE_KEYS.beta, provider),
-    gamma: new ethers.Wallet(PRIVATE_KEYS.gamma, provider),
-    delta: new ethers.Wallet(PRIVATE_KEYS.delta, provider)
+    beta: new ethers.Wallet(requirePrivateKey('VALIDATION_BETA_PRIVATE_KEY'), provider),
+    gamma: new ethers.Wallet(requirePrivateKey('VALIDATION_GAMMA_PRIVATE_KEY'), provider),
+    delta: new ethers.Wallet(requirePrivateKey('VALIDATION_DELTA_PRIVATE_KEY'), provider)
   };
   const signers = {
-    alpha: new ethers.NonceManager(wallets.alpha),
     beta: new ethers.NonceManager(wallets.beta),
     gamma: new ethers.NonceManager(wallets.gamma),
     delta: new ethers.NonceManager(wallets.delta)

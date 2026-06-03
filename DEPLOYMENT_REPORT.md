@@ -1,8 +1,8 @@
 # QuestForge AI Deployment Report
 
-Generated: 2026-05-15T22:35:39.342Z
-Environment: development
-Network: localhost
+Generated: 2026-05-16T00:39:34.710Z
+Environment: production
+Network: Celo Mainnet
 Status: SUCCESS
 Readiness Score: 95/100
 
@@ -10,14 +10,14 @@ Readiness Score: 95/100
 
 | Contract          | Address                                      |
 | ----------------- | -------------------------------------------- |
-| RewardNFT         | `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512` |
-| Treasury          | `0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0` |
-| Reputation        | `0xCf7Ed3AccA5a467e9e704C703E8D87F634fB0Fc9` |
-| ForgeQuestManager | `0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9` |
+| RewardNFT         | `0xc9539e553acC578d063A23B3F4f62C760356Cf6D` |
+| Treasury          | `0xEdFdE2946D0D31a636CE115d0026Ce6096957D5B` |
+| Reputation        | `0x8aB46e0Bf56EC119DEfd8c279b75ce19E72B083c` |
+| ForgeQuestManager | `0xFDF8901BB33Bd52ef199F3d3E6647b8a1f86D2d2` |
 
 ## Validation
 
-- Environment: not_run
+- Environment: fail
 - Contracts: pass
 - Treasury: fail
 - Gameplay: not_run

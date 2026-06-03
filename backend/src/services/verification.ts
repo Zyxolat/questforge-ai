@@ -1001,6 +1001,10 @@ export async function queueProofVerification(params: {
   proofUri: string;
   submissionTxHash: string;
 }) {
+  if (!contracts.forgeQuestManagerWrite) {
+    throw new Error('Proof verification is unavailable because VERIFIER_PRIVATE_KEY is not configured');
+  }
+
   const canonicalProofTxHash = canonicalizeProofReference(params.proofUri);
   const normalizedSubmissionTxHash = assertTransactionHash(params.submissionTxHash, 'submissionTxHash');
   const proofHash = hashProofUri(canonicalProofTxHash);
@@ -1077,14 +1081,7 @@ export async function queueProofVerification(params: {
     }
   });
 
-  if (contracts.forgeQuestManagerWrite) {
-    void processPendingProofSubmissions();
-  } else {
-    logger.warn('Proof queued but verifier signer is unavailable; leaving submission pending', {
-      questId: params.questId,
-      proofSubmissionId
-    });
-  }
+  void processPendingProofSubmissions();
 
   return {
     proofHash,
