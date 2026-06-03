@@ -52,7 +52,7 @@ class AIRewardEngine {
       );
       const minimumRewardForStake = this.minimumRewardForStake(input.stakeAmount);
       const minimumPlayableReward = this.roundCelo(
-        Math.max(BASE_REWARD_FLOOR, minimumRewardForStake, input.rewardBounds.min)
+        Math.max(BASE_REWARD_FLOOR, minimumRewardForStake)
       );
       const rewardCeiling = this.roundCelo(
         Math.min(
@@ -116,6 +116,24 @@ class AIRewardEngine {
       }
 
       rewardAmount = this.roundCelo(Math.max(minimumPlayableReward, Math.min(rewardAmount, rewardCeiling)));
+      const adaptedRewardBounds = {
+        min: this.roundCelo(Math.min(input.rewardBounds.min, rewardAmount)),
+        max: this.roundCelo(Math.max(Math.min(input.rewardBounds.max, rewardCeiling), rewardAmount))
+      };
+
+      if (
+        adaptedRewardBounds.min !== input.rewardBounds.min ||
+        adaptedRewardBounds.max !== input.rewardBounds.max
+      ) {
+        logger.warn('[REWARD] Treasury-constrained reward bounds adapted', {
+          userId: input.userId,
+          originalBounds: input.rewardBounds,
+          adaptedBounds: adaptedRewardBounds,
+          rewardAmount,
+          treasuryCap: treasuryState.treasuryCap,
+          availableRewardLiquidity: treasuryState.availableRewardLiquidity
+        });
+      }
 
       const xpReward = Math.max(
         150,

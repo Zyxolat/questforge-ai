@@ -102,6 +102,31 @@ class AIQuestGenerationEngine {
       rewardBounds: difficultyProfile.rewardBounds
     });
 
+    const effectiveRewardBounds = {
+      min: this.roundToCelo(Math.min(difficultyProfile.rewardBounds.min, rewardProfile.rewardAmount)),
+      max: this.roundToCelo(
+        Math.max(
+          Math.min(difficultyProfile.rewardBounds.max, rewardProfile.treasuryCap),
+          Math.min(difficultyProfile.rewardBounds.min, rewardProfile.rewardAmount)
+        )
+      )
+    };
+
+    if (
+      effectiveRewardBounds.min !== difficultyProfile.rewardBounds.min ||
+      effectiveRewardBounds.max !== difficultyProfile.rewardBounds.max
+    ) {
+      logger.warn('[QUEST-GENERATION] Reward bounds adapted to treasury capacity', {
+        wallet,
+        userId: user.id,
+        originalBounds: difficultyProfile.rewardBounds,
+        effectiveBounds: effectiveRewardBounds,
+        rewardAmount: rewardProfile.rewardAmount,
+        treasuryCap: rewardProfile.treasuryCap,
+        availableRewardLiquidity: rewardProfile.availableRewardLiquidity
+      });
+    }
+
     logger.info('[QUEST-GENERATION] Difficulty and reward profiles computed', {
       wallet,
       userId: user.id,
@@ -152,7 +177,7 @@ class AIQuestGenerationEngine {
         chain: input.chain,
         difficulty: difficultyProfile.difficulty,
         stakeBounds: difficultyProfile.stakeBounds,
-        rewardBounds: difficultyProfile.rewardBounds,
+        rewardBounds: effectiveRewardBounds,
         recommendedStake: difficultyProfile.recommendedStake,
         rewardAmount: rewardProfile.rewardAmount,
         xpReward: rewardProfile.xpReward,
@@ -324,6 +349,10 @@ class AIQuestGenerationEngine {
 
   getDiagnostics() {
     return { ...this.diagnostics };
+  }
+
+  private roundToCelo(value: number) {
+    return Number(value.toFixed(4));
   }
 
   private async buildPlayerProfile(user: UserWithRelations): Promise<PlayerQuestProfile> {
