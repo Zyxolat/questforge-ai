@@ -15,6 +15,12 @@ type ActiveWorldModifier = {
 
 export interface RewardCalculation {
   rewardAmount: number;
+  rewardBounds: {
+    min: number;
+    max: number;
+  };
+  minimumAllowedReward: number;
+  maximumAllowedReward: number;
   xpReward: number;
   reasoning: string;
   worldMultiplier: number;
@@ -46,14 +52,10 @@ class AIRewardEngine {
 
       const baseReward = 0.03 + input.difficulty * 0.015;
       const worldMultiplier = this.computeWorldMultiplier(activeWorldModifiers);
-      const rewardsRemaining = Math.max(
-        BASE_REWARD_FLOOR,
-        QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO - (activity?.rewardsEarned ?? 0)
+      const rewardsRemaining = this.roundCelo(
+        Math.max(0, QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO - (activity?.rewardsEarned ?? 0))
       );
       const minimumRewardForStake = this.minimumRewardForStake(input.stakeAmount);
-      const minimumPlayableReward = this.roundCelo(
-        Math.max(BASE_REWARD_FLOOR, minimumRewardForStake)
-      );
       const rewardCeiling = this.roundCelo(
         Math.min(
           QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
@@ -62,6 +64,10 @@ class AIRewardEngine {
           treasuryState.treasuryCap
         )
       );
+      const preferredRewardFloor = this.roundCelo(
+        Math.max(BASE_REWARD_FLOOR, input.rewardBounds.min, minimumRewardForStake)
+      );
+      const minimumAllowedReward = this.roundCelo(Math.min(preferredRewardFloor, rewardCeiling));
 
       if (treasuryState.availableRewardLiquidity <= 0) {
         throw new QuestGenerationError(
@@ -76,49 +82,47 @@ class AIRewardEngine {
         );
       }
 
-      let rewardAmount = baseReward * input.streakMultiplier * worldMultiplier;
-      rewardAmount = this.roundCelo(Math.max(BASE_REWARD_FLOOR, rewardAmount));
-
-      if (treasuryState.treasuryCap < minimumRewardForStake) {
-        throw new QuestGenerationError(
-          'QUEST_TREASURY_INSUFFICIENT_LIQUIDITY',
-          'Quest generation is temporarily unavailable because treasury liquidity is too low for a safe reward.',
-          503,
-          [
-            `Treasury address: ${contracts.treasury.target?.toString() ?? 'unknown'}`,
-            `Available reward liquidity: ${treasuryState.availableRewardLiquidity.toFixed(4)} CELO`,
-            `Treasury reward cap: ${treasuryState.treasuryCap.toFixed(4)} CELO`,
-            `Minimum safe reward for stake ${input.stakeAmount.toFixed(4)} CELO: ${minimumRewardForStake.toFixed(4)} CELO`
-          ]
-        );
-      }
-
-      if (rewardCeiling < minimumPlayableReward) {
+      if (rewardCeiling <= 0) {
         const dailyRewardsEarned = activity?.rewardsEarned ?? 0;
         const reasonDetails = [
-          `Minimum playable reward: ${minimumPlayableReward.toFixed(4)} CELO`,
           `Reward ceiling: ${rewardCeiling.toFixed(4)} CELO`,
-          `Difficulty reward bounds: ${input.rewardBounds.min.toFixed(4)}-${input.rewardBounds.max.toFixed(4)} CELO`,
-          `Stake safety floor: ${minimumRewardForStake.toFixed(4)} CELO`,
           `Daily rewards earned: ${dailyRewardsEarned.toFixed(4)} / ${QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO.toFixed(4)} CELO`,
-          `Treasury reward cap: ${treasuryState.treasuryCap.toFixed(4)} CELO`
+          `Treasury reward cap: ${treasuryState.treasuryCap.toFixed(4)} CELO`,
+          `Available reward liquidity: ${treasuryState.availableRewardLiquidity.toFixed(4)} CELO`
         ];
 
-        const dailyCapIsLimiting = rewardsRemaining < minimumPlayableReward;
         throw new QuestGenerationError(
-          dailyCapIsLimiting ? 'QUEST_DAILY_REWARD_CAPACITY_EXHAUSTED' : 'QUEST_REWARD_CAPACITY_UNAVAILABLE',
-          dailyCapIsLimiting
-            ? 'Quest generation is temporarily unavailable because the remaining daily reward capacity is below the minimum safe quest reward.'
-            : 'Quest generation is temporarily unavailable because the treasury cannot support a reward within the allowed gameplay bounds.',
-          dailyCapIsLimiting ? 429 : 503,
+          dailyRewardsEarned >= QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO
+            ? 'QUEST_DAILY_REWARD_CAPACITY_EXHAUSTED'
+            : 'QUEST_REWARD_CAPACITY_UNAVAILABLE',
+          dailyRewardsEarned >= QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO
+            ? 'Quest generation is temporarily unavailable because the remaining daily reward capacity is exhausted.'
+            : 'Quest generation is temporarily unavailable because the treasury cannot support any reward.',
+          dailyRewardsEarned >= QUEST_CONFIG.MAX_REWARDS_PER_DAY_CELO ? 429 : 503,
           reasonDetails
         );
       }
 
-      rewardAmount = this.roundCelo(Math.max(minimumPlayableReward, Math.min(rewardAmount, rewardCeiling)));
+      let rewardAmount = baseReward * input.streakMultiplier * worldMultiplier;
+      rewardAmount = this.roundCelo(Math.max(BASE_REWARD_FLOOR, rewardAmount));
+
+      if (rewardCeiling < preferredRewardFloor) {
+        logger.warn('[REWARD] Reward floor adapted to treasury capacity', {
+          userId: input.userId,
+          stakeAmount: input.stakeAmount,
+          preferredRewardFloor,
+          minimumAllowedReward,
+          rewardCeiling,
+          minimumRewardForStake,
+          treasuryCap: treasuryState.treasuryCap,
+          availableRewardLiquidity: treasuryState.availableRewardLiquidity
+        });
+      }
+
+      rewardAmount = this.roundCelo(Math.max(minimumAllowedReward, Math.min(rewardAmount, rewardCeiling)));
       const adaptedRewardBounds = {
-        min: this.roundCelo(Math.min(input.rewardBounds.min, rewardAmount)),
-        max: this.roundCelo(Math.max(Math.min(input.rewardBounds.max, rewardCeiling), rewardAmount))
+        min: minimumAllowedReward,
+        max: rewardCeiling
       };
 
       if (
@@ -142,6 +146,9 @@ class AIRewardEngine {
 
       return {
         rewardAmount,
+        rewardBounds: adaptedRewardBounds,
+        minimumAllowedReward,
+        maximumAllowedReward: rewardCeiling,
         xpReward,
         reasoning: this.buildReasoning({
           baseReward,
@@ -169,6 +176,22 @@ class AIRewardEngine {
 
       return {
         rewardAmount: this.roundCelo(Math.max(BASE_REWARD_FLOOR, 0.03 + input.difficulty * 0.015)),
+        rewardBounds: {
+          min: this.roundCelo(Math.max(BASE_REWARD_FLOOR, 0.03 + input.difficulty * 0.015)),
+          max: this.roundCelo(
+            Math.min(
+              QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
+              Math.max(BASE_REWARD_FLOOR, 0.03 + input.difficulty * 0.015) * 1.5
+            )
+          )
+        },
+        minimumAllowedReward: this.roundCelo(Math.max(BASE_REWARD_FLOOR, 0.03 + input.difficulty * 0.015)),
+        maximumAllowedReward: this.roundCelo(
+          Math.min(
+            QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
+            Math.max(BASE_REWARD_FLOOR, 0.03 + input.difficulty * 0.015) * 1.5
+          )
+        ),
         xpReward: 150 * input.difficulty,
         reasoning: 'Fallback deterministic reward profile applied',
         worldMultiplier: 1,
@@ -213,7 +236,7 @@ class AIRewardEngine {
       const treasuryCap = this.roundCelo(
         Math.min(
           QUEST_CONFIG.MAX_SINGLE_REWARD_CELO,
-          Math.max(BASE_REWARD_FLOOR, availableLiquidity * 0.05)
+          Math.max(0, availableLiquidity * 0.05)
         )
       );
 

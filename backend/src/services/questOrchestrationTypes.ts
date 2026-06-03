@@ -211,6 +211,8 @@ export interface QuestValidationInput {
   rewardReasoning: string;
   worldMultiplier: number;
   treasuryCap: number;
+  minimumAllowedReward: number;
+  maximumAllowedReward: number;
   activeWorldModifiers: Array<{
     id: string;
     name: string;

@@ -9,7 +9,6 @@ import { logger } from './logger';
 import { npcRelationshipEngine } from './npcRelationshipEngine';
 import { playerNarrativeState } from './playerNarrativeState';
 import { questNarrativeEngine } from './questNarrativeEngine';
-import { QuestGenerationError } from './questGenerationErrors';
 import { questValidationEngine } from './questValidationEngine';
 import type { PlayerQuestProfile, QuestNpcDraft, ValidatedQuestOutput } from './questOrchestrationTypes';
 import { realtimeEventPublisher } from './realtimeEventPublisher';
@@ -102,15 +101,7 @@ class AIQuestGenerationEngine {
       rewardBounds: difficultyProfile.rewardBounds
     });
 
-    const effectiveRewardBounds = {
-      min: this.roundToCelo(Math.min(difficultyProfile.rewardBounds.min, rewardProfile.rewardAmount)),
-      max: this.roundToCelo(
-        Math.max(
-          Math.min(difficultyProfile.rewardBounds.max, rewardProfile.treasuryCap),
-          Math.min(difficultyProfile.rewardBounds.min, rewardProfile.rewardAmount)
-        )
-      )
-    };
+    const effectiveRewardBounds = rewardProfile.rewardBounds;
 
     if (
       effectiveRewardBounds.min !== difficultyProfile.rewardBounds.min ||
@@ -133,28 +124,11 @@ class AIQuestGenerationEngine {
       difficulty: difficultyProfile.difficulty,
       recommendedStake: difficultyProfile.recommendedStake,
       rewardAmount: rewardProfile.rewardAmount,
-      rewardBounds: difficultyProfile.rewardBounds,
+      rewardBounds: effectiveRewardBounds,
       treasuryCap: rewardProfile.treasuryCap,
       availableRewardLiquidity: rewardProfile.availableRewardLiquidity,
       treasuryHealthy: rewardProfile.treasuryHealthy
     });
-
-    if (
-      rewardProfile.rewardAmount < difficultyProfile.rewardBounds.min ||
-      rewardProfile.rewardAmount > difficultyProfile.rewardBounds.max
-    ) {
-      throw new QuestGenerationError(
-        'QUEST_REWARD_CONFIGURATION_INVALID',
-        'Quest generation produced an invalid reward configuration.',
-        500,
-        [
-          `Reward amount: ${rewardProfile.rewardAmount.toFixed(4)} CELO`,
-          `Allowed reward bounds: ${difficultyProfile.rewardBounds.min.toFixed(4)}-${difficultyProfile.rewardBounds.max.toFixed(4)} CELO`,
-          `Treasury cap: ${rewardProfile.treasuryCap.toFixed(4)} CELO`,
-          `Available reward liquidity: ${rewardProfile.availableRewardLiquidity.toFixed(4)} CELO`
-        ]
-      );
-    }
 
     const playerProfile = await this.buildPlayerProfile(user);
     const npc = await this.selectQuestNpc(user, worldState, playerProfile);
@@ -210,7 +184,7 @@ class AIQuestGenerationEngine {
           stakeAmount: validated.stakeAmount,
           rewardAmount: validated.rewardAmount,
           xpReward: validated.xpReward,
-          maxRewardAmount: difficultyProfile.rewardBounds.max,
+          maxRewardAmount: effectiveRewardBounds.max,
           minStakeAmount: difficultyProfile.stakeBounds.min,
           maxStakeAmount: difficultyProfile.stakeBounds.max,
           status: 'AVAILABLE',

@@ -1,6 +1,6 @@
 import crypto from 'crypto';
 import { aiValidator } from './aiSafety';
-import { validateRewardBounds } from './antiAbuse';
+import { QUEST_CONFIG, validateRewardBounds } from './antiAbuse';
 import { logger } from './logger';
 import { buildQuestTemplateForType, type ObjectiveType } from './questTemplates';
 import type {
@@ -54,21 +54,38 @@ class QuestValidationEngine {
     errors.push(...narrativeCheck.errors);
 
     if (input.recommendedStake < input.stakeBounds.min || input.recommendedStake > input.stakeBounds.max) {
-      errors.push('Recommended stake fell outside deterministic stake bounds');
+      warnings.push('Recommended stake fell outside deterministic stake bounds and was normalized');
     }
 
-    const stakeAmount = this.roundCelo(
-      Math.max(input.stakeBounds.min, Math.min(input.stakeBounds.max, input.recommendedStake))
+    const normalizedRewardBounds = this.normalizeRewardBounds(input.rewardBounds, input.treasuryCap);
+    const rewardAmount = this.roundCelo(
+      Math.max(normalizedRewardBounds.min, Math.min(input.rewardAmount, normalizedRewardBounds.max))
     );
-    if (stakeAmount <= 0) {
-      errors.push('Stake amount must be positive');
+
+    if (
+      normalizedRewardBounds.min !== input.rewardBounds.min ||
+      normalizedRewardBounds.max !== input.rewardBounds.max
+    ) {
+      warnings.push(
+        `Reward bounds normalized to ${normalizedRewardBounds.min.toFixed(4)}-${normalizedRewardBounds.max.toFixed(4)} CELO`
+      );
     }
 
-    if (input.rewardAmount < input.rewardBounds.min || input.rewardAmount > input.rewardBounds.max) {
-      errors.push('Reward amount fell outside deterministic reward bounds');
+    const stakeAmount = this.normalizeStakeAmount(input.stakeBounds, input.recommendedStake, rewardAmount);
+
+    if (rewardAmount !== input.rewardAmount) {
+      warnings.push(
+        `Reward amount normalized from ${input.rewardAmount.toFixed(4)} CELO to ${rewardAmount.toFixed(4)} CELO`
+      );
     }
 
-    const rewardBoundsCheck = validateRewardBounds(stakeAmount, input.rewardAmount);
+    if (stakeAmount !== input.recommendedStake) {
+      warnings.push(
+        `Stake amount normalized from ${input.recommendedStake.toFixed(4)} CELO to ${stakeAmount.toFixed(4)} CELO`
+      );
+    }
+
+    const rewardBoundsCheck = validateRewardBounds(stakeAmount, rewardAmount);
     if (!rewardBoundsCheck.valid) {
       errors.push(...rewardBoundsCheck.errors);
     }
@@ -93,7 +110,15 @@ class QuestValidationEngine {
       throw new QuestValidationError('Generated quest failed deterministic validation', errors);
     }
 
-    const metadata = this.buildMetadata(orchestrationId, input, verificationTemplate.type, stakeAmount, warnings);
+    const metadata = this.buildMetadata(
+      orchestrationId,
+      input,
+      verificationTemplate.type,
+      stakeAmount,
+      rewardAmount,
+      normalizedRewardBounds,
+      warnings
+    );
 
     return {
       orchestrationId,
@@ -111,7 +136,7 @@ class QuestValidationEngine {
       storyline: input.narrative.storyline,
       rewardRationale: input.narrative.rewardRationale,
       stakeAmount,
-      rewardAmount: this.roundCelo(input.rewardAmount),
+      rewardAmount,
       xpReward: Math.round(input.xpReward),
       transactionCount,
       requiredTxTypes: input.narrative.txRequirements.map((requirement) => requirement.stage),
@@ -212,11 +237,39 @@ class QuestValidationEngine {
     });
   }
 
+  private normalizeRewardBounds(
+    rewardBounds: QuestValidationInput['rewardBounds'],
+    treasuryCap: number
+  ) {
+    const max = this.roundCelo(Math.max(0, Math.min(rewardBounds.max, treasuryCap)));
+    const min = this.roundCelo(Math.min(Math.max(0.01, rewardBounds.min), max));
+
+    return { min, max };
+  }
+
+  private normalizeStakeAmount(
+    stakeBounds: QuestValidationInput['stakeBounds'],
+    recommendedStake: number,
+    rewardAmount: number
+  ) {
+    const boundedStake = this.roundCelo(Math.max(stakeBounds.min, Math.min(stakeBounds.max, recommendedStake)));
+    const rewardConstrainedStake = this.roundCelo(
+      Math.max(
+        QUEST_CONFIG.MIN_SINGLE_STAKE_CELO,
+        Math.min(boundedStake, rewardAmount * 2)
+      )
+    );
+
+    return rewardConstrainedStake;
+  }
+
   private buildMetadata(
     orchestrationId: string,
     input: QuestValidationInput,
     verifierType: ObjectiveType,
     stakeAmount: number,
+    rewardAmount: number,
+    rewardBounds: { min: number; max: number },
     warnings: string[]
   ) {
     const verificationTemplate = buildQuestTemplateForType(verifierType, input.wallet, input.difficulty);
@@ -246,8 +299,9 @@ class QuestValidationEngine {
       adaptive: {
         reasoning: input.difficultyReasoning,
         stakeBounds: input.stakeBounds,
-        rewardBounds: input.rewardBounds,
+        rewardBounds,
         recommendedStake: stakeAmount,
+        recommendedReward: rewardAmount,
         estimatedDurationSeconds: input.estimatedDurationSeconds,
         agentId: input.agentId
       },
