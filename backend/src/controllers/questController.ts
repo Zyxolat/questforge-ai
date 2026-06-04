@@ -1077,6 +1077,15 @@ export async function submitProof(req: Request, res: Response) {
       submissionTxHash
     });
 
+    logger.info('[QUEST] Proof submission accepted', {
+      wallet,
+      userId: user.id,
+      questId,
+      proofSubmissionId: queued.proofSubmissionId,
+      proofHash: queued.proofHash,
+      verificationStatus: 'pending'
+    });
+
     res.status(202).json({
       success: true,
       questId,

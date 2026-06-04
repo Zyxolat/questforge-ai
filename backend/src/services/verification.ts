@@ -393,6 +393,19 @@ async function syncSuccessfulSettlementArtifacts(input: {
   const stakeAmount = Number(ethers.formatEther(input.onchainQuest.stakeAmount));
   const totalAmount = rewardAmount + stakeAmount;
 
+  logger.info('Proof verification reward settlement started', {
+    questId: input.quest.id,
+    chainQuestId: input.quest.chainQuestId?.toString() ?? null,
+    verificationTxHash: input.verificationTxHash,
+    verificationReason: input.verificationReason,
+    rewardReleased: Boolean(rewardReleased),
+    rewardPaid: Boolean(rewardPaid),
+    rewardMinted: Boolean(rewardMinted),
+    rewardAmount,
+    stakeAmount,
+    totalAmount
+  });
+
   await prisma.treasuryPayout.upsert({
     where: { questId: input.quest.id },
     create: {
@@ -443,6 +456,13 @@ async function syncSuccessfulSettlementArtifacts(input: {
           createdAt: settledAt
         }
       });
+
+      logger.info('Proof verification reward issuance recorded', {
+        questId: input.quest.id,
+        userId: input.quest.playerId,
+        verificationTxHash: input.verificationTxHash,
+        rewardAmount
+      });
     }
   }
 
@@ -465,6 +485,13 @@ async function syncSuccessfulSettlementArtifacts(input: {
             questHistory: input.quest.id,
             mintedAt: settledAt
           }
+        });
+
+        logger.info('Proof verification NFT mint recorded', {
+          questId: input.quest.id,
+          userId: input.quest.playerId,
+          tokenId,
+          verificationTxHash: input.verificationTxHash
         });
       }
 
@@ -520,6 +547,13 @@ async function syncSuccessfulSettlementArtifacts(input: {
       }
     });
   }
+
+  logger.info('Proof verification reward settlement completed', {
+    questId: input.quest.id,
+    chainQuestId: input.quest.chainQuestId?.toString() ?? null,
+    verificationTxHash: input.verificationTxHash,
+    verificationReason: input.verificationReason
+  });
 }
 
 async function syncFailedSettlementArtifacts(input: {
@@ -621,6 +655,12 @@ async function claimPendingProofs(limit: number) {
       claimed.push({ ...proof, verificationResult: 'processing', verificationReason: 'Deterministic verification in progress' });
     }
   }
+
+  logger.info('Proof verification batch claimed', {
+    requestedLimit: limit,
+    pendingCount: proofs.length,
+    claimedCount: claimed.length
+  });
 
   return claimed;
 }
@@ -769,6 +809,15 @@ async function settleVerificationSuccess(input: {
   const verificationTxHash = (receipt?.hash || tx.hash) as string;
   const xpReward = Number(onchainQuest.xpReward);
 
+  logger.info('Proof verification success tx settled', {
+    questId: quest.id,
+    chainQuestId: quest.chainQuestId.toString(),
+    proofSubmissionId,
+    verificationTxHash,
+    xpReward,
+    verificationReason
+  });
+
   await markProofResult({
     proofSubmissionId,
     questId: quest.id,
@@ -805,6 +854,15 @@ async function settleVerificationSuccess(input: {
     verificationTxHash,
     verificationReason
   });
+
+  logger.info('Quest completion finalized', {
+    questId: quest.id,
+    chainQuestId: quest.chainQuestId.toString(),
+    playerId: quest.playerId,
+    verificationTxHash,
+    xpReward,
+    rewardAmount: quest.rewardAmount
+  });
 }
 
 async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmissionId: string, verificationReason: string) {
@@ -832,6 +890,14 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
     receipt = await waitForTransaction(tx);
     verificationTxHash = (receipt?.hash || tx.hash) as string;
   }
+
+  logger.warn('Proof verification failure settlement started', {
+    questId: quest.id,
+    chainQuestId: quest.chainQuestId.toString(),
+    proofSubmissionId,
+    verificationTxHash: verificationTxHash ?? null,
+    verificationReason
+  });
 
   await markProofResult({
     proofSubmissionId,
@@ -862,6 +928,14 @@ async function settleVerificationFailure(quest: QuestVerificationRow, proofSubmi
     onchainQuest,
     receipt,
     verificationTxHash,
+    verificationReason
+  });
+
+  logger.warn('Quest completion rejected', {
+    questId: quest.id,
+    chainQuestId: quest.chainQuestId.toString(),
+    playerId: quest.playerId,
+    verificationTxHash: verificationTxHash ?? null,
     verificationReason
   });
 }
@@ -1064,6 +1138,15 @@ export async function queueProofVerification(params: {
     proofTxHash: normalizedSubmissionTxHash
   });
 
+  logger.info('Proof verification queued', {
+    questId: params.questId,
+    chainQuestId: quest.chainQuestId?.toString() ?? null,
+    userId: params.userId,
+    proofSubmissionId,
+    proofTxHash: canonicalProofTxHash,
+    submissionTxHash: normalizedSubmissionTxHash
+  });
+
   await publishVerificationRealtimeEvent({
     replayKey: `verification-submitted:${params.questId}:${proofSubmissionId}:${normalizedSubmissionTxHash}`,
     eventName: 'proof:submitted',
@@ -1101,6 +1184,10 @@ export async function processPendingProofSubmissions(limit = env.VERIFICATION_BA
 
   workerActive = true;
   try {
+    logger.info('Proof verification worker batch started', {
+      limit
+    });
+
     while (true) {
       const pending = await claimPendingProofs(limit);
       if (pending.length === 0) {
@@ -1113,6 +1200,9 @@ export async function processPendingProofSubmissions(limit = env.VERIFICATION_BA
     }
   } finally {
     workerActive = false;
+    logger.info('Proof verification worker batch finished', {
+      limit
+    });
   }
 }
 

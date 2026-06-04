@@ -1090,6 +1090,7 @@ export default function CommandCenter() {
         'Proof submitted. The AI Dungeon Master is now verifying the result and streaming the outcome back to this screen.'
       );
       await syncNow();
+      await refreshQuestFeed();
       setProofUri('');
     } catch (error) {
       console.error('[CommandCenter] submitQuest failed', error);

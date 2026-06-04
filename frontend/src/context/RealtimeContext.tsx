@@ -409,7 +409,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
 
     socket.on('connect', () => {
       setConnectionStatus('connected');
-      socket.emit('auth', { address });
+      socket.emit('subscribe:user', address.toLowerCase());
     });
 
     socket.on('disconnect', () => {
@@ -454,6 +454,34 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.disconnect();
     };
   }, [address]);
+
+  useEffect(() => {
+    if (!address) {
+      return;
+    }
+
+    const hasPendingVerification = quests.some((quest) => quest.status === 'SUBMITTED');
+    if (!hasPendingVerification || connectionStatus !== 'connected') {
+      return;
+    }
+
+    let cancelled = false;
+    const interval = window.setInterval(() => {
+      if (cancelled) {
+        return;
+      }
+
+      void (async () => {
+        await syncNow();
+        await refreshQuestFeed();
+      })();
+    }, 5000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [address, connectionStatus, quests, lastEventId]);
 
   const value: RealtimeStateContextValue = {
     connectionStatus,
