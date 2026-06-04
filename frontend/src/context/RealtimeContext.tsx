@@ -444,10 +444,24 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    socket.on('event', (event: RealtimeEventEnvelope) => {
-      setNotifications(prev => sortNotifications([...prev, event]));
-      applyRealtimeQuestEvent(event);
-      setLastEventId((current) => Math.max(current, event.id ?? 0));
+    socket.onAny((eventName, ...args) => {
+      if (eventName === 'bootstrap') {
+        return;
+      }
+
+      const event = args[0] as RealtimeEventEnvelope | undefined;
+      if (!event || typeof event !== 'object') {
+        return;
+      }
+
+      const normalizedEvent = {
+        ...event,
+        eventName: typeof event.eventName === 'string' ? event.eventName : eventName
+      };
+
+      setNotifications(prev => sortNotifications([...prev, normalizedEvent]));
+      applyRealtimeQuestEvent(normalizedEvent);
+      setLastEventId((current) => Math.max(current, normalizedEvent.id ?? 0));
     });
 
     return () => {
