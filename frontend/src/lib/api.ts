@@ -566,7 +566,35 @@ export function registerQuestStart(questId: string, chainQuestId: string, startT
 }
 
 export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {
-  return api.post('/quests/submit-proof', { questId, proofUri, submissionTxHash });
+  console.debug('[API] Submitting proof for verification', {
+    questId,
+    proofUriPreview: proofUri.slice(0, 16),
+    submissionTxHash,
+    endpoint: '/quests/submit-proof'
+  });
+
+  return api
+    .post('/quests/submit-proof', { questId, proofUri, submissionTxHash })
+    .then((response) => {
+      console.debug('[API] Proof verification submission accepted', {
+        status: response.status,
+        questId: response.data?.questId ?? questId,
+        proofSubmissionId: response.data?.proofSubmissionId,
+        verificationStatus: response.data?.verificationStatus
+      });
+      return response;
+    })
+    .catch((error) => {
+      console.error('[API] Proof verification submission failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        responseData: axios.isAxiosError(error) ? JSON.stringify(error.response?.data).slice(0, 500) : undefined,
+        questId,
+        submissionTxHash
+      });
+      throw error;
+    });
 }
 
 export function claimDailyLoginBonus() {

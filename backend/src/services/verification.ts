@@ -640,6 +640,7 @@ async function claimPendingProofs(limit: number) {
   `;
 
   const claimed: ProofSubmissionRow[] = [];
+  const claimedQuestIds: string[] = [];
 
   for (const proof of proofs) {
     const updated = await prisma.$executeRaw`
@@ -653,13 +654,15 @@ async function claimPendingProofs(limit: number) {
 
     if (updated === 1) {
       claimed.push({ ...proof, verificationResult: 'processing', verificationReason: 'Deterministic verification in progress' });
+      claimedQuestIds.push(proof.questId);
     }
   }
 
   logger.info('Proof verification batch claimed', {
     requestedLimit: limit,
     pendingCount: proofs.length,
-    claimedCount: claimed.length
+    claimedCount: claimed.length,
+    claimedQuestIds
   });
 
   return claimed;
@@ -949,6 +952,15 @@ async function verifyQueuedProof(proofSubmissionId: string) {
 
   const quest = await loadQuestForVerification(proof.questId);
   if (!quest || !quest.playerId || !quest.playerWallet || !quest.chainQuestId) {
+    logger.warn('Proof verification skipped because quest context is incomplete', {
+      proofSubmissionId,
+      questId: proof.questId,
+      hasQuest: Boolean(quest),
+      hasPlayerId: Boolean(quest?.playerId),
+      hasPlayerWallet: Boolean(quest?.playerWallet),
+      hasChainQuestId: Boolean(quest?.chainQuestId)
+    });
+
     await updateProofSubmission({
       id: proof.id,
       verificationResult: 'REJECTED',
@@ -1067,6 +1079,12 @@ async function verifyQueuedProof(proofSubmissionId: string) {
       durationMs: elapsedMs(verificationStartedAtMs)
     });
   }
+
+  logger.info('Proof verification worker finished quest', {
+    proofSubmissionId,
+    questId: quest.id,
+    durationMs: elapsedMs(verificationStartedAtMs)
+  });
 }
 
 export async function queueProofVerification(params: {
@@ -1121,6 +1139,15 @@ export async function queueProofVerification(params: {
       currentVerificationResult: existingProof.verificationResult
     });
   } else {
+    logger.info('Proof verification persistence starting', {
+      questId: params.questId,
+      chainQuestId: quest.chainQuestId?.toString() ?? null,
+      userId: params.userId,
+      proofHash,
+      proofUriPreview: canonicalProofTxHash.slice(0, 16),
+      submissionTxHash: normalizedSubmissionTxHash
+    });
+
     proofSubmissionId = await insertProofSubmission({
       userId: params.userId,
       questId: params.questId,
@@ -1128,6 +1155,14 @@ export async function queueProofVerification(params: {
       proofHash,
       verificationResult: 'pending',
       verificationReason: 'Queued for deterministic verification'
+    });
+
+    logger.info('Proof verification persistence completed', {
+      questId: params.questId,
+      chainQuestId: quest.chainQuestId?.toString() ?? null,
+      userId: params.userId,
+      proofSubmissionId,
+      proofHash
     });
   }
 
@@ -1195,6 +1230,11 @@ export async function processPendingProofSubmissions(limit = env.VERIFICATION_BA
       }
 
       for (const proof of pending) {
+        logger.info('Proof verification worker picked up quest', {
+          questId: proof.questId,
+          proofSubmissionId: proof.id,
+          verificationResult: proof.verificationResult
+        });
         await verifyQueuedProof(proof.id);
       }
     }

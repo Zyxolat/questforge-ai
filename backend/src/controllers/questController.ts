@@ -1030,6 +1030,15 @@ export async function submitProof(req: Request, res: Response) {
   const wallet = req.auth?.wallet;
   const { questId, proofUri, submissionTxHash } = req.body;
 
+  logger.info('[QUEST] Proof submission route entered', {
+    wallet: wallet ?? null,
+    userId: req.auth?.userId ?? null,
+    questId: typeof questId === 'string' ? questId : null,
+    hasProofUri: typeof proofUri === 'string' && proofUri.length > 0,
+    proofUriPreview: typeof proofUri === 'string' ? proofUri.slice(0, 16) : null,
+    submissionTxHash: typeof submissionTxHash === 'string' ? submissionTxHash : null
+  });
+
   if (!wallet || !questId || !proofUri || !submissionTxHash) {
     return res.status(400).json({ error: 'Wallet, questId, proofUri, and submissionTxHash are required' });
   }
@@ -1069,6 +1078,15 @@ export async function submitProof(req: Request, res: Response) {
     if (quest.expiresAt < new Date()) {
       return res.status(400).json({ error: 'Quest has expired' });
     }
+
+    logger.info('[QUEST] Proof submission queuing requested', {
+      wallet,
+      userId: user.id,
+      questId,
+      chainQuestId: quest.chainQuestId?.toString() ?? null,
+      proofUriPreview: proofUri.slice(0, 16),
+      submissionTxHash
+    });
 
     const queued = await queueProofVerification({
       userId: user.id,

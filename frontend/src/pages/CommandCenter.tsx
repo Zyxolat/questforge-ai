@@ -379,7 +379,7 @@ export default function CommandCenter() {
   const narrativeProfile = resolveNarrativeRecord(currentQuestForDisplay);
   const recentNotifications = notifications.slice(0, 5);
   const canRetryProofQueue =
-    interactiveQuest?.status === 'SUBMITTED' && pendingProofRetry?.questId === interactiveQuest.id;
+    pendingProofRetry?.questId === interactiveQuest?.id;
 
   const proofHelperText = useMemo(() => {
     if (!interactiveQuest) {
@@ -1064,21 +1064,31 @@ export default function CommandCenter() {
           submissionTxHash
         };
         setPendingProofRetry(queuedProofRetry);
-
-        patchQuest(questMatcher(resolvedQuest), {
-          status: 'SUBMITTED',
-          proofTx: normalizedProof,
-          proofTxHash: submissionTxHash,
-          verificationResult: 'pending',
-          verificationReason: 'Queued for deterministic verification'
-        });
       }
 
       if (!submissionTxHash) {
         throw new Error('Proof submission transaction hash is missing for backend verification');
       }
 
+      console.debug('[CommandCenter] Submitting proof to backend verification service', {
+        questId: resolvedQuest.id,
+        chainQuestId: resolvedQuest.chainQuestId,
+        proofTxHash: normalizedProof,
+        submissionTxHash
+      });
+
       await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
+      console.debug('[CommandCenter] Backend proof verification submission accepted', {
+        questId: resolvedQuest.id,
+        submissionTxHash
+      });
+      patchQuest(questMatcher(resolvedQuest), {
+        status: 'SUBMITTED',
+        proofTx: normalizedProof,
+        proofTxHash: submissionTxHash,
+        verificationResult: 'pending',
+        verificationReason: 'Queued for deterministic verification'
+      });
       setPendingProofRetry(null);
       setTxStatus({
         type: 'pending',
@@ -1094,16 +1104,13 @@ export default function CommandCenter() {
       setProofUri('');
     } catch (error) {
       console.error('[CommandCenter] submitQuest failed', error);
-      if (!canRetryProofQueue && interactiveQuest.id && queuedProofRetry?.questId === interactiveQuest.id) {
-        patchQuest(questMatcher(interactiveQuest), {
-          status: 'SUBMITTED',
-          proofTx: queuedProofRetry.proofTxHash,
-          proofTxHash: queuedProofRetry.submissionTxHash,
-          verificationResult: 'pending',
-          verificationReason: 'Proof reached the chain, but backend sync still needs to succeed.'
-        });
+      if (queuedProofRetry?.questId === interactiveQuest.id) {
+        setMessage(
+          'Your proof was accepted onchain, but the backend verification queue did not confirm yet. Try "Retry backend sync" after a moment.'
+        );
+      } else {
+        setMessage(formatActionFailure(error, 'Proof submission failed.'));
       }
-      setMessage(formatActionFailure(error, 'Proof submission failed.'));
     } finally {
       setLoading(false);
     }
