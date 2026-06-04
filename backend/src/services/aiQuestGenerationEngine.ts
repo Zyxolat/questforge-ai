@@ -152,6 +152,8 @@ class AIQuestGenerationEngine {
         difficulty: difficultyProfile.difficulty,
         stakeBounds: difficultyProfile.stakeBounds,
         rewardBounds: effectiveRewardBounds,
+        minimumAllowedReward: rewardProfile.minimumAllowedReward,
+        maximumAllowedReward: rewardProfile.maximumAllowedReward,
         recommendedStake: difficultyProfile.recommendedStake,
         rewardAmount: rewardProfile.rewardAmount,
         xpReward: rewardProfile.xpReward,

@@ -57,7 +57,12 @@ class QuestValidationEngine {
       warnings.push('Recommended stake fell outside deterministic stake bounds and was normalized');
     }
 
-    const normalizedRewardBounds = this.normalizeRewardBounds(input.rewardBounds, input.treasuryCap);
+    const normalizedRewardBounds = this.normalizeRewardBounds(
+      input.rewardBounds,
+      input.treasuryCap,
+      input.minimumAllowedReward,
+      input.maximumAllowedReward
+    );
     const rewardAmount = this.roundCelo(
       Math.max(normalizedRewardBounds.min, Math.min(input.rewardAmount, normalizedRewardBounds.max))
     );
@@ -239,10 +244,12 @@ class QuestValidationEngine {
 
   private normalizeRewardBounds(
     rewardBounds: QuestValidationInput['rewardBounds'],
-    treasuryCap: number
+    treasuryCap: number,
+    minimumAllowedReward: number,
+    maximumAllowedReward: number
   ) {
-    const max = this.roundCelo(Math.max(0, Math.min(rewardBounds.max, treasuryCap)));
-    const min = this.roundCelo(Math.min(Math.max(0.01, rewardBounds.min), max));
+    const max = this.roundCelo(Math.max(0, Math.min(rewardBounds.max, treasuryCap, maximumAllowedReward)));
+    const min = this.roundCelo(Math.min(Math.max(0.01, rewardBounds.min, minimumAllowedReward), max));
 
     return { min, max };
   }
