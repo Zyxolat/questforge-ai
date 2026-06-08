@@ -98,6 +98,12 @@ export type QuestState = {
   proofTx?: string | null;
   proofTxHash?: string | null;
   verificationTx?: string | null;
+  rewardedEvent?: {
+    txHash?: string;
+    rewardAmount?: string;
+    xpReward?: string;
+    proofHash?: string;
+  } | null;
   [key: string]: unknown;
 };
 
@@ -184,6 +190,7 @@ type RealtimeStateContextValue = {
   upsertQuest: (quest: QuestState) => void;
   patchQuest: (matcher: QuestMatcher, patch: Partial<QuestState>) => void;
   getQuest: (matcher: QuestMatcher) => QuestState | null;
+  addNotification: (event: RealtimeEventEnvelope) => void;
   setNpcDialogue: (npcName: string, dialogue: string) => void;
 };
 
@@ -324,6 +331,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (matcher.orchestrationId && q.orchestrationId === matcher.orchestrationId) return true;
       return false;
     }) ?? null;
+  };
+
+  const addNotification = (event: RealtimeEventEnvelope) => {
+    setNotifications(prev => sortNotifications([event, ...prev]));
+    applyRealtimeQuestEvent(event);
   };
 
   const setNpcDialogue = (npcName: string, dialogue: string) => {
@@ -519,6 +531,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     upsertQuest,
     patchQuest,
     getQuest,
+    addNotification,
     setNpcDialogue,
   };
 

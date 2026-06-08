@@ -7,15 +7,16 @@ const reputationAddress = env.REPUTATION_ADDRESS;
 const treasuryAddress = env.TREASURY_ADDRESS;
 
 const forgeQuestManagerAbi: ethers.InterfaceAbi = [
-  'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
-  'function startQuest(uint256 questId) external payable',
+  'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
   'function submitQuest(uint256 questId,string calldata proofUri) external',
+  'function verifyQuest(uint256 questId,bool success,bytes32 proofVerificationHash) external',
+  'function claimReward(uint256 questId) external',
   'function cancelQuest(uint256 questId) external',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)',
-  'event QuestStarted(uint256 indexed questId,address indexed creator,address indexed player,uint256 stakeAmount)',
   'event QuestSubmitted(uint256 indexed questId,address indexed player,bytes32 proofHash)',
-  'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
+  'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)',
+  'event QuestRewarded(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
 ];
 
 const rewardNftAbi: ethers.InterfaceAbi = [
@@ -29,13 +30,14 @@ const reputationAbi: ethers.InterfaceAbi = [
 ];
 
 const treasuryAbi: ethers.InterfaceAbi = [
-  'function questFunds(uint256) view returns (uint256 reservedReward,uint256 lockedStake,address player,uint8 state)',
+  'function questFunds(uint256) view returns (uint256 reservedReward,address player,uint8 state)',
   'function availableRewardLiquidity() view returns (uint256)',
   'function isSolvent() view returns (bool)',
   'function fundNativeRewardPool() external payable',
   'event RewardReserved(uint256 indexed questId,address indexed creator,uint256 amount,uint256 totalReservedRewards)',
-  'event RewardPaid(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 stakeAmount,uint256 totalPayout)',
-  'event RewardRefunded(uint256 indexed questId,address indexed recipient,uint256 rewardAmount,uint256 stakeAmount,bytes32 reason)'
+  'event RewardReleased(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 totalPayout)',
+  'event RewardPaid(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 totalPayout)',
+  'event RewardRefunded(uint256 indexed questId,address indexed recipient,uint256 rewardAmount,bytes32 reason)'
 ];
 
 export const getContract = (address: string, abi: ethers.InterfaceAbi, signerOrProvider: ethers.Signer | ethers.Provider) => {

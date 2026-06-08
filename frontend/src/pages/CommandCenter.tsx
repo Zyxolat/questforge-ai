@@ -19,13 +19,12 @@ import {
   fetchDailyMissions,
   generateQuest,
   registerOnchainQuest,
-  registerQuestStart,
   submitProofForVerification
 } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
 import { parseReceiptEvent } from '../lib/questTransactions';
-import { describeTransactionFailure, formatCeloAmount } from '../lib/transactionDiagnostics';
+import { describeTransactionFailure } from '../lib/transactionDiagnostics';
 import {
   estimateContractWriteGas,
   sendContractWrite,
@@ -176,9 +175,10 @@ function formatActionFailure(error: unknown, fallbackLabel: string) {
   return fallbackLabel;
 }
 
-function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest') {
+function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest' | 'claimReward') {
   if (functionName === 'createQuest') return 'Forge quest';
-  if (functionName === 'startQuest') return 'Start quest';
+  if (functionName === 'startQuest') return 'Complete quest';
+  if (functionName === 'claimReward') return 'Claim reward';
   return 'Submit proof';
 }
 
@@ -293,7 +293,8 @@ export default function CommandCenter() {
     refreshQuestFeed,
     upsertQuest,
     patchQuest,
-    getQuest
+    getQuest,
+    addNotification
   } = useRealtimeState();
   const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
   const [proofUri, setProofUri] = useState('');
@@ -306,7 +307,7 @@ export default function CommandCenter() {
   const [rewardData, setRewardData] = useState({ xp: 0, token: '0', nft: 'Rare' });
   const [onboardingOpen, setOnboardingOpen] = useState(() => {
     if (typeof window === 'undefined') return false;
-    return !localStorage.getItem('questforge:onboarding-complete');
+    return !localStorage.getItem('forgequest:onboarding-complete');
   });
   const [txStatus, setTxStatus] = useState<{
     type: TxStatusType;
@@ -491,7 +492,7 @@ export default function CommandCenter() {
                   ? interactiveQuest.verificationTx
                   : current?.hash,
               label: 'Proof verified',
-              message: 'Deterministic verification passed. Reward settlement details are updating now.'
+              message: 'Deterministic verification passed. Claim your reward onchain to complete the quest.'
             }
       );
       return;
@@ -527,7 +528,7 @@ export default function CommandCenter() {
   useEffect(() => {
     const questId = interactiveQuest?.id;
     if (
-      interactiveQuest?.status !== 'VERIFIED' ||
+      interactiveQuest?.status !== 'REWARDED' ||
       !questId ||
       completedQuestIds.includes(questId) ||
       celebrationQuestId === questId
@@ -588,7 +589,7 @@ export default function CommandCenter() {
 
   function focusProofSubmission() {
     setMessage(
-      'Complete the objective, then paste the proof transaction below to trigger AI verification.'
+      'Complete the objective, then paste the proof transaction below to trigger backend verification.'
     );
     proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
@@ -660,15 +661,16 @@ export default function CommandCenter() {
     if (authStatus !== 'authenticated') return 'Awaiting secure sign-in';
     if (!isRealtimeReady) return `Realtime ${hydrationStatus}`;
     if (interactiveQuest?.status === 'SUBMITTED') return 'Verification pending';
-    if (interactiveQuest?.status === 'VERIFIED') return 'Reward settlement complete';
+    if (interactiveQuest?.status === 'VERIFIED') return 'Reward ready to claim';
+    if (interactiveQuest?.status === 'REWARDED') return 'Reward settlement complete';
     if (interactiveQuest?.status === 'ACTIVE') return 'Quest live';
     if (interactiveQuest?.status === 'AVAILABLE') return 'Ready to begin';
-    if (restoredQuest) return 'No new quest started yet';
+    if (restoredQuest) return 'No new quest generated yet';
     return 'Forge ready';
   }
 
   async function submitForgeWrite(
-    functionName: 'createQuest' | 'startQuest' | 'submitQuest',
+    functionName: 'createQuest' | 'startQuest' | 'submitQuest' | 'claimReward',
     args: unknown[],
     options?: { value?: bigint; gasLimit?: bigint }
   ) {
@@ -826,7 +828,7 @@ export default function CommandCenter() {
     if (!(await requireReadyAuth('generating quests'))) return;
 
     setLoading(true);
-    setMessage('Summoning the Forge Master. AI is crafting your quest and preparing the onchain record...');
+      setMessage('Selecting a quest template and preparing the onchain record...');
     setTxStatus(null);
     setProofError(null);
     setProofUri('');
@@ -839,7 +841,7 @@ export default function CommandCenter() {
       const createQuestArgs = [
         template.title,
         template.metadataUri,
-        ethers.parseEther(template.stakeAmount.toString()),
+        0n,
         ethers.parseEther(template.rewardAmount.toString()),
         BigInt(template.xpReward),
         BigInt(template.durationSeconds)
@@ -866,7 +868,7 @@ export default function CommandCenter() {
         ...template,
         chainQuestId,
         creator: address,
-        status: 'AVAILABLE',
+        status: 'ACTIVE',
         treasuryPayout: { status: 'RESERVED' }
       };
 
@@ -904,113 +906,6 @@ export default function CommandCenter() {
     }
   }
 
-  async function handleStartQuest(questOverride?: QuestState | null) {
-    const candidateQuest = questOverride ?? interactiveQuest;
-    if (!address || !forgeQuestManager || !candidateQuest || !signer) return;
-    if (!(await requireReadyAuth('starting quests'))) return;
-
-    setLoading(true);
-    setMessage('Accepting the quest and locking your stake onchain...');
-    setTxStatus(null);
-
-    try {
-      const resolvedQuest = await resolveQuestForChainAction(
-        candidateQuest,
-        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
-      );
-      setMessage('Quest sync complete. Starting quest on Celo...');
-
-      if (!provider) throw new Error('Wallet provider is unavailable');
-
-      const signerAddress = await signer.getAddress();
-      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
-      const onchainQuest = await forgeQuestManager.quests(chainQuestId);
-      if (Number(onchainQuest.status) !== 0) {
-        throw new Error('Quest is no longer available.');
-      }
-
-      const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
-      const availableBalance = await provider.getBalance(signerAddress);
-      if (availableBalance < stakeValue) {
-        throw new Error(
-          `Insufficient funds for the quest stake. Need ${formatCeloAmount(stakeValue)} CELO.`
-        );
-      }
-
-      const gasEstimate =
-        isMiniPay && walletProvider
-          ? await estimateContractWriteGas({
-              provider: walletProvider,
-              contractAddress: contractAddresses.forgeQuestManagerAddress,
-              contractInterface: forgeQuestManager.interface,
-              functionName: 'startQuest',
-              args: [chainQuestId],
-              from: signerAddress,
-              value: stakeValue
-            })
-          : await forgeQuestManager.startQuest.estimateGas(chainQuestId, {
-              value: stakeValue
-            });
-
-      const gasLimit = gasEstimate + gasEstimate / 5n;
-      const feeData = await provider.getFeeData();
-      const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n;
-      const estimatedGasCost = gasEstimate * gasPrice;
-
-      if (availableBalance < stakeValue + estimatedGasCost) {
-        throw new Error('Insufficient funds for the quest stake plus gas.');
-      }
-
-      const { hash: startTxHash } = await submitForgeWrite(
-        'startQuest',
-        [chainQuestId],
-        { value: stakeValue, gasLimit }
-      );
-
-      let persistedQuest: QuestState = {
-        ...resolvedQuest,
-        status: 'ACTIVE',
-        treasuryPayout: {
-          ...(resolvedQuest.treasuryPayout || {}),
-          status: 'LOCKED'
-        }
-      };
-
-      if (resolvedQuest.id) {
-        try {
-          const startRegistrationResponse = await registerQuestStart(
-            String(resolvedQuest.id),
-            chainQuestId.toString(),
-            startTxHash
-          );
-          const registeredQuest = (startRegistrationResponse.data as { quest?: QuestState }).quest;
-          if (registeredQuest) {
-            persistedQuest = { ...persistedQuest, ...registeredQuest };
-          }
-        } catch (registrationError) {
-          console.error(
-            '[CommandCenter] Backend quest start registration failed',
-            registrationError
-          );
-        }
-      }
-
-      upsertQuest(persistedQuest);
-      setRevealQuestModal(false);
-      setMessage(
-        'Quest started. Your stake is locked and the objective is live. Complete the task, then submit proof below.'
-      );
-      await syncNow();
-      window.setTimeout(() => {
-        proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 250);
-    } catch (error) {
-      console.error('[CommandCenter] startQuest failed', error);
-      setMessage(formatActionFailure(error, 'Start quest transaction failed.'));
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function handleSubmitProof() {
     if (!address || !forgeQuestManager || !interactiveQuest) {
@@ -1019,7 +914,7 @@ export default function CommandCenter() {
     }
 
     if (interactiveQuest.status !== 'ACTIVE' && !canRetryProofQueue) {
-      setMessage('Start the quest onchain before submitting proof.');
+      setMessage('Quest is not ready for submission yet. Please wait for it to synchronize.');
       return;
     }
 
@@ -1097,7 +992,7 @@ export default function CommandCenter() {
         message: 'Deterministic verification is running. Results should stream back shortly.'
       });
       setMessage(
-        'Proof submitted. The AI Dungeon Master is now verifying the result and streaming the outcome back to this screen.'
+        'Proof submitted. The backend is now verifying the result and streaming the outcome back to this screen.'
       );
       await syncNow();
       await refreshQuestFeed();
@@ -1111,6 +1006,93 @@ export default function CommandCenter() {
       } else {
         setMessage(formatActionFailure(error, 'Proof submission failed.'));
       }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleClaimReward() {
+    if (!address || !forgeQuestManager || !interactiveQuest) {
+      setMessage('Connect your wallet and select a verified quest to claim rewards.');
+      return;
+    }
+
+    if (interactiveQuest.status !== 'VERIFIED') {
+      setMessage('Reward claim is only available after proof verification succeeds.');
+      return;
+    }
+
+    if (!(await requireReadyAuth('claiming reward'))) return;
+
+    setLoading(true);
+    setMessage('Claiming the verified reward onchain...');
+    setTxStatus(null);
+
+    try {
+      const resolvedQuest = await resolveQuestForChainAction(
+        interactiveQuest,
+        'Unable to claim reward because the quest is still syncing with backend state.'
+      );
+      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+
+      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [chainQuestId]);
+
+      const rewardedLog = parseReceiptEvent(
+        receipt,
+        {
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface
+        },
+        'QuestRewarded'
+      );
+
+      const rewardAmount = rewardedLog?.args?.rewardAmount
+        ? ethers.formatEther(rewardedLog.args.rewardAmount)
+        : String(resolvedQuest.rewardAmount ?? '0');
+      const xpReward = rewardedLog?.args?.xpReward?.toString() ?? String(resolvedQuest.xpReward ?? '0');
+      const proofHash = rewardedLog?.args?.proofHash ? String(rewardedLog.args.proofHash) : undefined;
+
+      patchQuest(questMatcher(resolvedQuest), {
+        status: 'REWARDED',
+        treasuryPayout: {
+          ...(resolvedQuest.treasuryPayout && typeof resolvedQuest.treasuryPayout === 'object'
+            ? resolvedQuest.treasuryPayout
+            : {}),
+          status: 'PAID',
+          payoutTx: claimTxHash
+        },
+        rewardedEvent: {
+          txHash: claimTxHash,
+          rewardAmount,
+          xpReward,
+          proofHash
+        }
+      });
+
+      setMessage(
+        `Reward claimed onchain: ${rewardAmount} CELO and ${xpReward} XP. Proof hash: ${proofHash ?? 'unknown'}`
+      );
+
+      addNotification({
+        id: Date.now(),
+        eventName: 'quest:rewarded',
+        payload: {
+          questId: resolvedQuest.id,
+          chainQuestId: resolvedQuest.chainQuestId,
+          title: `Reward claimed: ${rewardAmount} CELO`,
+          detail: `${xpReward} XP awarded`,
+          proofHash,
+          verificationTx: claimTxHash,
+          status: 'REWARDED'
+        },
+        createdAt: new Date().toISOString()
+      });
+
+      await syncNow();
+      await refreshQuestFeed();
+    } catch (error) {
+      console.error('[CommandCenter] claimReward failed', error);
+      setMessage(formatActionFailure(error, 'Reward claim failed.'));
     } finally {
       setLoading(false);
     }
@@ -1156,7 +1138,7 @@ export default function CommandCenter() {
           </motion.div>
           <h2 className="text-4xl font-black text-glowyellow">Enter the Forge</h2>
           <p className="mt-4 text-lg text-slate-300">
-            Connect your wallet to begin an AI-powered quest that settles on Celo and rewards
+            Connect your wallet to begin a rule-based quest that settles on Celo and rewards
             real onchain progression.
           </p>
           <motion.button
@@ -1182,7 +1164,13 @@ export default function CommandCenter() {
         isOpen={revealQuestModal}
         quest={lastGeneratedQuest}
         onClose={() => setRevealQuestModal(false)}
-        onAccept={() => void handleStartQuest(lastGeneratedQuest)}
+        onAccept={() => {
+          setRevealQuestModal(false);
+          setMessage('Quest is ready. Complete the task, then submit proof below.');
+          window.setTimeout(() => {
+            proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 250);
+        }}
         loading={loading}
       />
       <QuestCompletionModal
@@ -1350,8 +1338,8 @@ export default function CommandCenter() {
                   {restoredQuest.title || 'Previous quest found'}
                 </p>
                 <p className="mt-2 text-sm text-slate-200">
-                  We found an older quest on this wallet, but connecting your wallet did not generate,
-                  accept, or pay for a new quest in this session.
+                  We found an older quest on this wallet, but connecting your wallet did not generate
+                  or complete a new quest in this session.
                 </p>
                 <p className="mt-2 text-sm text-slate-300">
                   Resume it only if you want to continue that earlier run.
@@ -1367,7 +1355,7 @@ export default function CommandCenter() {
                     {restoredQuest.status === 'ACTIVE'
                       ? 'Resume and Submit Proof'
                       : restoredQuest.status === 'AVAILABLE'
-                        ? 'Resume and Start Quest'
+                        ? 'Resume and Complete Quest'
                         : 'Resume Previous Quest'}
                   </motion.button>
                   <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
@@ -1387,12 +1375,8 @@ export default function CommandCenter() {
               ) : interactiveQuest ? (
                 <ActiveQuestPanel
                   quest={interactiveQuest}
-                  onStartQuest={
-                    interactiveQuest.status === 'AVAILABLE'
-                      ? () => void handleStartQuest(interactiveQuest)
-                      : undefined
-                  }
                   onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
+                  onClaimReward={interactiveQuest.status === 'VERIFIED' ? handleClaimReward : undefined}
                   onReviewFailure={
                     interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED'
                       ? reviewFailureState
@@ -1410,8 +1394,7 @@ export default function CommandCenter() {
                   <div className="mb-4 text-5xl">✨</div>
                   <p className="text-xl font-bold text-white">Generate Your First Quest</p>
                   <p className="mt-2 text-slate-300">
-                    One click summons an AI-crafted mission, writes it onchain, and stages it for
-                    live play.
+                    One click summons a rule-based mission and stages it for live play.
                   </p>
                 </motion.div>
               )}
@@ -1511,7 +1494,7 @@ export default function CommandCenter() {
                   </p>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-navy/40 p-4">
-                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">AI Layer</p>
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Rules Layer</p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <span className="rounded-full border border-glowyellow/30 bg-glowyellow/10 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-glowyellow">
                       {generationProfile?.provider || generationProfile?.source || 'Adaptive engine'}
@@ -1597,7 +1580,7 @@ export default function CommandCenter() {
                   ))
                 ) : (
                   <div className="rounded-2xl border border-white/10 bg-navy/40 p-4 text-sm text-slate-400">
-                    Waiting for blockchain and AI events to stream into the realm feed.
+                    Waiting for blockchain and backend events to stream into the realm feed.
                   </div>
                 )}
               </div>
@@ -1614,11 +1597,11 @@ export default function CommandCenter() {
               <div className="mt-4 space-y-3 text-sm text-slate-300">
                 <div className="flex gap-3">
                   <span className="text-lg">1️⃣</span>
-                  <p>AI generates a unique quest and the UI reveals it dramatically.</p>
+                  <p>The rules engine selects a quest and the UI reveals it dramatically.</p>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-lg">2️⃣</span>
-                  <p>You accept the quest and stake CELO through a real blockchain transaction.</p>
+                  <p>You review the quest, complete the objective, and submit proof in a single completion flow.</p>
                 </div>
                 <div className="flex gap-3">
                   <span className="text-lg">3️⃣</span>

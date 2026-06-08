@@ -4,8 +4,8 @@ import { QuestState } from '../context/RealtimeContext';
 
 interface ActiveQuestPanelProps {
   quest: QuestState | null;
-  onStartQuest?: () => void;
   onSubmitProof?: () => void;
+  onClaimReward?: () => void;
   onReviewFailure?: () => void;
   loading?: boolean;
   disabled?: boolean;
@@ -13,8 +13,8 @@ interface ActiveQuestPanelProps {
 
 export default function ActiveQuestPanel({
   quest,
-  onStartQuest,
   onSubmitProof,
+  onClaimReward,
   onReviewFailure,
   loading = false,
   disabled = false
@@ -98,13 +98,13 @@ export default function ActiveQuestPanel({
             .padStart(2, '0')}`;
 
   const nextAction = isAvailable
-    ? 'Review the objective, confirm the stake, and begin the quest onchain.'
+    ? 'Review the objective and prepare to complete the quest.'
     : isActive
       ? 'Complete the objective below, then submit a proof transaction or Celoscan link.'
       : isSubmitted
         ? 'Your proof is queued for deterministic verification. Stay on this screen for live updates.'
         : isVerified
-          ? 'Rewards have landed. Open the celebration summary and continue your adventure.'
+          ? 'Your proof has been verified. Claim the reward onchain to complete this quest.'
           : isFailed
             ? 'This run did not settle successfully. Review the treasury outcome and start another quest.'
             : 'Quest state synced. Review the latest objective details below.';
@@ -321,15 +321,8 @@ export default function ActiveQuestPanel({
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
-            className="grid gap-3 rounded-2xl border border-orange-500/30 bg-orange-500/10 p-4 md:grid-cols-2"
+            className="grid gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4"
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-orange-300">Stake Locked</p>
-                <p className="mt-1 text-xl font-bold text-orange-300">{quest.stakeAmount || '?'} CELO</p>
-              </div>
-              <p className="text-right text-sm text-slate-400">At risk during quest</p>
-            </div>
             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Proof Target</p>
               <p className="mt-2 text-sm text-white">Submit a transaction hash or Celoscan URL that proves this objective was completed.</p>
@@ -337,7 +330,7 @@ export default function ActiveQuestPanel({
           </motion.div>
         )}
 
-        {(quest.proofTx || quest.proofTxHash || quest.verificationTx || quest.treasuryPayout?.status) && (
+        {(quest.proofTx || quest.proofTxHash || quest.verificationTx || quest.treasuryPayout?.status || quest.rewardedEvent) && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -362,6 +355,30 @@ export default function ActiveQuestPanel({
           </motion.div>
         )}
 
+        {quest.rewardedEvent ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 p-4"
+          >
+            <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">QuestRewarded Event</p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Reward</p>
+                <p className="mt-1 text-sm text-white">{quest.rewardedEvent.rewardAmount ?? 'unknown'} CELO</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">XP</p>
+                <p className="mt-1 text-sm text-white">{quest.rewardedEvent.xpReward ?? 'unknown'}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-[0.18em] text-slate-400">Proof Hash</p>
+                <p className="mt-1 break-all text-xs font-mono text-white">{quest.rewardedEvent.proofHash ?? 'unknown'}</p>
+              </div>
+            </div>
+          </motion.div>
+        ) : null}
+
         {isFailed ? (
           <motion.div
             initial={{ opacity: 0 }}
@@ -383,18 +400,7 @@ export default function ActiveQuestPanel({
           transition={{ delay: 0.5 }}
           className="flex flex-col gap-3 pt-4 sm:flex-row"
         >
-          {isAvailable && onStartQuest && (
-            <motion.button
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              onClick={onStartQuest}
-              disabled={loading || disabled}
-              className="flex-1 rounded-2xl bg-gradient-to-r from-glowyellow to-softyellow px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-navy shadow-lg hover:shadow-2xl transition-shadow disabled:opacity-50 min-h-[44px] sm:min-h-[48px]"
-            >
-              {loading ? 'Starting...' : 'Begin Quest'}
-            </motion.button>
-          )}
-
+  
           {isActive && onSubmitProof && (
             <motion.button
               whileHover={{ scale: 1.03 }}
@@ -403,7 +409,7 @@ export default function ActiveQuestPanel({
               disabled={loading || disabled}
               className="flex-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition-shadow disabled:opacity-50 min-h-[44px] sm:min-h-[48px]"
             >
-              {loading ? 'Submitting...' : 'Prepare Proof Submission'}
+              {loading ? 'Submitting...' : 'Submit Completion'}
             </motion.button>
           )}
 
@@ -417,7 +423,17 @@ export default function ActiveQuestPanel({
             </motion.div>
           )}
 
-          {isVerified && (
+          {isVerified && onClaimReward ? (
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={onClaimReward}
+              disabled={loading || disabled}
+              className="flex-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition-shadow disabled:opacity-50 min-h-[44px] sm:min-h-[48px]"
+            >
+              {loading ? 'Claiming...' : 'Claim Reward'}
+            </motion.button>
+          ) : isVerified ? (
             <motion.div
               animate={{ scale: [1, 1.05, 1] }}
               transition={{ duration: 1, repeat: Infinity }}
@@ -425,7 +441,7 @@ export default function ActiveQuestPanel({
             >
               ✓ Completed!
             </motion.div>
-          )}
+          ) : null}
 
           {isFailed && (
             <motion.button
