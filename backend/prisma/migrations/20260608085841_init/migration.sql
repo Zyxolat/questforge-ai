@@ -1,14 +1,45 @@
 /*
   Warnings:
 
-  - The values [ACTIVE,SUBMITTED,VERIFIED,CANCELLED,FAILED] on the enum `QuestStatus` will be removed. If these variants are still used in the database, this will fail.
+  - The values [ACTIVE,SUBMITTED,VERIFIED,CANCELLED,FAILED,STAKED,STARTED] on the enum `QuestStatus` will be normalized. If these variants are still used in the database, this migration will proactively convert them.
   - You are about to drop the column `maxStakeAmount` on the `Quest` table. All the data in the column will be lost.
   - You are about to drop the column `minStakeAmount` on the `Quest` table. All the data in the column will be lost.
-  - Made the column `npcId` on table `NPCConversation` required. This step will fail if there are existing NULL values in that column.
+  - Made the column `npcId` on table `NPCConversation` required. This step will fail if there are existing NULL or orphaned values in that column.
 
 */
+
 -- AlterEnum
 BEGIN;
+-- Normalize legacy Quest statuses before enum conversion.
+UPDATE "Quest"
+SET "status" = CASE
+  WHEN "status" = 'ACTIVE' THEN 'ACCEPTED'
+  WHEN "status" = 'STARTED' THEN 'ACCEPTED'
+  WHEN "status" = 'STAKED' THEN 'ACCEPTED'
+  WHEN "status" = 'SUBMITTED' THEN 'CLAIMABLE'
+  WHEN "status" = 'VERIFIED' THEN 'CLAIMABLE'
+  WHEN "status" = 'FAILED' THEN 'ACCEPTED'
+  WHEN "status" = 'CANCELLED' THEN 'AVAILABLE'
+  ELSE "status"
+END
+WHERE "status" IN ('ACTIVE','STARTED','STAKED','SUBMITTED','VERIFIED','FAILED','CANCELLED');
+
+-- Repair NPCConversation references before NOT NULL / FK enforcement.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM "NPCConversation" WHERE "npcId" IS NULL OR NOT EXISTS (SELECT 1 FROM "NPC" WHERE "NPC"."id" = "NPCConversation"."npcId")) THEN
+    INSERT INTO "NPC" ("id", "type", "name", "personality", "currentLocation", "reputation", "createdAt", "updatedAt")
+    VALUES ('00000000-0000-0000-0000-000000000000', 'quest_giver', 'Unknown NPC', '{}', 'tavern', 0.0, now(), now())
+    ON CONFLICT ("id") DO NOTHING;
+
+    UPDATE "NPCConversation"
+    SET "npcId" = '00000000-0000-0000-0000-000000000000'
+    WHERE "npcId" IS NULL
+       OR NOT EXISTS (SELECT 1 FROM "NPC" WHERE "NPC"."id" = "NPCConversation"."npcId");
+  END IF;
+END;
+$$;
+
 CREATE TYPE "QuestStatus_new" AS ENUM ('AVAILABLE', 'ACCEPTED', 'COMPLETED', 'CLAIMABLE', 'REWARDED');
 ALTER TABLE "Quest" ALTER COLUMN "status" DROP DEFAULT;
 ALTER TABLE "Quest" ALTER COLUMN "status" TYPE "QuestStatus_new" USING ("status"::text::"QuestStatus_new");
