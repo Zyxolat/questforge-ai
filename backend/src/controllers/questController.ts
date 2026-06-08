@@ -268,7 +268,6 @@ export async function generateQuest(req: Request, res: Response) {
       expiresAt: generated.quest.expiresAt,
       status: generated.quest.status,
       creator: normalizedWallet,
-      playerId: null,
       isEventQuest: generated.quest.isEventQuest
     };
 
@@ -576,7 +575,9 @@ export async function registerOnchainQuest(req: Request, res: Response) {
         data: {
           chainQuestId: parsedChainQuestId,
           status: 'ACCEPTED',
-          playerId: user.id,
+          player: {
+            connect: { id: user.id }
+          },
           startedAt: rewardReservedAt,
           stakeAmount: 0
         }
