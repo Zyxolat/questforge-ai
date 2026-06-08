@@ -207,7 +207,8 @@ export async function estimateContractWriteGas(input: Omit<ContractTransactionIn
   console.debug('[walletProvider] Estimating gas for contract write', {
     contractAddress: input.contractAddress,
     functionName: input.functionName,
-    from: input.from
+    from: input.from,
+    hasValue: !!input.value
   });
 
   try {
@@ -216,18 +217,36 @@ export async function estimateContractWriteGas(input: Omit<ContractTransactionIn
     
     console.info('[walletProvider] Gas estimation successful', {
       functionName: input.functionName,
-      gasEstimate: gasAmount.toString()
+      gasEstimate: gasAmount.toString(),
+      gasEstimateHex: '0x' + gasAmount.toString(16)
     });
     
     return gasAmount;
   } catch (error) {
-    console.error('[walletProvider] Gas estimation failed', {
+    console.warn('[walletProvider] Gas estimation failed, using fallback estimate', {
       functionName: input.functionName,
       from: input.from,
       errorName: error instanceof Error ? error.name : 'Unknown',
       errorMessage: error instanceof Error ? error.message : String(error)
     });
-    throw error;
+    
+    // Fallback: use estimated gas based on function type
+    // createQuest is typically ~150k, claimReward ~100k, submitQuest ~80k
+    const fallbackGasEstimates: Record<string, bigint> = {
+      'createQuest': BigInt(200000),    // 200k for safety margin
+      'claimReward': BigInt(150000),    // 150k for safety margin
+      'submitQuest': BigInt(120000),    // 120k for safety margin
+      'verifyQuest': BigInt(120000),
+      'cancelQuest': BigInt(100000)
+    };
+    
+    const fallbackGas = fallbackGasEstimates[input.functionName] ?? BigInt(200000);
+    console.info('[walletProvider] Using fallback gas estimate', {
+      functionName: input.functionName,
+      fallbackGas: fallbackGas.toString()
+    });
+    
+    return fallbackGas;
   }
 }
 

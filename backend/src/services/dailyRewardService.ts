@@ -84,11 +84,45 @@ async function estimateTransferCost(to: string) {
   }
 
   try {
-    const [balance, gasLimit, feeData] = await Promise.all([
-      contracts.provider.getBalance(signer.address),
-      signer.estimateGas({ to, value: DAILY_REWARD_AMOUNT_WEI }),
-      contracts.provider.getFeeData()
-    ]);
+    // Verify RPC provider is responsive
+    try {
+      await contracts.provider.getNetwork();
+      console.debug('[DAILY-REWARD] RPC provider is responsive');
+    } catch (networkError) {
+      throw new DailyRewardPayoutError('RPC provider is not responding to network queries', 503, {
+        step: 'rpc_connectivity',
+        error: networkError instanceof Error ? networkError.message : String(networkError)
+      });
+    }
+
+    // Get balance and fee data in parallel
+    let balance: bigint;
+    let feeData: Awaited<ReturnType<typeof contracts.provider.getFeeData>>;
+    let gasLimit: bigint;
+
+    try {
+      [balance, feeData] = await Promise.all([
+        contracts.provider.getBalance(signer.address),
+        contracts.provider.getFeeData()
+      ]);
+    } catch (balanceError) {
+      throw new DailyRewardPayoutError('Unable to query account balance and fee data from RPC provider', 503, {
+        step: 'balance_query',
+        error: balanceError instanceof Error ? balanceError.message : String(balanceError)
+      });
+    }
+
+    try {
+      gasLimit = await signer.estimateGas({ to, value: DAILY_REWARD_AMOUNT_WEI });
+    } catch (gasError) {
+      console.warn('[DAILY-REWARD] Gas estimation failed, using fallback estimate', {
+        step: 'gas_estimation',
+        error: gasError instanceof Error ? gasError.message : String(gasError)
+      });
+      // Use fallback gas estimate if estimation fails
+      gasLimit = BigInt(21000) + BigInt(5000); // standard transfer + buffer
+    }
+
     const legacyGasPrice = feeData.gasPrice ?? 0n;
     const suggestedPriorityFee = feeData.maxPriorityFeePerGas ?? legacyGasPrice;
     const priorityFeePerGas =
@@ -120,6 +154,9 @@ async function estimateTransferCost(to: string) {
       requiredBalance
     };
   } catch (error) {
+    if (error instanceof DailyRewardPayoutError) {
+      throw error;
+    }
     throw new DailyRewardPayoutError('Unable to query Celo RPC provider for payout cost', 503, {
       step: 'provider_query',
       error: error instanceof Error ? error.message : String(error),

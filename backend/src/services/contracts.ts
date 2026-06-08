@@ -17,6 +17,7 @@ const ForgeQuestManagerABI = [
   'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
   'function submitQuest(uint256 questId,string calldata proofUri) external',
   'function verifyQuest(uint256 questId,bool success,bytes32 proofVerificationHash) external',
+  'function claimReward(uint256 questId) external',
   'function cancelQuest(uint256 questId) external',
   'function playerNonces(address player) view returns (uint256)',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
