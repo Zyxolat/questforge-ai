@@ -327,11 +327,21 @@ export default function CommandCenter() {
 
   const forgeQuestManager = useMemo(() => {
     if (!signer) return null;
-    return getContract(
+    const contract = getContract(
       contractAddresses.forgeQuestManagerAddress,
       contractABIs.forgeQuestManagerAbi,
       signer
     );
+    
+    console.debug('[CommandCenter] ForgeQuestManager contract initialized', {
+      address: contractAddresses.forgeQuestManagerAddress,
+      hasCreateQuestMethod: typeof (contract as ethers.Contract)['createQuest'] === 'function',
+      hasClaimRewardMethod: typeof (contract as ethers.Contract)['claimReward'] === 'function',
+      hasSubmitQuestMethod: typeof (contract as ethers.Contract)['submitQuest'] === 'function',
+      signerAddress: signer.address
+    });
+    
+    return contract;
   }, [signer]);
 
   function isQuestFromCurrentSession(quest: QuestState | null): boolean {
@@ -680,21 +690,51 @@ export default function CommandCenter() {
 
     const txLabel = formatTxLabel(functionName);
 
+    console.info('[CommandCenter] submitForgeWrite initiated', {
+      functionName,
+      txLabel,
+      hasValue: !!options?.value,
+      isMiniPay,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      walletAddress: address
+    });
+
     try {
       if (!isMiniPay) {
         if (!signer) throw new Error('Wallet signer is unavailable');
+
+        console.debug('[CommandCenter] Using standard wallet path', {
+          functionName,
+          signerType: signer.constructor.name
+        });
 
         const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (
           ...methodArgs: unknown[]
         ) => Promise<ethers.ContractTransactionResponse>;
 
         if (typeof transactionMethod !== 'function') {
-          throw new Error(`Transaction method ${functionName} not found`);
+          console.error('[CommandCenter] Transaction method not found on contract', {
+            functionName,
+            availableMethods: Object.getOwnPropertyNames(forgeQuestManager).filter(m => typeof (forgeQuestManager as Record<string, unknown>)[m] === 'function')
+          });
+          throw new Error(`Transaction method ${functionName} not found on contract. Contract may not be properly initialized.`);
         }
+
+        console.debug('[CommandCenter] Calling contract method', {
+          functionName,
+          argsLength: args.length,
+          hasValue: typeof options?.value === 'bigint',
+          valueInEther: typeof options?.value === 'bigint' ? ethers.formatEther(options.value) : undefined
+        });
 
         const tx = await transactionMethod(...args, {
           ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
           ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+        });
+
+        console.info('[CommandCenter] Transaction submitted successfully', {
+          functionName,
+          txHash: tx.hash
         });
 
         setTxStatus({
@@ -705,6 +745,13 @@ export default function CommandCenter() {
         });
 
         const receipt = await tx.wait();
+        console.info('[CommandCenter] Transaction confirmed', {
+          functionName,
+          txHash: tx.hash,
+          blockNumber: receipt?.blockNumber,
+          status: receipt?.status
+        });
+
         setTxStatus({
           type: 'confirmed',
           hash: tx.hash,
@@ -756,6 +803,15 @@ export default function CommandCenter() {
 
       return { hash: txHash, receipt };
     } catch (error) {
+      console.error('[CommandCenter] submitForgeWrite failed', {
+        functionName,
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        isMiniPay,
+        hasForgeQuestManager: !!forgeQuestManager,
+        hasSigner: !!signer,
+        hasProvider: !!provider
+      });
       setTxStatus({
         type: 'error',
         label: `${txLabel} failed`,
@@ -900,6 +956,14 @@ export default function CommandCenter() {
       return;
     }
 
+    console.info('[CommandCenter] handleAcceptQuest: Quest validation passed, preparing transaction', {
+      questId: questToAccept.id,
+      questTitle: questToAccept.title,
+      rewardAmount: questToAccept.rewardAmount,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      walletAddress: address
+    });
+
     setLoading(true);
     setTxStatus(null);
     setProofError(null);
@@ -918,11 +982,25 @@ export default function CommandCenter() {
         durationSeconds
       ] as const;
 
+      console.debug('[CommandCenter] handleAcceptQuest: Calling submitForgeWrite', {
+        functionName: 'createQuest',
+        title: template.title,
+        rewardAmount: template.rewardAmount,
+        xpReward: template.xpReward,
+        durationSeconds: template.durationSeconds,
+        acceptanceFee: '0.001 CELO'
+      });
+
       const { hash: creationTxHash, receipt } = await submitForgeWrite(
         'createQuest',
         [...createQuestArgs],
         { value: ethers.parseEther('0.001') }
       );
+
+      console.info('[CommandCenter] handleAcceptQuest: Transaction receipt received', {
+        txHash: creationTxHash,
+        blockNumber: receipt?.blockNumber
+      });
 
       const parsedLog = parseReceiptEvent(
         receipt,
@@ -962,7 +1040,13 @@ export default function CommandCenter() {
       setMessage('Quest accepted! Complete the objective and submit proof below.');
       await syncNow();
     } catch (error) {
-      console.error('[CommandCenter] Accept quest failed', error);
+      console.error('[CommandCenter] handleAcceptQuest failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        questId: questToAccept?.id,
+        questTitle: questToAccept?.title
+      });
       setMessage(formatActionFailure(error, 'Quest acceptance failed.'));
     } finally {
       setLoading(false);
@@ -1086,6 +1170,13 @@ export default function CommandCenter() {
 
     if (!(await requireReadyAuth('claiming reward'))) return;
 
+    console.info('[CommandCenter] handleClaimReward: Validation passed, preparing to claim', {
+      questId: interactiveQuest.id,
+      questTitle: interactiveQuest.title,
+      chainQuestId: interactiveQuest.chainQuestId,
+      walletAddress: address
+    });
+
     setLoading(true);
     setMessage('Claiming the verified reward onchain...');
     setTxStatus(null);
@@ -1096,6 +1187,11 @@ export default function CommandCenter() {
         'Unable to claim reward because the quest is still syncing with backend state.'
       );
       const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+
+      console.debug('[CommandCenter] handleClaimReward: Calling submitForgeWrite', {
+        functionName: 'claimReward',
+        chainQuestId: chainQuestId.toString()
+      });
 
       const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [chainQuestId]);
 
@@ -1153,7 +1249,14 @@ export default function CommandCenter() {
       await syncNow();
       await refreshQuestFeed();
     } catch (error) {
-      console.error('[CommandCenter] claimReward failed', error);
+      console.error('[CommandCenter] handleClaimReward failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        questId: interactiveQuest?.id,
+        questTitle: interactiveQuest?.title,
+        chainQuestId: interactiveQuest?.chainQuestId
+      });
       setMessage(formatActionFailure(error, 'Reward claim failed.'));
     } finally {
       setLoading(false);
