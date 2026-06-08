@@ -120,8 +120,8 @@ describe('Smart Contracts Integration', function () {
       .to.emit(treasury, 'RewardPaid')
       .withArgs(1, player.address, reward, reward);
 
-    const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
-    const gasCost = BigInt(receipt.gasUsed) * BigInt(gasPrice);
+    const gasPrice = receipt?.gasPrice ?? 0n;
+    const gasCost = receipt ? BigInt(receipt.gasUsed ?? 0n) * BigInt(gasPrice) : 0n;
     const playerBalanceAfter = await ethers.provider.getBalance(player.address);
     const treasuryBalanceAfter = await ethers.provider.getBalance(await treasury.getAddress());
     const verifiedQuest = await forgeQuestManager.quests(1);
