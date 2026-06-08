@@ -261,6 +261,18 @@ export default function QuestRevealModal({
                       <motion.div
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
+                        transition={{ delay: 0.72 }}
+                        className="rounded-2xl border border-white/10 bg-white/5 p-4"
+                      >
+                        <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Acceptance Fee</p>
+                        <p className="mt-2 text-sm text-slate-200">
+                          Generating this quest is free. Accepting it will send 0.001 CELO to begin the mission.
+                        </p>
+                      </motion.div>
+
+                      <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
                         transition={{ delay: 0.75 }}
                         className="grid gap-4 sm:grid-cols-3"
                       >
@@ -305,7 +317,7 @@ export default function QuestRevealModal({
                         disabled={loading}
                         className={`min-h-[44px] flex-1 rounded-xl bg-gradient-to-r ${colorClasses[color]} px-6 py-3 font-bold uppercase tracking-[0.2em] text-white shadow-lg transition hover:shadow-2xl disabled:opacity-50 sm:min-h-[48px]`}
                       >
-                        {loading ? 'Preparing...' : 'Continue'}
+                        {loading ? 'Accepting...' : 'Accept Quest'}
                       </motion.button>
                     </div>
                   </motion.div>

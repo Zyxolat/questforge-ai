@@ -1,7 +1,8 @@
 import { ethers } from 'ethers';
 import { env } from '../config/env';
+import { rpcProvider } from './rpcProvider';
 
-const provider = new ethers.JsonRpcProvider(env.CELO_RPC_URL, env.CELO_CHAIN_ID);
+const provider = rpcProvider.getProvider();
 const verifierSigner = env.VERIFIER_PRIVATE_KEY ? new ethers.Wallet(env.VERIFIER_PRIVATE_KEY, provider) : null;
 const dailyRewardSigner = env.DAILY_REWARD_TREASURY_PRIVATE_KEY
   ? new ethers.Wallet(env.DAILY_REWARD_TREASURY_PRIVATE_KEY, provider)

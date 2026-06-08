@@ -821,14 +821,29 @@ export default function CommandCenter() {
   }
 
   async function handleGenerateQuest() {
+    console.debug('[CommandCenter] handleGenerateQuest start', {
+      address,
+      authStatus,
+      isCorrectNetwork,
+      apiBaseUrl: env.API_BASE_URL,
+      isDev: import.meta.env.DEV
+    });
+
     if (!address || !forgeQuestManager) {
       setMessage('Connect your wallet first.');
       return;
     }
-    if (!(await requireReadyAuth('generating quests'))) return;
+    if (!(await requireReadyAuth('generating quests'))) {
+      console.debug('[CommandCenter] requireReadyAuth returned false', {
+        authStatus,
+        isAuthReady,
+        isCorrectNetwork
+      });
+      return;
+    }
 
     setLoading(true);
-      setMessage('Selecting a quest template and preparing the onchain record...');
+    setMessage('Selecting a quest template and preparing a free mission preview...');
     setTxStatus(null);
     setProofError(null);
     setProofUri('');
@@ -836,21 +851,79 @@ export default function CommandCenter() {
 
     try {
       const response = await generateQuest('Celo');
+      console.debug('[CommandCenter] generateQuest call successful', {
+        status: response.status,
+        questId: response.data?.quest?.id,
+        orchestrationId: response.data?.quest?.orchestrationId
+      });
       const template = response.data.quest as GeneratedQuestTemplate;
 
+      const persistedQuest: QuestState = {
+        ...template,
+        creator: address,
+        playerId: null,
+        status: 'AVAILABLE'
+      };
+
+      setMessage('Quest generated successfully. Review it and accept to begin for 0.001 CELO.');
+      setLastGeneratedQuest(persistedQuest);
+      setRevealQuestModal(true);
+      upsertQuest(persistedQuest);
+      await syncNow();
+    } catch (error) {
+      console.error('[CommandCenter] Generate quest flow failed', error);
+      console.debug('[CommandCenter] Generate quest failure details', {
+        authStatus,
+        isCorrectNetwork,
+        address,
+        error
+      });
+      setMessage(formatActionFailure(error, 'Quest generation failed.'));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAcceptQuest() {
+    const questToAccept = interactiveQuest ?? lastGeneratedQuest;
+    if (!address || !forgeQuestManager || !questToAccept) {
+      setMessage('Connect your wallet and generate a quest before accepting.');
+      return;
+    }
+
+    if (questToAccept.status !== 'AVAILABLE') {
+      setMessage('Only generated quests can be accepted.');
+      return;
+    }
+
+    if (!(await requireReadyAuth('accepting quest'))) {
+      return;
+    }
+
+    setLoading(true);
+    setTxStatus(null);
+    setProofError(null);
+    setMessage('Accepting the quest onchain. Approve a 0.001 CELO transaction to begin.');
+
+    try {
+      const template = questToAccept as GeneratedQuestTemplate;
+      const rewardAmount = ethers.parseEther(template.rewardAmount.toString());
+      const xpReward = BigInt(template.xpReward);
+      const durationSeconds = BigInt(template.durationSeconds);
       const createQuestArgs = [
         template.title,
         template.metadataUri,
-        0n,
-        ethers.parseEther(template.rewardAmount.toString()),
-        BigInt(template.xpReward),
-        BigInt(template.durationSeconds)
+        rewardAmount,
+        xpReward,
+        durationSeconds
       ] as const;
 
       const { hash: creationTxHash, receipt } = await submitForgeWrite(
         'createQuest',
-        [...createQuestArgs]
+        [...createQuestArgs],
+        { value: ethers.parseEther('0.001') }
       );
+
       const parsedLog = parseReceiptEvent(
         receipt,
         {
@@ -859,53 +932,42 @@ export default function CommandCenter() {
         },
         'QuestCreated'
       );
+
       const chainQuestId = parsedLog?.args?.questId?.toString();
       if (!chainQuestId) {
         throw new Error('Quest creation receipt did not include a quest id');
       }
 
-      let persistedQuest: QuestState = {
-        ...template,
+      setMessage('Quest accepted onchain. Syncing acceptance state with backend...');
+
+      const registeredQuest = await registerOnchainQuestWithRetry(
+        String(template.id),
         chainQuestId,
-        creator: address,
-        status: 'ACTIVE',
-        treasuryPayout: { status: 'RESERVED' }
-      };
+        creationTxHash
+      );
 
-      setMessage('Quest forged onchain. Syncing cinematic state with the backend...');
-
-      try {
-        const registeredQuest = await registerOnchainQuestWithRetry(
-          String(template.id),
-          chainQuestId,
-          creationTxHash
-        );
-        if (registeredQuest) {
-          persistedQuest = { ...persistedQuest, ...registeredQuest };
-        }
-        setMessage('Quest forged successfully. Review the reveal and accept it to begin.');
-      } catch (registrationError) {
-        console.error(
-          '[CommandCenter] Backend onchain quest registration failed after retries',
-          registrationError
-        );
-        setMessage(
-          'Quest forged onchain, but backend sync is delayed. You can still review and begin it.'
-        );
-      }
+      const persistedQuest: QuestState = registeredQuest
+        ? registeredQuest
+        : {
+            ...template,
+            creator: address,
+            chainQuestId,
+            status: 'ACCEPTED'
+          };
 
       setLastGeneratedQuest(persistedQuest);
-      setRevealQuestModal(true);
+      patchQuest(questMatcher(questToAccept), persistedQuest);
       upsertQuest(persistedQuest);
+      setRevealQuestModal(false);
+      setMessage('Quest accepted! Complete the objective and submit proof below.');
       await syncNow();
     } catch (error) {
-      console.error('[CommandCenter] Generate quest flow failed', error);
-      setMessage(formatActionFailure(error, 'Quest creation failed.'));
+      console.error('[CommandCenter] Accept quest failed', error);
+      setMessage(formatActionFailure(error, 'Quest acceptance failed.'));
     } finally {
       setLoading(false);
     }
   }
-
 
   async function handleSubmitProof() {
     if (!address || !forgeQuestManager || !interactiveQuest) {
@@ -1164,13 +1226,7 @@ export default function CommandCenter() {
         isOpen={revealQuestModal}
         quest={lastGeneratedQuest}
         onClose={() => setRevealQuestModal(false)}
-        onAccept={() => {
-          setRevealQuestModal(false);
-          setMessage('Quest is ready. Complete the task, then submit proof below.');
-          window.setTimeout(() => {
-            proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 250);
-        }}
+        onAccept={() => void handleAcceptQuest()}
         loading={loading}
       />
       <QuestCompletionModal
@@ -1375,6 +1431,7 @@ export default function CommandCenter() {
               ) : interactiveQuest ? (
                 <ActiveQuestPanel
                   quest={interactiveQuest}
+                  onAcceptQuest={interactiveQuest.status === 'AVAILABLE' ? handleAcceptQuest : undefined}
                   onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
                   onClaimReward={interactiveQuest.status === 'VERIFIED' ? handleClaimReward : undefined}
                   onReviewFailure={

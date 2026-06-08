@@ -83,41 +83,49 @@ async function estimateTransferCost(to: string) {
     });
   }
 
-  const [balance, gasLimit, feeData] = await Promise.all([
-    contracts.provider.getBalance(signer.address),
-    signer.estimateGas({ to, value: DAILY_REWARD_AMOUNT_WEI }),
-    contracts.provider.getFeeData()
-  ]);
-  const legacyGasPrice = feeData.gasPrice ?? 0n;
-  const suggestedPriorityFee = feeData.maxPriorityFeePerGas ?? legacyGasPrice;
-  const priorityFeePerGas =
-    suggestedPriorityFee > DAILY_REWARD_PRIORITY_FEE_CAP_WEI ? DAILY_REWARD_PRIORITY_FEE_CAP_WEI : suggestedPriorityFee;
-  const suggestedMaxFee = feeData.maxFeePerGas ?? (legacyGasPrice > 0n ? legacyGasPrice * 2n : priorityFeePerGas);
-  const maxFeePerGas = suggestedMaxFee < priorityFeePerGas ? priorityFeePerGas : suggestedMaxFee;
-  const usesEip1559Fees = feeData.maxFeePerGas != null || feeData.maxPriorityFeePerGas != null;
-  const txFeeOverrides = usesEip1559Fees
-    ? {
-        maxPriorityFeePerGas: priorityFeePerGas,
-        maxFeePerGas
-      }
-    : {
-        gasPrice: legacyGasPrice > 0n ? legacyGasPrice : maxFeePerGas
-      };
-  const estimatedGasCost = gasLimit * (usesEip1559Fees ? maxFeePerGas : legacyGasPrice || maxFeePerGas);
-  const requiredBalance = DAILY_REWARD_AMOUNT_WEI + estimatedGasCost;
+  try {
+    const [balance, gasLimit, feeData] = await Promise.all([
+      contracts.provider.getBalance(signer.address),
+      signer.estimateGas({ to, value: DAILY_REWARD_AMOUNT_WEI }),
+      contracts.provider.getFeeData()
+    ]);
+    const legacyGasPrice = feeData.gasPrice ?? 0n;
+    const suggestedPriorityFee = feeData.maxPriorityFeePerGas ?? legacyGasPrice;
+    const priorityFeePerGas =
+      suggestedPriorityFee > DAILY_REWARD_PRIORITY_FEE_CAP_WEI ? DAILY_REWARD_PRIORITY_FEE_CAP_WEI : suggestedPriorityFee;
+    const suggestedMaxFee = feeData.maxFeePerGas ?? (legacyGasPrice > 0n ? legacyGasPrice * 2n : priorityFeePerGas);
+    const maxFeePerGas = suggestedMaxFee < priorityFeePerGas ? priorityFeePerGas : suggestedMaxFee;
+    const usesEip1559Fees = feeData.maxFeePerGas != null || feeData.maxPriorityFeePerGas != null;
+    const txFeeOverrides = usesEip1559Fees
+      ? {
+          maxPriorityFeePerGas: priorityFeePerGas,
+          maxFeePerGas
+        }
+      : {
+          gasPrice: legacyGasPrice > 0n ? legacyGasPrice : maxFeePerGas
+        };
+    const estimatedGasCost = gasLimit * (usesEip1559Fees ? maxFeePerGas : legacyGasPrice || maxFeePerGas);
+    const requiredBalance = DAILY_REWARD_AMOUNT_WEI + estimatedGasCost;
 
-  return {
-    signer,
-    treasuryWallet: signer.address,
-    balance,
-    gasLimit,
-    txFeeOverrides,
-    estimatedGasCost,
-    feeMode: usesEip1559Fees ? 'eip1559' : 'legacy',
-    priorityFeePerGas: usesEip1559Fees ? priorityFeePerGas : null,
-    maxFeePerGas: usesEip1559Fees ? maxFeePerGas : null,
-    requiredBalance
-  };
+    return {
+      signer,
+      treasuryWallet: signer.address,
+      balance,
+      gasLimit,
+      txFeeOverrides,
+      estimatedGasCost,
+      feeMode: usesEip1559Fees ? 'eip1559' : 'legacy',
+      priorityFeePerGas: usesEip1559Fees ? priorityFeePerGas : null,
+      maxFeePerGas: usesEip1559Fees ? maxFeePerGas : null,
+      requiredBalance
+    };
+  } catch (error) {
+    throw new DailyRewardPayoutError('Unable to query Celo RPC provider for payout cost', 503, {
+      step: 'provider_query',
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : null
+    });
+  }
 }
 
 async function findDailyRewardClaim(wallet: string, claimDate: string) {

@@ -28,6 +28,7 @@
     "validate:treasury": "ts-node scripts/validate-treasury.ts",
     "validate:gameplay": "ts-node scripts/validate-gameplay.ts",
     "validate:gameplay:twice": "ts-node scripts/validate-gameplay-twice.ts",
+    "validate:gameplay:thrice": "GAMEPLAY_VALIDATION_RUNS=3 ts-node scripts/validate-gameplay-twice.ts",
     "validate:security": "ts-node scripts/validate-security.ts",
     "validate:minipay": "ts-node scripts/validate-minipay.ts",
     "validate:backend-runtime": "ts-node scripts/validate-backend-runtime.ts",
@@ -39,9 +40,13 @@
     "deploy:production": "ts-node scripts/deploy-production.ts",
     "generate:report": "ts-node scripts/generate-deployment-report.ts",
     "dev:backend": "cd backend && npm run dev",
+    "dev:backend:ready": "cd backend && npm run wait-for-db && npm run prisma:migrate:deploy && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "start:backend": "cd backend && npm start",
-    "start:frontend": "cd frontend && npm start"
+    "start:backend:ready": "cd backend && npm run wait-for-db && npm run prisma:migrate:deploy && npm start",
+    "start:frontend": "cd frontend && npm start",
+    "validate:gameplay:local": "API_URL=http://localhost:4000 npm run validate:gameplay",
+    "validate:gameplay:local:thrice": "API_URL=http://localhost:4000 npm run validate:gameplay:thrice"
   },
   "lint-staged": {
     "**/*.{ts,tsx,js,jsx}": "eslint --fix --no-warn-ignored",

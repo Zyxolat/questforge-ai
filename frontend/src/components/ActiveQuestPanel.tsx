@@ -4,6 +4,7 @@ import { QuestState } from '../context/RealtimeContext';
 
 interface ActiveQuestPanelProps {
   quest: QuestState | null;
+  onAcceptQuest?: () => void;
   onSubmitProof?: () => void;
   onClaimReward?: () => void;
   onReviewFailure?: () => void;
@@ -13,6 +14,7 @@ interface ActiveQuestPanelProps {
 
 export default function ActiveQuestPanel({
   quest,
+  onAcceptQuest,
   onSubmitProof,
   onClaimReward,
   onReviewFailure,
@@ -98,7 +100,7 @@ export default function ActiveQuestPanel({
             .padStart(2, '0')}`;
 
   const nextAction = isAvailable
-    ? 'Review the objective and prepare to complete the quest.'
+    ? 'Review the objective and accept the quest onchain for 0.001 CELO.'
     : isActive
       ? 'Complete the objective below, then submit a proof transaction or Celoscan link.'
       : isSubmitted
@@ -401,6 +403,18 @@ export default function ActiveQuestPanel({
           className="flex flex-col gap-3 pt-4 sm:flex-row"
         >
   
+          {isAvailable && onAcceptQuest && (
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.97 }}
+              onClick={onAcceptQuest}
+              disabled={loading || disabled}
+              className="flex-1 rounded-2xl bg-gradient-to-r from-blue-500 to-cyan-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white shadow-lg hover:shadow-2xl transition-shadow disabled:opacity-50 min-h-[44px] sm:min-h-[48px]"
+            >
+              {loading ? 'Accepting...' : 'Accept Quest'}
+            </motion.button>
+          )}
+
           {isActive && onSubmitProof && (
             <motion.button
               whileHover={{ scale: 1.03 }}

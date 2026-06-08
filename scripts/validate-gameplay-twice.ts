@@ -19,10 +19,12 @@ async function runValidationAttempt(attempt: number): Promise<number> {
 }
 
 async function main() {
+  const runs = Number(process.env.GAMEPLAY_VALIDATION_RUNS || '2');
   const results: number[] = [];
 
-  results.push(await runValidationAttempt(1));
-  results.push(await runValidationAttempt(2));
+  for (let attempt = 1; attempt <= runs; attempt++) {
+    results.push(await runValidationAttempt(attempt));
+  }
 
   console.log('\n=== Gameplay validation summary ===');
   results.forEach((exitCode, index) => {

@@ -531,6 +531,8 @@ export function fetchRealtimeSync(afterId: number) {
 export function generateQuest(chain = 'Celo') {
   console.debug('[API] Generating quest', {
     chain,
+    apiBaseUrl: API_BASE,
+    origin: typeof window !== 'undefined' ? window.location.origin : 'server',
     hasAccessToken: Boolean(currentAccessToken)
   });
 

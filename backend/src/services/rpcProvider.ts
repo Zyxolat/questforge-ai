@@ -239,6 +239,10 @@ class RobustRpcProvider {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  getProvider(): ethers.JsonRpcProvider {
+    return this.provider;
+  }
 }
 
 // Export singleton instance

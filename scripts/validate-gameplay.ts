@@ -14,6 +14,8 @@
  *
  * Optional env for onchain validation:
  *   VALIDATION_PRIVATE_KEY=0x...
+ *   VERIFIER_PRIVATE_KEY=0x...
+ *   PRIVATE_KEY=0x...
  *   VALIDATION_RPC_URL=https://forno.celo.org
  */
 
@@ -23,9 +25,28 @@ import * as dotenv from 'dotenv';
 import * as fs from 'fs';
 import * as path from 'path';
 
-const envPath = path.join(__dirname, '../.env.production');
-if (fs.existsSync(envPath)) {
-  dotenv.config({ path: envPath });
+const productionEnvPath = path.join(__dirname, '../.env.production');
+const rootEnvPath = path.join(__dirname, '../.env');
+const rootLocalEnvPath = path.join(__dirname, '../.env.local');
+const backendEnvPath = path.join(__dirname, '../backend/.env');
+
+for (const envPath of [productionEnvPath, rootEnvPath, rootLocalEnvPath, backendEnvPath]) {
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+  }
+}
+
+function normalizeEnvValue(raw?: string): string | undefined {
+  const value = raw?.trim();
+  if (!value) {
+    return undefined;
+  }
+
+  if (value.startsWith('replace-with') || value.startsWith('${{') || value.startsWith('$') || value === 'null' || value === 'undefined') {
+    return undefined;
+  }
+
+  return value;
 }
 
 type GameplayStatus = 'pass' | 'fail' | 'pending';
@@ -302,7 +323,10 @@ async function main() {
   const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://forgequest-online-production.up.railway.app';
   const { rootUrl, apiUrl } = resolveUrls(rawBase);
   const deployment = loadDeploymentAddresses();
-  const validationPrivateKey = process.env.VALIDATION_PRIVATE_KEY?.trim();
+  const validationPrivateKey =
+    normalizeEnvValue(process.env.VALIDATION_PRIVATE_KEY) ||
+    normalizeEnvValue(process.env.VERIFIER_PRIVATE_KEY) ||
+    normalizeEnvValue(process.env.PRIVATE_KEY);
   const authWallet = validationPrivateKey ? new ethers.Wallet(validationPrivateKey) : ethers.Wallet.createRandom();
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
@@ -386,26 +410,53 @@ async function main() {
     );
 
     startedAt = Date.now();
-    const provider = new ethers.JsonRpcProvider(DEFAULT_RPC_URL, RPC_CHAIN_ID);
-    const code = await provider.getCode(deployment.FORGE_QUEST_MANAGER_ADDRESS);
-    recordTest(
-      'Contract Deployment',
-      code !== '0x' ? 'pass' : 'fail',
-      code !== '0x'
-        ? `ForgeQuestManager deployed at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`
-        : `No bytecode found at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`,
-      Date.now() - startedAt,
-      {
-        manager: deployment.FORGE_QUEST_MANAGER_ADDRESS,
-        treasury: deployment.TREASURY_ADDRESS
-      }
-    );
+    let onchainUnavailable = false;
+    let provider: ethers.JsonRpcProvider | undefined;
+
+    try {
+      provider = new ethers.JsonRpcProvider(DEFAULT_RPC_URL, RPC_CHAIN_ID);
+      const code = await provider.getCode(deployment.FORGE_QUEST_MANAGER_ADDRESS);
+      recordTest(
+        'Contract Deployment',
+        code !== '0x' ? 'pass' : 'fail',
+        code !== '0x'
+          ? `ForgeQuestManager deployed at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`
+          : `No bytecode found at ${deployment.FORGE_QUEST_MANAGER_ADDRESS}`,
+        Date.now() - startedAt,
+        {
+          manager: deployment.FORGE_QUEST_MANAGER_ADDRESS,
+          treasury: deployment.TREASURY_ADDRESS
+        }
+      );
+    } catch (error: unknown) {
+      onchainUnavailable = true;
+      const message = error instanceof Error ? error.message : String(error);
+      recordTest(
+        'Contract Deployment',
+        'pending',
+        `Celo RPC unavailable, skipping onchain validation: ${message}`,
+        Date.now() - startedAt,
+        {
+          rpcUrl: DEFAULT_RPC_URL,
+          error: message
+        }
+      );
+    }
+
+    if (onchainUnavailable || !provider) {
+      recordTest(
+        'Wallet Tx Flow',
+        'pending',
+        'Onchain validations are skipped because the Celo RPC provider is unavailable.'
+      );
+      return;
+    }
 
     if (!validationPrivateKey) {
       recordTest(
         'Wallet Tx Flow',
         'pending',
-        'Set VALIDATION_PRIVATE_KEY to execute createQuest -> register-onchain -> active quest -> proof submission against the live deployment.'
+        'Set VALIDATION_PRIVATE_KEY, VERIFIER_PRIVATE_KEY, or PRIVATE_KEY to execute createQuest -> register-onchain -> active quest -> proof submission against the live deployment.'
       );
     } else {
       const baseSigner = new ethers.Wallet(validationPrivateKey, provider);

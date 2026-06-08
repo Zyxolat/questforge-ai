@@ -70,6 +70,32 @@ function extractQuestOrchestrationId(metadata: unknown) {
   return typeof orchestrationId === 'string' ? orchestrationId : null;
 }
 
+type QuestSchemaColumnRow = {
+  tableName: string;
+  columnName: string;
+};
+
+let questTableColumnsCache: Set<string> | null = null;
+
+async function getQuestTableColumns(): Promise<Set<string>> {
+  if (questTableColumnsCache) return questTableColumnsCache;
+
+  const rows = await prisma.$queryRaw<QuestSchemaColumnRow[]>`
+    SELECT table_name AS "tableName", column_name AS "columnName"
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND lower(table_name) = lower('Quest')
+  `;
+
+  questTableColumnsCache = new Set(rows.map((row) => row.columnName.toLowerCase()));
+  return questTableColumnsCache;
+}
+
+async function hasQuestColumn(columnName: string): Promise<boolean> {
+  const columns = await getQuestTableColumns();
+  return columns.has(columnName.toLowerCase());
+}
+
 function serializeQuest<
   T extends {
     chainQuestId?: bigint | null;
@@ -220,13 +246,14 @@ export async function generateQuest(req: Request, res: Response) {
     await incrementDailyActivity(user.id, { questsAttempted: 1 });
     const activitySnapshot = await getDailyActivity(user.id);
 
-    const questPayload = {
+    const includeMetadataUri = await hasQuestColumn('metadataUri');
+
+    const questPayload: Prisma.QuestCreateInput = {
       id: generated.quest.id,
       orchestrationId: generated.quest.orchestrationId,
       title: generated.quest.title,
       description: generated.quest.description,
       metadata: generated.quest.metadata as Prisma.InputJsonValue,
-      metadataUri: generated.quest.metadataUri,
       difficulty: generated.quest.difficulty,
       questType: generated.quest.questType,
       objective: generated.quest.objective,
@@ -245,29 +272,38 @@ export async function generateQuest(req: Request, res: Response) {
       isEventQuest: generated.quest.isEventQuest
     };
 
+    if (includeMetadataUri) {
+      questPayload.metadataUri = generated.quest.metadataUri;
+    }
+
+    const questUpdate: Prisma.QuestUpdateInput = {
+      title: generated.quest.title,
+      description: generated.quest.description,
+      metadata: generated.quest.metadata as Prisma.InputJsonValue,
+      difficulty: generated.quest.difficulty,
+      questType: generated.quest.questType,
+      objective: generated.quest.objective,
+      lore: generated.quest.lore,
+      worldStateVersion: generated.quest.worldStateVersion,
+      stakeAmount: generated.quest.stakeAmount,
+      rewardAmount: generated.quest.rewardAmount,
+      xpReward: generated.quest.xpReward,
+      transactionCount: generated.quest.transactionCount,
+      requiredTxTypes: generated.quest.requiredTxTypes,
+      durationSeconds: generated.quest.durationSeconds,
+      expiresAt: generated.quest.expiresAt,
+      creator: normalizedWallet,
+      isEventQuest: generated.quest.isEventQuest
+    };
+
+    if (includeMetadataUri) {
+      questUpdate.metadataUri = generated.quest.metadataUri;
+    }
+
     await prisma.quest.upsert({
       where: { id: generated.quest.id },
       create: questPayload,
-      update: {
-        title: generated.quest.title,
-        description: generated.quest.description,
-        metadata: generated.quest.metadata as Prisma.InputJsonValue,
-        metadataUri: generated.quest.metadataUri,
-        difficulty: generated.quest.difficulty,
-        questType: generated.quest.questType,
-        objective: generated.quest.objective,
-        lore: generated.quest.lore,
-        worldStateVersion: generated.quest.worldStateVersion,
-        stakeAmount: generated.quest.stakeAmount,
-        rewardAmount: generated.quest.rewardAmount,
-        xpReward: generated.quest.xpReward,
-        transactionCount: generated.quest.transactionCount,
-        requiredTxTypes: generated.quest.requiredTxTypes,
-        durationSeconds: generated.quest.durationSeconds,
-        expiresAt: generated.quest.expiresAt,
-        creator: normalizedWallet,
-        isEventQuest: generated.quest.isEventQuest
-      }
+      update: questUpdate
     });
 
     logger.info('[QUEST] Generate quest request succeeded', {

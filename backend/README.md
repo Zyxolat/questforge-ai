@@ -21,11 +21,15 @@ cp .env.example .env
 # Generate Prisma client
 npm run prisma:generate
 
-# Run database migrations
-npx prisma migrate deploy
-
-# Start development server
+# Start development server once DATABASE_URL is available
+npm run wait-for-db
 npm run dev
+```
+
+To start the backend and automatically wait for a reachable local database, use:
+
+```bash
+npm run wait-for-db && npm run dev
 ```
 
 The server listens on `http://localhost:4000` by default.
