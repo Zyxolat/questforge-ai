@@ -727,10 +727,22 @@ export default function CommandCenter() {
           valueInEther: typeof options?.value === 'bigint' ? ethers.formatEther(options.value) : undefined
         });
 
-        const tx = await transactionMethod(...args, {
-          ...(typeof options?.value === 'bigint' ? { value: options.value } : {}),
-          ...(typeof options?.gasLimit === 'bigint' ? { gasLimit: options.gasLimit } : {})
+        // Build transaction options for ethers v6
+        const txOptions: Record<string, unknown> = {};
+        if (typeof options?.value === 'bigint') {
+          txOptions.value = options.value;
+        }
+        if (typeof options?.gasLimit === 'bigint') {
+          txOptions.gasLimit = options.gasLimit;
+        }
+
+        console.debug('[CommandCenter] Transaction options prepared', {
+          functionName,
+          hasValue: 'value' in txOptions,
+          hasGasLimit: 'gasLimit' in txOptions
         });
+
+        const tx = await transactionMethod(...args, txOptions);
 
         console.info('[CommandCenter] Transaction submitted successfully', {
           functionName,
