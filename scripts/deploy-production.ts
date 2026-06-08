@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Production Deployment Orchestrator
+ * ForgeQuest Online - Production Deployment Orchestrator
  * 
  * Orchestrates the complete production deployment pipeline:
  * 1. Pre-flight validation
@@ -205,7 +205,7 @@ function upsertEnvValue(envContent: string, name: string, value: string) {
 
 async function main() {
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║     QuestForge AI - Production Deployment Orchestrator     ║');
+  console.log('║     ForgeQuest Online - Production Deployment Orchestrator     ║');
   console.log('║                  Celo Mainnet Deployment                   ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 

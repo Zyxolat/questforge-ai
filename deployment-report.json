@@ -26,8 +26,8 @@
     ]
   },
   "configuration": {
-    "apiUrl": "https://questforge-ai-production.up.railway.app",
-    "frontendUrl": "https://questforge-ai.vercel.app",
+    "apiUrl": "https://forgequest-online-production.up.railway.app",
+    "frontendUrl": "https://forgequest-online.vercel.app",
     "databaseUrl": "",
     "rpcUrl": "https://forno.celo.org"
   },

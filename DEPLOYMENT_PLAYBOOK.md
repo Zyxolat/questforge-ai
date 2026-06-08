@@ -1,4 +1,4 @@
-# QuestForge AI - Production Deployment Execution Playbook
+# ForgeQuest Online - Production Deployment Execution Playbook
 
 **Generated:** May 10, 2026  
 **Status:** Ready for Production Deployment  
@@ -10,6 +10,7 @@
 ## 🚀 QUICK START
 
 ### 1-Minute Setup
+
 ```bash
 # Copy environment template
 cp .env.production.template .env.production
@@ -22,6 +23,7 @@ npm run validate:production-env
 ```
 
 ### 5-Minute Deployment
+
 ```bash
 # Deploy contracts to Celo Mainnet
 npm run deploy:production
@@ -34,6 +36,7 @@ npm run generate:report
 ```
 
 ### 10-Minute Validation
+
 ```bash
 # Run all validation tests
 npm run validate:all
@@ -46,6 +49,7 @@ npm run validate:all
 ## 📋 Available Commands
 
 ### Validation Scripts
+
 ```bash
 npm run validate:production-env    # Check environment variables
 npm run validate:treasury          # Verify treasury health
@@ -57,12 +61,14 @@ npm run validate:all              # Run all validations
 ```
 
 ### Deployment Scripts
+
 ```bash
 npm run deploy:production         # Deploy contracts to Celo Mainnet
 npm run generate:report           # Generate deployment report
 ```
 
 ### Build Scripts
+
 ```bash
 npm run build:contracts           # Compile smart contracts
 npm run build:backend             # Build backend services
@@ -71,6 +77,7 @@ npm run build:all                 # Build everything
 ```
 
 ### Development
+
 ```bash
 npm run dev:backend               # Start backend in dev mode
 npm run dev:frontend              # Start frontend in dev mode
@@ -121,6 +128,7 @@ npm run start:frontend            # Start frontend in production
 ## 🔄 Deployment Flow
 
 ### Phase 1: Pre-Flight (5 minutes)
+
 ```bash
 1. npm run validate:production-env
    ✓ Environment validated
@@ -129,6 +137,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 2: Contract Deployment (10-15 minutes)
+
 ```bash
 2. npm run deploy:production
    ✓ Contracts compiled
@@ -139,6 +148,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 3: Treasury Funding (5 minutes)
+
 ```bash
 3. npm run validate:treasury
    ✓ Treasury verified
@@ -147,6 +157,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 4: Service Startup (5 minutes)
+
 ```bash
 4. Start Backend & Frontend
    ✓ Backend listening
@@ -155,6 +166,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 5: Gameplay Validation (10-15 minutes)
+
 ```bash
 5. npm run validate:gameplay
    ✓ Wallet connection works
@@ -165,6 +177,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 6: Security Validation (5 minutes)
+
 ```bash
 6. npm run validate:security
    ✓ Replay attacks blocked
@@ -174,6 +187,7 @@ npm run start:frontend            # Start frontend in production
 ```
 
 ### Phase 7: Final Checks (5 minutes)
+
 ```bash
 7. npm run generate:report
    ✓ Report generated
@@ -188,24 +202,28 @@ npm run start:frontend            # Start frontend in production
 ## 🎯 Success Criteria
 
 ### Environment Validation ✓
+
 - [ ] All required variables present
 - [ ] RPC connectivity verified
 - [ ] Database connection works
 - [ ] Private keys securely stored
 
 ### Contract Deployment ✓
+
 - [ ] All 4 contracts deployed
 - [ ] Deployment addresses saved
 - [ ] Roles configured correctly
 - [ ] Treasury funded
 
 ### Treasury Health ✓
+
 - [ ] Balance > 10 CELO
 - [ ] Solvency: SOLVENT
 - [ ] Can execute payouts
 - [ ] Circuit breaker configured
 
 ### Gameplay Flow ✓
+
 - [ ] Wallet connection works
 - [ ] Quest generation succeeds
 - [ ] TX #1 (start) confirms
@@ -216,6 +234,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Leaderboard updated
 
 ### Security ✓
+
 - [ ] Replay attacks blocked
 - [ ] Double rewards prevented
 - [ ] Unauthorized access rejected
@@ -223,6 +242,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Input validation working
 
 ### Backend Runtime ✓
+
 - [ ] Health check responds
 - [ ] Database connected
 - [ ] Indexer running
@@ -231,6 +251,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Error handling works
 
 ### Performance ✓
+
 - [ ] API response < 500ms
 - [ ] Transaction confirmation < 30s
 - [ ] Page load < 3s
@@ -241,6 +262,7 @@ npm run start:frontend            # Start frontend in production
 ## 📝 Pre-Deployment Checklist
 
 ### Security (CRITICAL)
+
 - [ ] PRIVATE_KEY stored in secrets manager
 - [ ] DATABASE_URL uses secure credentials
 - [ ] No secrets in .env file (git-ignored)
@@ -248,6 +270,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Incident response plan ready
 
 ### Infrastructure (CRITICAL)
+
 - [ ] PostgreSQL 14+ running
 - [ ] Celo RPC endpoint responding
 - [ ] Domain DNS records configured
@@ -256,6 +279,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Database backups enabled
 
 ### Code Quality (REQUIRED)
+
 - [ ] All tests passing
 - [ ] No console.log in production code
 - [ ] Linting passes
@@ -263,6 +287,7 @@ npm run start:frontend            # Start frontend in production
 - [ ] Security audit complete
 
 ### Deployment (REQUIRED)
+
 - [ ] .env.production created
 - [ ] Deployer wallet funded (2-5 CELO)
 - [ ] Team notified of deployment time
@@ -318,12 +343,12 @@ npm run validate:backend-runtime
 
 ## 📞 Support Contacts
 
-| Role | Responsibility | Contact |
-|------|-----------------|---------|
-| Smart Contract Lead | Contract deployment & verification | - |
-| Backend Lead | API operations & indexing | - |
-| DevOps Lead | Infrastructure & monitoring | - |
-| Product Manager | Release coordination | - |
+| Role                | Responsibility                     | Contact |
+| ------------------- | ---------------------------------- | ------- |
+| Smart Contract Lead | Contract deployment & verification | -       |
+| Backend Lead        | API operations & indexing          | -       |
+| DevOps Lead         | Infrastructure & monitoring        | -       |
+| Product Manager     | Release coordination               | -       |
 
 ---
 

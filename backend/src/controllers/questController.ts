@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { Prisma, type QuestStatus } from '@prisma/client';
-import { aiQuestGenerationEngine } from '../services/aiQuestGenerationEngine';
 import { contracts } from '../services/contracts';
 import { normalizeWallet, prisma, upsertUser } from '../services/chain';
 import {
@@ -11,15 +10,20 @@ import {
 } from '../services/antiAbuse';
 import { buildQuestTemplate } from '../services/questTemplates';
 import { logger } from '../services/logger';
+import { ruleBasedQuestEngine } from '../services/ruleBasedQuestEngine';
 import { npcRelationshipEngine } from '../services/npcRelationshipEngine';
-import { QuestGenerationError } from '../services/questGenerationErrors';
-import { questNarrativeEngine } from '../services/questNarrativeEngine';
 import { QuestValidationError } from '../services/questValidationEngine';
 import { realtimeEventPublisher } from '../services/realtimeEventPublisher';
 import { queueProofVerification } from '../services/verification';
 import { worldStateCoordinator } from '../services/worldStateCoordinator';
 
-const QUEST_FEED_STATUSES: QuestStatus[] = ['AVAILABLE', 'ACTIVE', 'SUBMITTED', 'VERIFIED', 'CANCELLED', 'FAILED'];
+const QUEST_FEED_STATUSES: QuestStatus[] = [
+  'AVAILABLE',
+  'ACCEPTED',
+  'COMPLETED',
+  'CLAIMABLE',
+  'REWARDED'
+];
 
 type TreasuryPayoutRow = {
   questId: string;
@@ -85,25 +89,6 @@ function serializeQuest<
         }
       : null
   };
-}
-
-async function loadSerializedQuestById(questId: string) {
-  const quest = await prisma.quest.findUnique({
-    where: { id: questId }
-  });
-
-  if (!quest) {
-    return null;
-  }
-
-  const treasuryPayout = await prisma.treasuryPayout.findUnique({
-    where: { questId }
-  });
-
-  return serializeQuest({
-    ...quest,
-    treasuryPayout
-  });
 }
 
 async function loadLatestProofStateByQuestIds(questIds: string[]) {
@@ -196,16 +181,19 @@ export async function generateQuest(req: Request, res: Response) {
     });
   }
 
+  const normalizedWallet = normalizeWallet(wallet);
+
   logger.info('[QUEST] Generate quest request received', {
-    wallet,
+    wallet: normalizedWallet,
     userId: req.auth?.userId ?? null,
     chain,
     hasAccessToken: Boolean(req.get('authorization'))
   });
 
   try {
-    const user = await upsertUser(normalizeWallet(wallet));
+    const user = await upsertUser(normalizedWallet);
     const dailyLimits = await checkDailyLimits(user.id);
+    const worldState = await worldStateCoordinator.getCurrentWorldState('quest_generation');
 
     if (!dailyLimits.canAttempt) {
       return res.status(429).json({
@@ -217,10 +205,70 @@ export async function generateQuest(req: Request, res: Response) {
       });
     }
 
-    const generated = await aiQuestGenerationEngine.generateQuest({ wallet, chain });
+    const generated = ruleBasedQuestEngine.generateQuest(user.level, {
+      wallet: normalizeWallet(wallet),
+      chain,
+      userId: user.id,
+      username: user.username,
+      xp: user.xp,
+      level: user.level,
+      streak: user.streak,
+      onchainActions: user.onchainActions,
+      worldState
+    });
 
     await incrementDailyActivity(user.id, { questsAttempted: 1 });
     const activitySnapshot = await getDailyActivity(user.id);
+
+    const questPayload = {
+      id: generated.quest.id,
+      orchestrationId: generated.quest.orchestrationId,
+      title: generated.quest.title,
+      description: generated.quest.description,
+      metadata: generated.quest.metadata as Prisma.InputJsonValue,
+      metadataUri: generated.quest.metadataUri,
+      difficulty: generated.quest.difficulty,
+      questType: generated.quest.questType,
+      objective: generated.quest.objective,
+      lore: generated.quest.lore,
+      worldStateVersion: generated.quest.worldStateVersion,
+      stakeAmount: generated.quest.stakeAmount,
+      rewardAmount: generated.quest.rewardAmount,
+      xpReward: generated.quest.xpReward,
+      transactionCount: generated.quest.transactionCount,
+      requiredTxTypes: generated.quest.requiredTxTypes,
+      durationSeconds: generated.quest.durationSeconds,
+      expiresAt: generated.quest.expiresAt,
+      status: generated.quest.status,
+      creator: normalizedWallet,
+      playerId: null,
+      isEventQuest: generated.quest.isEventQuest
+    };
+
+    await prisma.quest.upsert({
+      where: { id: generated.quest.id },
+      create: questPayload,
+      update: {
+        title: generated.quest.title,
+        description: generated.quest.description,
+        metadata: generated.quest.metadata as Prisma.InputJsonValue,
+        metadataUri: generated.quest.metadataUri,
+        difficulty: generated.quest.difficulty,
+        questType: generated.quest.questType,
+        objective: generated.quest.objective,
+        lore: generated.quest.lore,
+        worldStateVersion: generated.quest.worldStateVersion,
+        stakeAmount: generated.quest.stakeAmount,
+        rewardAmount: generated.quest.rewardAmount,
+        xpReward: generated.quest.xpReward,
+        transactionCount: generated.quest.transactionCount,
+        requiredTxTypes: generated.quest.requiredTxTypes,
+        durationSeconds: generated.quest.durationSeconds,
+        expiresAt: generated.quest.expiresAt,
+        creator: normalizedWallet,
+        isEventQuest: generated.quest.isEventQuest
+      }
+    });
 
     logger.info('[QUEST] Generate quest request succeeded', {
       wallet,
@@ -235,6 +283,8 @@ export async function generateQuest(req: Request, res: Response) {
     });
 
     res.json({
+      success: true,
+      source: 'rule_based',
       quest: {
         id: generated.quest.id,
         orchestrationId: generated.quest.orchestrationId,
@@ -288,22 +338,6 @@ export async function generateQuest(req: Request, res: Response) {
       }
     });
   } catch (error) {
-    if (error instanceof QuestGenerationError) {
-      logger.warn('[QUEST] Generate quest request failed with structured service error', {
-        wallet,
-        code: error.code,
-        status: error.status,
-        details: error.details
-      });
-      return res.status(error.status).json({
-        error: {
-          code: error.code,
-          message: error.message
-        },
-        details: error.details
-      });
-    }
-
     if (error instanceof QuestValidationError) {
       logger.warn('[QUEST] Generate quest request failed deterministic validation', {
         wallet,
@@ -321,10 +355,12 @@ export async function generateQuest(req: Request, res: Response) {
     logger.error('Quest generation failed', error, {
       wallet
     });
+    const errorDetails = error instanceof Error ? error.message : String(error);
     res.status(500).json({
       error: {
         code: 'QUEST_GENERATION_FAILED',
-        message: 'Quest generation failed unexpectedly'
+        message: 'Quest generation failed unexpectedly',
+        details: errorDetails
       }
     });
   }
@@ -485,12 +521,28 @@ export async function registerOnchainQuest(req: Request, res: Response) {
     const block = await contracts.provider.getBlock(receipt.blockNumber);
     const rewardReservedAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
 
+    const user = await prisma.user.findUnique({
+      where: { wallet: normalizedWallet }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: {
+          code: 'PLAYER_NOT_FOUND',
+          message: 'Player account not found for the authenticated wallet'
+        }
+      });
+    }
+
     const updatedQuest = await prisma.$transaction(async (tx) => {
       const nextQuest = await tx.quest.update({
         where: { id: questId },
         data: {
           chainQuestId: parsedChainQuestId,
-          status: 'AVAILABLE'
+          status: 'ACCEPTED',
+          playerId: user.id,
+          startedAt: rewardReservedAt,
+          stakeAmount: 0
         }
       });
 
@@ -498,7 +550,9 @@ export async function registerOnchainQuest(req: Request, res: Response) {
         where: { questId },
         create: {
           questId,
+          userId: user.id,
           chainQuestId: parsedChainQuestId,
+          playerWallet: normalizedWallet,
           rewardAmount: quest.rewardAmount,
           stakeAmount: 0,
           totalAmount: quest.rewardAmount,
@@ -507,7 +561,9 @@ export async function registerOnchainQuest(req: Request, res: Response) {
           rewardReservedAt
         },
         update: {
+          userId: user.id,
           chainQuestId: parsedChainQuestId,
+          playerWallet: normalizedWallet,
           rewardAmount: quest.rewardAmount,
           stakeAmount: 0,
           totalAmount: quest.rewardAmount,
@@ -563,244 +619,11 @@ export async function registerOnchainQuest(req: Request, res: Response) {
   }
 }
 
-export async function registerQuestStart(req: Request, res: Response) {
-  const wallet = req.auth?.wallet;
-  const { questId, chainQuestId, startTxHash } = req.body as {
-    questId?: string;
-    chainQuestId?: string | number;
-    startTxHash?: string;
-  };
-
-  if (!wallet || !questId || !chainQuestId || !startTxHash) {
-    return res.status(400).json({
-      error: {
-        code: 'QUEST_START_REGISTRATION_INVALID',
-        message: 'Wallet, questId, chainQuestId, and startTxHash are required'
-      }
-    });
-  }
-
-  let parsedChainQuestId: bigint;
-  try {
-    parsedChainQuestId = BigInt(String(chainQuestId));
-  } catch {
-    return res.status(400).json({
-      error: {
-        code: 'QUEST_CHAIN_ID_INVALID',
-        message: 'chainQuestId must be a valid integer'
-      }
-    });
-  }
-
-  const normalizedWallet = normalizeWallet(wallet);
-
-  try {
-    logger.info('[QUEST] Register quest start request received', {
-      wallet: normalizedWallet,
-      questId,
-      chainQuestId: parsedChainQuestId.toString(),
-      startTxHash
-    });
-
-    const [user, quest] = await Promise.all([
-      prisma.user.findUnique({
-        where: { wallet: normalizedWallet }
-      }),
-      prisma.quest.findUnique({
-        where: { id: questId }
-      })
-    ]);
-
-    if (!user) {
-      return res.status(404).json({
-        error: {
-          code: 'QUEST_PLAYER_NOT_FOUND',
-          message: 'Player not found'
-        }
-      });
-    }
-
-    if (!quest) {
-      return res.status(404).json({
-        error: {
-          code: 'QUEST_NOT_FOUND',
-          message: 'Quest not found'
-        }
-      });
-    }
-
-    if (quest.chainQuestId && quest.chainQuestId !== parsedChainQuestId) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_CHAIN_ID_CONFLICT',
-          message: 'Quest is already linked to a different onchain quest id'
-        },
-        details: [
-          `existing=${quest.chainQuestId.toString()}`,
-          `received=${parsedChainQuestId.toString()}`
-        ]
-      });
-    }
-
-    const receipt = await contracts.provider.getTransactionReceipt(startTxHash);
-    logger.info('[QUEST] Register quest start receipt fetched', {
-      questId,
-      chainQuestId: parsedChainQuestId.toString(),
-      startTxHash,
-      receiptStatus: receipt?.status ?? null,
-      blockNumber: receipt?.blockNumber ?? null,
-      logs: summarizeForgeQuestReceipt(receipt)
-    });
-
-    if (!receipt || receipt.status !== 1) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_START_TX_UNCONFIRMED',
-          message: 'Quest start transaction is not confirmed onchain yet'
-        }
-      });
-    }
-
-    const parsedQuestStarted = parseForgeQuestReceiptEvent(receipt, 'QuestStarted');
-
-    if (!parsedQuestStarted) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_START_EVENT_MISSING',
-          message: 'Quest start transaction did not emit QuestStarted'
-        }
-      });
-    }
-
-    const eventQuestId = BigInt(parsedQuestStarted.args.questId.toString());
-    const eventPlayer = normalizeWallet(String(parsedQuestStarted.args.player));
-    const stakeAmount = Number(parsedQuestStarted.args.stakeAmount.toString()) / 1e18;
-
-    if (eventQuestId !== parsedChainQuestId) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_CHAIN_ID_MISMATCH',
-          message: 'QuestStarted event quest id did not match the provided chainQuestId'
-        },
-        details: [
-          `event=${eventQuestId.toString()}`,
-          `received=${parsedChainQuestId.toString()}`
-        ]
-      });
-    }
-
-    if (eventPlayer !== normalizedWallet) {
-      return res.status(403).json({
-        error: {
-          code: 'QUEST_PLAYER_MISMATCH',
-          message: 'QuestStarted event player did not match the authenticated wallet'
-        }
-      });
-    }
-
-    const onchainQuest = await contracts.forgeQuestManager.quests(parsedChainQuestId);
-    if (Number(onchainQuest.status) !== 1) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_ONCHAIN_STATUS_INVALID',
-          message: `Onchain quest status is ${onchainQuest.status.toString()}, not ACTIVE`
-        }
-      });
-    }
-
-    if (normalizeWallet(String(onchainQuest.player)) !== normalizedWallet) {
-      return res.status(409).json({
-        error: {
-          code: 'QUEST_ONCHAIN_PLAYER_INVALID',
-          message: 'Onchain quest player did not match the authenticated wallet'
-        }
-      });
-    }
-
-    const block = await contracts.provider.getBlock(receipt.blockNumber);
-    const startedAt = block ? new Date(Number(block.timestamp) * 1000) : new Date();
-
-    await prisma.$transaction(async (tx) => {
-      await tx.quest.update({
-        where: { id: questId },
-        data: {
-          chainQuestId: parsedChainQuestId,
-          status: 'ACTIVE',
-          playerId: user.id,
-          startedAt,
-          stakeTx: startTxHash,
-          stakeTxHash: startTxHash
-        }
-      });
-
-      await tx.treasuryPayout.upsert({
-        where: { questId },
-        create: {
-          questId,
-          userId: user.id,
-          chainQuestId: parsedChainQuestId,
-          playerWallet: normalizedWallet,
-          rewardAmount: quest.rewardAmount,
-          stakeAmount,
-          totalAmount: quest.rewardAmount + stakeAmount,
-          status: 'LOCKED'
-        },
-        update: {
-          userId: user.id,
-          chainQuestId: parsedChainQuestId,
-          playerWallet: normalizedWallet,
-          rewardAmount: quest.rewardAmount,
-          stakeAmount,
-          totalAmount: quest.rewardAmount + stakeAmount,
-          status: 'LOCKED'
-        }
-      });
-    });
-
-    const serializedQuest = await loadSerializedQuestById(questId);
-
-    logger.info('[QUEST] Quest start registration DB persistence verified', {
-      questId,
-      chainQuestId: serializedQuest?.chainQuestId ?? null,
-      status: serializedQuest?.status ?? null,
-      treasuryPayoutStatus: serializedQuest?.treasuryPayout?.status ?? null
-    });
-
-    logger.info('[QUEST] Quest start registration completed', {
-      wallet: normalizedWallet,
-      userId: user.id,
-      questId,
-      chainQuestId: parsedChainQuestId.toString(),
-      startTxHash,
-      stakeAmount
-    });
-
-    return res.json({
-      success: true,
-      quest: serializedQuest
-    });
-  } catch (error) {
-    logger.error('Quest start registration failed', error, {
-      wallet: normalizedWallet,
-      questId,
-      chainQuestId: String(chainQuestId),
-      startTxHash
-    });
-
-    return res.status(500).json({
-      error: {
-        code: 'QUEST_START_REGISTRATION_FAILED',
-        message: error instanceof Error ? error.message : 'Failed to register quest start'
-      }
-    });
-  }
-}
-
 export async function getQuestOrchestrationDiagnostics(_req: Request, res: Response) {
   try {
     const worldState = await worldStateCoordinator.getCurrentWorldState('diagnostics');
     res.json({
-      orchestration: aiQuestGenerationEngine.getDiagnostics(),
+      orchestration: ruleBasedQuestEngine.getDiagnostics(),
       worldState: {
         version: worldState.version,
         season: worldState.season,
@@ -862,27 +685,12 @@ export async function getNPCDialogue(req: Request, res: Response) {
         orderBy: { updatedAt: 'desc' }
       });
 
-      dialogue = await questNarrativeEngine.generateNPCDialogue({
-        playerName,
-        npc: {
-          npcId: npc.id,
-          name: npc.name,
-          type: npc.type,
-          role:
-            typeof npc.personality === 'object' && npc.personality && !Array.isArray(npc.personality)
-              ? String((npc.personality as Record<string, unknown>).role ?? 'lore_keeper')
-              : 'lore_keeper',
-          relationshipScore: Number((memory?.importanceScore ?? 0.5).toFixed(3)),
-          personalitySummary:
-            typeof npc.personality === 'object' && npc.personality && !Array.isArray(npc.personality)
-              ? JSON.stringify(npc.personality).slice(0, 160)
-              : 'measured and observant',
-          openingDialogue: '',
-          memoryReferences: memory ? [memory.memory] : [`guild=${user.clanId ?? 'none'}`, `streak=${user.streak}`]
-        },
-        worldState,
-        relationshipSummary: memory ? [memory.memory] : [`successes=${user.totalQuestsCompleted}`, `streak=${user.streak}`]
-      });
+      const personalitySummary =
+        typeof npc.personality === 'object' && npc.personality && !Array.isArray(npc.personality)
+          ? JSON.stringify(npc.personality).slice(0, 160)
+          : 'measured and observant';
+      const relationshipSummary = memory ? [memory.memory] : [`successes=${user.totalQuestsCompleted}`, `streak=${user.streak}`];
+      dialogue = `${npc.name} says: ${npcType} watches over ${worldState.season.label}, ${playerName}. ${relationshipSummary[0] ?? 'Your path is still being written.'} ${personalitySummary}.`;
 
       const conversation = await prisma.nPCConversation.create({
         data: {
@@ -1071,7 +879,7 @@ export async function submitProof(req: Request, res: Response) {
       return res.status(409).json({ error: 'Quest has not been indexed with its onchain id yet' });
     }
 
-    if (quest.status !== 'ACTIVE' && quest.status !== 'SUBMITTED') {
+    if (quest.status !== 'ACCEPTED') {
       return res.status(400).json({ error: `Quest status is ${quest.status}` });
     }
 

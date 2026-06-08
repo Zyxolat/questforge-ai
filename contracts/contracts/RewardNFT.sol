@@ -13,7 +13,7 @@ contract RewardNFT is ERC721URIStorage, AccessControl {
 
     event RewardMinted(address indexed player, uint256 indexed tokenId, uint256 questId);
 
-    constructor(address admin) ERC721("QuestForge Reward", "QFR") {
+    constructor(address admin) ERC721("ForgeQuest Reward", "QFR") {
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(MINTER_ROLE, admin);
     }

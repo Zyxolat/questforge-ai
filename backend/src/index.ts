@@ -1,5 +1,5 @@
 /**
- * QuestForge AI — Backend Entry Point
+ * Online ForgeQuest Game - Backend Entry Point
  *
  * Environment variables are validated eagerly when `./config/env` is imported
  * below. If any required variable is missing the process will exit before
@@ -27,7 +27,6 @@ import { logger } from './services/logger';
 type StartupServiceKey =
   | 'websocket'
   | 'database'
-  | 'groq'
   | 'worldState'
   | 'proofVerificationWorker'
   | 'eventQueue'
@@ -137,8 +136,7 @@ async function bootstrap() {
   const { rpcFailoverManager } = await import('./services/rpcFailoverManager');
   const { prisma } = await import('./services/chain');
   const { assertAuthStorageReady } = await import('./services/auth');
-  const { aiQuestGenerationEngine } = await import('./services/aiQuestGenerationEngine');
-  const { aiGroqClient } = await import('./services/aiGroqClient');
+  const { ruleBasedQuestEngine } = await import('./services/ruleBasedQuestEngine');
   const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
   const { startProofVerificationWorker, stopProofVerificationWorker } = await import('./services/verification');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
@@ -148,6 +146,15 @@ async function bootstrap() {
 
   const app = express();
   const httpServer = createServer(app);
+  const openSockets = new Set<import('net').Socket>();
+
+  httpServer.on('connection', (socket) => {
+    openSockets.add(socket);
+    socket.on('close', () => {
+      openSockets.delete(socket);
+    });
+  });
+
   const startupState: StartupState = {
     servicesReady: false,
     isInitializing: false,
@@ -160,7 +167,6 @@ async function bootstrap() {
     services: {
       websocket: createServiceState(true),
       database: createServiceState(false),
-      groq: createServiceState(true),
       worldState: createServiceState(false),
       proofVerificationWorker: createServiceState(true),
       eventQueue: createServiceState(false),
@@ -314,25 +320,6 @@ async function bootstrap() {
       );
     }
 
-    if (!env.GROQ_API_KEY) {
-      markServiceSkipped('groq', 'GROQ_API_KEY not configured; deterministic fallbacks remain enabled');
-      return;
-    }
-
-    if (startupState.services.groq.status !== 'ready') {
-      await runStartupStep(
-        'groq',
-        attempt,
-        async () => {
-          await aiGroqClient.validateModelAccess(env.GROQ_MODEL);
-        },
-        {
-          optional: true,
-          swallowFailure: true,
-          timeoutMs: 15000
-        }
-      );
-    }
   };
 
   const initializeBackgroundServices = async () => {
@@ -430,6 +417,17 @@ async function bootstrap() {
       exitCode
     });
 
+    const forceExitTimer = setTimeout(() => {
+      logger.error('[SHUTDOWN] Force exiting after shutdown timeout');
+      process.exit(exitCode);
+    }, 15000);
+
+    // Forcefully close any remaining open sockets so the server can terminate cleanly.
+    for (const socket of [...openSockets]) {
+      socket.destroy();
+      openSockets.delete(socket);
+    }
+
     await new Promise<void>((resolve) => {
       httpServer.close(() => resolve());
     }).catch((error) => {
@@ -457,6 +455,7 @@ async function bootstrap() {
     }
 
     logger.info('[SHUTDOWN] All services stopped');
+    clearTimeout(forceExitTimer);
     process.exit(exitCode);
   };
 
@@ -530,8 +529,7 @@ async function bootstrap() {
       const wsStats = productionWebSocketBroadcaster.getStats();
       const rpcHealth = await rpcFailoverManager.getHealthStatus();
       const worldDiagnostics = worldStateCoordinator.getDiagnostics();
-      const questDiagnostics = aiQuestGenerationEngine.getDiagnostics();
-      const groqHealth = aiGroqClient.getHealthStatus();
+      const questDiagnostics = ruleBasedQuestEngine.getDiagnostics();
 
       res.status(200).json({
         timestamp: new Date().toISOString(),
@@ -540,7 +538,6 @@ async function bootstrap() {
         worker: workerStatus,
         queue: queueStats,
         websocket: wsStats,
-        groq: groqHealth,
         rpc: {
           endpoints: rpcHealth,
           lastSuccessful: rpcFailoverManager.getLastSuccessfulEndpoint(),
@@ -582,7 +579,7 @@ async function bootstrap() {
   });
 
   app.get('/', (_req, res) => {
-    res.json({ status: 'QuestForge AI backend online' });
+    res.json({ status: 'Online ForgeQuest Game backend online' });
   });
 
   app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {

@@ -20,7 +20,7 @@ const TEMPLATE_ALLOWLIST: Record<ObjectiveType, QuestVerificationBaseTemplate> =
     questType: 'Celo Transfer',
     validationRules: [
       'Proof must be a successful Celo transaction hash.',
-      'The proof transaction must be signed by the quest player after the quest starts.',
+      'The proof transaction must be signed by the quest player after the quest is issued.',
       'The transaction must transfer CELO to another non-zero wallet.',
       'The transfer value must meet the quest minimum amount.'
     ],
@@ -33,7 +33,7 @@ const TEMPLATE_ALLOWLIST: Record<ObjectiveType, QuestVerificationBaseTemplate> =
     questType: 'Contract Invocation',
     validationRules: [
       'Proof must be a successful Celo transaction hash.',
-      'The proof transaction must be signed by the quest player after the quest starts.',
+      'The proof transaction must be signed by the quest player after the quest is issued.',
       'The transaction must call a smart contract with calldata.',
       'The transaction must spend at least the quest minimum gas value in CELO.'
     ],
@@ -46,7 +46,7 @@ const TEMPLATE_ALLOWLIST: Record<ObjectiveType, QuestVerificationBaseTemplate> =
     questType: 'Token Approval',
     validationRules: [
       'Proof must be a successful Celo transaction hash.',
-      'The proof transaction must be signed by the quest player after the quest starts.',
+      'The proof transaction must be signed by the quest player after the quest is issued.',
       'The receipt must emit at least one ERC20 Approval event.',
       'The transaction must target a live contract address.'
     ],

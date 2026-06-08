@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "[ENTRYPOINT] Starting QuestForge AI Backend"
+echo "[ENTRYPOINT] Starting ForgeQuest Online Backend"
 echo "[ENTRYPOINT] Running database migrations..."
 
 # Run Prisma migrations

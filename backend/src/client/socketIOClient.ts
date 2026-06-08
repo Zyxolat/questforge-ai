@@ -20,7 +20,7 @@ interface QuestEvent {
   creatorWallet?: string;
 }
 
-class QuestForgeRealtimeClient {
+class ForgeQuestRealtimeClient {
   private socket: Socket | null = null;
   private isConnected = false;
   private reconnectAttempts = 0;
@@ -45,7 +45,7 @@ class QuestForgeRealtimeClient {
 
     // Connection event
     this.socket.on('connect', () => {
-      console.log('✓ Connected to QuestForge backend');
+      console.log('✓ Connected to Online ForgeQuest Game backend');
       this.isConnected = true;
       this.reconnectAttempts = 0;
 
@@ -117,10 +117,6 @@ class QuestForgeRealtimeClient {
       console.log('💰 Reward reserved:', event);
     });
 
-    this.socket.on('stake:locked', (event: QuestEvent) => {
-      console.log('🔒 Stake locked:', event);
-    });
-
     this.socket.on('reward:released', (event: QuestEvent) => {
       console.log('🔓 Reward released:', event);
     });
@@ -182,7 +178,7 @@ class QuestForgeRealtimeClient {
     const { data } = event;
     console.log(`Quest started by ${data.player}`, {
       questId: data.questId,
-      stake: data.stakeAmount
+      reward: data.rewardAmount
     });
   }
 
@@ -224,7 +220,7 @@ class QuestForgeRealtimeClient {
     if (this.socket) {
       this.socket.disconnect();
       this.isConnected = false;
-      console.log('Disconnected from QuestForge backend');
+      console.log('Disconnected from Online ForgeQuest Game backend');
     }
   }
 
@@ -244,28 +240,28 @@ class QuestForgeRealtimeClient {
 }
 
 // Export singleton instance
-export const questForgeClient = new QuestForgeRealtimeClient();
+export const forgeQuestClient = new ForgeQuestRealtimeClient();
 
 /**
  * React Hook for using the client
  */
 import { useEffect, useState } from 'react';
 
-export function useQuestForgeEvents(userWallet?: string) {
+export function useForgeQuestEvents(userWallet?: string) {
   const [isConnected, setIsConnected] = useState(false);
   const [events, setEvents] = useState<QuestEvent[]>([]);
 
   useEffect(() => {
     // Connect on mount
-    questForgeClient.connect(window.location.origin, userWallet);
+    forgeQuestClient.connect(window.location.origin, userWallet);
 
     // Store events
     const handleEvent = (event: QuestEvent) => {
       setEvents((prev) => [event, ...prev].slice(0, 100)); // Keep last 100
     };
 
-    if (questForgeClient.getSocket()) {
-      const socket = questForgeClient.getSocket()!;
+    if (forgeQuestClient.getSocket()) {
+      const socket = forgeQuestClient.getSocket()!;
       socket.on('quest:created', handleEvent);
       socket.on('proof:submitted', handleEvent);
       socket.on('reward:claimed', handleEvent);
@@ -279,7 +275,7 @@ export function useQuestForgeEvents(userWallet?: string) {
     };
   }, [userWallet]);
 
-  return { isConnected, events, client: questForgeClient };
+  return { isConnected, events, client: forgeQuestClient };
 }
 
 /**
@@ -287,7 +283,7 @@ export function useQuestForgeEvents(userWallet?: string) {
  *
  * function QuestFeed() {
  *   const { userWallet } = useWallet();
- *   const { isConnected, events } = useQuestForgeEvents(userWallet);
+ *   const { isConnected, events } = useForgeQuestEvents(userWallet);
  *
  *   return (
  *     <div>

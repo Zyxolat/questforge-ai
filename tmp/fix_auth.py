@@ -1,6 +1,6 @@
 import re
 
-with open('/home/zyxolat/Desktop/QuestForge AI/backend/src/services/auth.ts', 'r') as f:
+with open('/home/zyxolat/Desktop/ForgeQuest Online/backend/src/services/auth.ts', 'r') as f:
     content = f.read()
 
 # Find the second DELETE followed by INSERT (not the first one which only cleans expired)

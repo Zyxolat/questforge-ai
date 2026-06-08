@@ -2,7 +2,7 @@
 
 ## Session Summary: June 1, 2026
 
-This session conducted a comprehensive MiniPay Hackathon Readiness Audit and implemented critical improvements to QuestForge AI.
+This session conducted a comprehensive MiniPay Hackathon Readiness Audit and implemented critical improvements to ForgeQuest Online.
 
 ---
 
@@ -335,4 +335,4 @@ Features:
 
 ---
 
-**QuestForge AI is production-ready for the MiniPay Hackathon! 🏆**
+**ForgeQuest Online is production-ready for the MiniPay Hackathon! 🏆**

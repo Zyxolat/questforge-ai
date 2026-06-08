@@ -108,9 +108,10 @@ class WorldStateCoordinator {
       this.findLatestSnapshot(),
       prisma.quest.findMany({
         where: {
-          status: { in: ['VERIFIED', 'FAILED', 'ACTIVE'] }
+          status: { in: ['ACCEPTED', 'COMPLETED', 'CLAIMABLE', 'REWARDED'] }
         },
         select: {
+          id: true,
           difficulty: true,
           status: true,
           metadata: true
@@ -120,6 +121,14 @@ class WorldStateCoordinator {
       })
     ]);
 
+    const failureCount = await prisma.questHistory.count({
+      where: {
+        questId: { in: recentQuests.map((quest) => quest.id) },
+        action: 'FAILED'
+      }
+    });
+
+    const recentFailureRate = recentQuests.length > 0 ? failureCount / recentQuests.length : 0;
     const season = this.computeSeason(new Date());
     const eventSummaries = activeEvents.map<WorldStateEventSummary>((event: {
       id: string;
@@ -138,7 +147,7 @@ class WorldStateCoordinator {
       difficulty: event.difficulty,
       description: event.description
     }));
-    const factions = this.computeFactionStates(eventSummaries, recentQuests);
+    const factions = this.computeFactionStates(eventSummaries, recentQuests, recentFailureRate);
     const activeConflicts = this.computeActiveConflicts(eventSummaries, factions);
     const questThemes = this.computeQuestThemes(season.key, eventSummaries, factions);
     const seasonalContent = this.computeSeasonalContent(season.key, eventSummaries);
@@ -306,13 +315,10 @@ class WorldStateCoordinator {
 
   private computeFactionStates(
     activeEvents: WorldStateEventSummary[],
-    recentQuests: Array<{ difficulty: number; status: string; metadata: Prisma.JsonValue }>
+    recentQuests: Array<{ difficulty: number; status: string; metadata: Prisma.JsonValue }>,
+    recentFailureRate: number
   ): WorldFactionState[] {
     const activeConflictBonus = activeEvents.some((event) => event.type.includes('faction')) ? 0.15 : 0;
-    const recentFailureRate =
-      recentQuests.length > 0
-        ? recentQuests.filter((quest) => quest.status === 'FAILED').length / recentQuests.length
-        : 0;
     const recentDifficultyAverage =
       recentQuests.length > 0
         ? recentQuests.reduce((sum, quest) => sum + quest.difficulty, 0) / recentQuests.length

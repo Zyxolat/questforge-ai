@@ -1,23 +1,23 @@
 #!/usr/bin/env node
 
 /**
- * QuestForge AI - Live AI Generation Validation
+ * ForgeQuest Online - Rule-Based Quest Generation Validation
  *
  * Validates:
  * 1. Wallet auth against the real API surface
  * 2. Multiple quest generations through the live generation path
- * 3. Groq source attribution and fallback rate
+ * 3. Rule-based source attribution and deterministic output
  * 4. Narrative diversity across title, lore, mission structure, and NPC dialogue
- * 5. Telemetry visibility (latency + token usage) when Groq is active
+ * 5. Telemetry visibility (latency + token usage)
  *
  * Usage:
  *   npx ts-node scripts/validate-ai-generation.ts
  *
  * Optional env:
- *   API_URL=https://questforge-ai-production.up.railway.app
- *   AI_VALIDATION_TESTS_COUNT=5
- *   AI_VALIDATION_PRIVATE_KEY=0x...
- *   AI_VALIDATION_REQUIRE_REAL_AI=true
+ *   API_URL=https://forgequest-online-production.up.railway.app
+ *   QUEST_VALIDATION_TESTS_COUNT=5
+ *   QUEST_VALIDATION_PRIVATE_KEY=0x...
+ *   QUEST_VALIDATION_REQUIRE_RULE_BASED_SOURCE=true
  */
 
 import { Wallet } from 'ethers';
@@ -68,12 +68,10 @@ type DiagnosticsPayload = {
   orchestration?: {
     questGeneration?: {
       generatedCount?: number;
-      aiGeneratedCount?: number;
-      fallbackGeneratedCount?: number;
-      lastGenerationSource?: string | null;
-      lastFallbackReason?: string | null;
-      lastLatencyMs?: number | null;
-      lastTotalTokens?: number | null;
+      lastTemplateId?: string | null;
+      lastCategory?: string | null;
+      lastDifficulty?: number | null;
+      lastQuestId?: string | null;
     };
   };
   healthy?: boolean;
@@ -178,23 +176,23 @@ async function readDiagnostics(rootUrl: string, apiUrl: string) {
 }
 
 async function main() {
-  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app';
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://forgequest-online-production.up.railway.app';
   const { rootUrl, apiUrl } = resolveUrls(rawBase);
-  const testsCount = Number(process.env.AI_VALIDATION_TESTS_COUNT || '5');
-  const requireRealAI = parseBooleanEnv(process.env.AI_VALIDATION_REQUIRE_REAL_AI, true);
+  const testsCount = Number(process.env.QUEST_VALIDATION_TESTS_COUNT || '5');
+  const requireRuleBasedSource = parseBooleanEnv(process.env.QUEST_VALIDATION_REQUIRE_RULE_BASED_SOURCE, true);
   const chainId = Number(process.env.CELO_CHAIN_ID || process.env.AUTH_CHAIN_ID || '42220');
-  const wallet = process.env.AI_VALIDATION_PRIVATE_KEY
-    ? new Wallet(process.env.AI_VALIDATION_PRIVATE_KEY)
+  const wallet = process.env.QUEST_VALIDATION_PRIVATE_KEY
+    ? new Wallet(process.env.QUEST_VALIDATION_PRIVATE_KEY)
     : Wallet.createRandom();
 
   console.log('\n========================================');
-  console.log('QuestForge AI - Live AI Validation');
+  console.log('ForgeQuest Online - Rule-Based Quest Validation');
   console.log('========================================\n');
   console.log(`Backend root: ${rootUrl}`);
   console.log(`API base:     ${apiUrl}`);
   console.log(`Wallet:       ${wallet.address}`);
   console.log(`Quest runs:   ${testsCount}`);
-  console.log(`Require AI:   ${requireRealAI}\n`);
+  console.log(`Require source: ${requireRuleBasedSource ? 'rule_based' : 'any'}\n`);
 
   const accessToken = await authenticateWallet(apiUrl, wallet, chainId);
   console.log('Authenticated wallet session.\n');
@@ -205,8 +203,8 @@ async function main() {
   const missionStructures = new Set<string>();
   const dialogueLines = new Set<string>();
   const chapterFingerprints = new Set<string>();
-  const aiSources: string[] = [];
-  const fallbackSources: string[] = [];
+  const ruleBasedSources: string[] = [];
+  const nonRuleBasedSources: string[] = [];
   const latencies: number[] = [];
   const tokenTotals: number[] = [];
 
@@ -232,10 +230,10 @@ async function main() {
       );
     }
 
-    if (generation.source === 'groq') {
-      aiSources.push(quest.id);
+    if (generation.source === 'rules') {
+      ruleBasedSources.push(quest.id);
     } else {
-      fallbackSources.push(`${quest.id}:${generation.fallbackReason || 'unknown-fallback'}`);
+      nonRuleBasedSources.push(`${quest.id}:${generation.source || 'unknown-source'}`);
     }
 
     if (typeof generation.latencyMs === 'number') {
@@ -283,32 +281,28 @@ async function main() {
   });
 
   console.log('\nGeneration health:');
-  console.log(`  - Groq-sourced quests: ${aiSources.length}/${testsCount}`);
-  console.log(`  - Fallback quests: ${fallbackSources.length}/${testsCount}`);
+  console.log(`  - Rule-based quests: ${ruleBasedSources.length}/${testsCount}`);
+  console.log(`  - Non-rule-based quests: ${nonRuleBasedSources.length}/${testsCount}`);
   console.log(`  - Avg latency: ${averageLatencyMs ?? 'n/a'} ms`);
   console.log(`  - Avg total tokens: ${averageTokens ?? 'n/a'}`);
 
   if (orchestration) {
     console.log('\nBackend diagnostics:');
     console.log(`  - generatedCount: ${orchestration.generatedCount ?? 'n/a'}`);
-    console.log(`  - aiGeneratedCount: ${orchestration.aiGeneratedCount ?? 'n/a'}`);
-    console.log(`  - fallbackGeneratedCount: ${orchestration.fallbackGeneratedCount ?? 'n/a'}`);
-    console.log(`  - lastGenerationSource: ${orchestration.lastGenerationSource ?? 'n/a'}`);
-    console.log(`  - lastLatencyMs: ${orchestration.lastLatencyMs ?? 'n/a'}`);
-    console.log(`  - lastTotalTokens: ${orchestration.lastTotalTokens ?? 'n/a'}`);
-    if (orchestration.lastFallbackReason) {
-      console.log(`  - lastFallbackReason: ${orchestration.lastFallbackReason}`);
-    }
+    console.log(`  - lastTemplateId: ${orchestration.lastTemplateId ?? 'n/a'}`);
+    console.log(`  - lastCategory: ${orchestration.lastCategory ?? 'n/a'}`);
+    console.log(`  - lastDifficulty: ${orchestration.lastDifficulty ?? 'n/a'}`);
+    console.log(`  - lastQuestId: ${orchestration.lastQuestId ?? 'n/a'}`);
   }
 
   const failedChecks: string[] = [];
 
-  if (requireRealAI && aiSources.length !== testsCount) {
-    failedChecks.push(`Expected ${testsCount}/${testsCount} quests from Groq, got ${aiSources.length}`);
+  if (requireRuleBasedSource && ruleBasedSources.length !== testsCount) {
+    failedChecks.push(`Expected ${testsCount}/${testsCount} quests from rule-based source, got ${ruleBasedSources.length}`);
   }
 
-  if (fallbackSources.length > 0) {
-    failedChecks.push(`Fallback was triggered ${fallbackSources.length} time(s): ${fallbackSources.join(', ')}`);
+  if (nonRuleBasedSources.length > 0) {
+    failedChecks.push(`Non-rule-based source was triggered ${nonRuleBasedSources.length} time(s): ${nonRuleBasedSources.join(', ')}`);
   }
 
   const insufficientVariety = varietyChecks.filter((check) => check.value < Math.max(2, Math.ceil(testsCount * 0.6)));
@@ -319,23 +313,19 @@ async function main() {
   }
 
   if (!averageLatencyMs || !averageTokens) {
-    failedChecks.push('Groq telemetry was not exposed for generated quests');
-  }
-
-  if (orchestration && typeof orchestration.fallbackGeneratedCount === 'number' && orchestration.fallbackGeneratedCount > 0) {
-    failedChecks.push(`Backend diagnostics still report fallbackGeneratedCount=${orchestration.fallbackGeneratedCount}`);
+    failedChecks.push('Generation telemetry was not exposed for generated quests');
   }
 
   if (failedChecks.length > 0) {
-    console.log('\nAI validation failed:');
+    console.log('\nRule-based validation failed:');
     failedChecks.forEach((failure) => console.log(`  - ${failure}`));
     process.exit(1);
   }
 
-  console.log('\nAI validation passed.');
+  console.log('\nRule-based validation passed.');
 }
 
 main().catch((error) => {
-  console.error('Fatal AI validation error:', error);
+  console.error('Fatal rule-based validation error:', error);
   process.exit(1);
 });

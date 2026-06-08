@@ -8,16 +8,16 @@ export default function LoadingScreen() {
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full border border-glowyellow/30 bg-glowyellow/10">
             <div className="h-10 w-10 animate-pulse rounded-full bg-glowyellow/50 blur-md" />
           </div>
-          <p className="text-xs uppercase tracking-[0.35em] text-softyellow">Live AI Forge</p>
+          <p className="text-xs uppercase tracking-[0.35em] text-softyellow">Online ForgeQuest Game</p>
           <div data-questforge-heading="true" className="text-3xl font-semibold text-white">
             Forging your next onchain chapter
           </div>
           <p className="mx-auto max-w-md text-sm text-slate-300">
-            QuestForge is loading wallet state, syncing the realm, and preparing a cinematic AI quest reveal.
+            Online ForgeQuest Game is loading wallet state, syncing the realm, and preparing the next rule-based quest.
           </p>
           <div className="mx-auto grid max-w-md grid-cols-3 gap-3 pt-3 text-left text-[11px] uppercase tracking-[0.18em] text-slate-400">
             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">Wallet Auth</div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">AI Narrative</div>
+            <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">Rules Engine</div>
             <div className="rounded-2xl border border-white/10 bg-white/5 px-3 py-3">Celo Sync</div>
           </div>
         </div>

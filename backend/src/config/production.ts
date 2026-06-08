@@ -1,8 +1,7 @@
 import { env } from './env';
 import { prisma } from '../services/chain';
 import { contracts } from '../services/contracts';
-import { aiGroqClient } from '../services/aiGroqClient';
-import { aiQuestGenerationEngine } from '../services/aiQuestGenerationEngine';
+import { ruleBasedQuestEngine } from '../services/ruleBasedQuestEngine';
 import { worldStateCoordinator } from '../services/worldStateCoordinator';
 import { productionEventIngestor } from '../services/productionEventIngestor';
 import { productionEventQueue } from '../services/productionEventQueue';
@@ -42,7 +41,6 @@ async function withTimeout<T>(label: string, fn: () => Promise<T>, timeoutMs: nu
 export async function performHealthCheck(startup?: StartupSnapshot) {
   const heapUsage = process.memoryUsage();
   const heapUtilization = heapUsage.heapTotal > 0 ? heapUsage.heapUsed / heapUsage.heapTotal : 0;
-  const groqHealth = aiGroqClient.getHealthStatus();
   const ingestorStatus = productionEventIngestor.getStatus();
   const queueStats = await withTimeout(
     'queue health check',
@@ -51,7 +49,6 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
   ).catch(() => null);
   const workerStatus = productionEventWorker.getStatus();
   const eventStreamingRequired = env.NODE_ENV === 'production' || env.ENABLE_EVENT_STREAM;
-  const groqRequired = false;
   const recentSyncWindowMs = Math.max(env.EVENT_POLL_INTERVAL_MS * 3, 120000);
   const lastSuccessfulSyncAt = ingestorStatus.lastSuccessfulSyncAt
     ? Date.parse(ingestorStatus.lastSuccessfulSyncAt)
@@ -74,13 +71,6 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
       ok: false,
       required: eventStreamingRequired,
       message: eventStreamingRequired ? 'World state not initialized yet' : 'Event streaming disabled'
-    },
-    groq: {
-      ok: groqRequired ? groqHealth.validated : true,
-      required: groqRequired,
-      message: groqHealth.validated
-        ? `Groq model ${groqHealth.model} validated`
-        : groqHealth.lastError || (groqRequired ? 'Groq has not been validated yet' : 'Fallback mode allowed')
     },
     verifier: {
       ok: Boolean(contracts.verifierSigner),
@@ -190,11 +180,10 @@ export async function performHealthCheck(startup?: StartupSnapshot) {
       worker: workerStatus,
       ingestor: ingestorStatus,
       websocket: productionWebSocketBroadcaster.getStats(),
-      groq: groqHealth,
       rpcLastSuccessfulEndpoint: rpcFailoverManager.getLastSuccessfulEndpoint()
     },
     orchestration: {
-      questGeneration: aiQuestGenerationEngine.getDiagnostics(),
+      questGeneration: ruleBasedQuestEngine.getDiagnostics(),
       worldState: worldDiagnostics
     },
     startup: startup ?? null,

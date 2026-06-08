@@ -20,9 +20,9 @@ export interface DecodedEvent {
 
 const QUEST_MANAGER_ABI = [
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)',
-  'event QuestStarted(uint256 indexed questId,address indexed creator,address indexed player,uint256 stakeAmount)',
   'event QuestSubmitted(uint256 indexed questId,address indexed player,bytes32 proofHash)',
-  'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
+  'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)',
+  'event QuestRewarded(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
 ];
 
 const REWARD_NFT_ABI = [
@@ -31,10 +31,9 @@ const REWARD_NFT_ABI = [
 
 const TREASURY_ABI = [
   'event RewardReserved(uint256 indexed questId,address indexed creator,uint256 amount,uint256 totalReservedRewards)',
-  'event StakeLocked(uint256 indexed questId,address indexed player,uint256 amount,uint256 totalLockedStakes)',
-  'event RewardReleased(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 stakeAmount,uint256 totalPayout)',
-  'event RewardPaid(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 stakeAmount,uint256 totalPayout)',
-  'event RewardRefunded(uint256 indexed questId,address indexed recipient,uint256 rewardAmount,uint256 stakeAmount,bytes32 reason)'
+  'event RewardReleased(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 totalPayout)',
+  'event RewardPaid(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 totalPayout)',
+  'event RewardRefunded(uint256 indexed questId,address indexed recipient,uint256 rewardAmount,bytes32 reason)'
 ];
 
 // Create interfaces
@@ -82,31 +81,6 @@ const decoders: Record<string, EventDecoderFunc> = {
         };
       }
 
-      if (parsed.name === 'QuestStarted') {
-        chainQuestId = event[0];
-        creatorWallet = String(event[1]);
-        playerWallet = String(event[2]);
-        return {
-          eventType: 'quest_started',
-          eventName: 'QuestStarted',
-          blockNumber: BigInt(log.blockNumber),
-          transactionHash: log.transactionHash,
-          logIndex: Number(log.index ?? 0),
-          blockTimestamp,
-          contractAddress: log.address,
-          fromAddress: playerWallet,
-          data: {
-            questId: chainQuestId,
-            creator: creatorWallet,
-            player: playerWallet,
-            stakeAmount: event[3]
-          },
-          chainQuestId,
-          playerWallet,
-          creatorWallet
-        };
-      }
-
       if (parsed.name === 'QuestSubmitted') {
         chainQuestId = event[0];
         playerWallet = String(event[1]);
@@ -133,7 +107,7 @@ const decoders: Record<string, EventDecoderFunc> = {
         chainQuestId = event[0];
         playerWallet = String(event[1]);
         return {
-          eventType: 'reward_claimed',
+          eventType: 'quest_verified',
           eventName: 'QuestVerified',
           blockNumber: BigInt(log.blockNumber),
           transactionHash: log.transactionHash,
@@ -148,6 +122,30 @@ const decoders: Record<string, EventDecoderFunc> = {
             rewardAmount: event[3],
             xpReward: event[4],
             proofHash: event[5]
+          },
+          chainQuestId,
+          playerWallet
+        };
+      }
+
+      if (parsed.name === 'QuestRewarded') {
+        chainQuestId = event[0];
+        playerWallet = String(event[1]);
+        return {
+          eventType: 'quest_rewarded',
+          eventName: 'QuestRewarded',
+          blockNumber: BigInt(log.blockNumber),
+          transactionHash: log.transactionHash,
+          logIndex: Number(log.index ?? 0),
+          blockTimestamp,
+          contractAddress: log.address,
+          fromAddress: playerWallet,
+          data: {
+            questId: chainQuestId,
+            player: playerWallet,
+            rewardAmount: event[2],
+            xpReward: event[3],
+            proofHash: event[4]
           },
           chainQuestId,
           playerWallet
@@ -236,29 +234,6 @@ const decoders: Record<string, EventDecoderFunc> = {
         };
       }
 
-      if (parsed.name === 'StakeLocked') {
-        chainQuestId = event[0];
-        playerWallet = String(event[1]);
-        return {
-          eventType: 'stake_locked',
-          eventName: 'StakeLocked',
-          blockNumber: BigInt(log.blockNumber),
-          transactionHash: log.transactionHash,
-          logIndex: Number(log.index ?? 0),
-          blockTimestamp,
-          contractAddress: log.address,
-          fromAddress: playerWallet,
-          data: {
-            questId: chainQuestId,
-            player: playerWallet,
-            amount: event[2],
-            totalLockedStakes: event[3]
-          },
-          chainQuestId,
-          playerWallet
-        };
-      }
-
       if (parsed.name === 'RewardReleased') {
         chainQuestId = event[0];
         playerWallet = String(event[1]);
@@ -275,8 +250,7 @@ const decoders: Record<string, EventDecoderFunc> = {
             questId: chainQuestId,
             player: playerWallet,
             rewardAmount: event[2],
-            stakeAmount: event[3],
-            totalPayout: event[4]
+            totalPayout: event[3]
           },
           chainQuestId,
           playerWallet
@@ -299,8 +273,7 @@ const decoders: Record<string, EventDecoderFunc> = {
             questId: chainQuestId,
             player: playerWallet,
             rewardAmount: event[2],
-            stakeAmount: event[3],
-            totalPayout: event[4]
+            totalPayout: event[3]
           },
           chainQuestId,
           playerWallet
@@ -323,8 +296,7 @@ const decoders: Record<string, EventDecoderFunc> = {
             questId: chainQuestId,
             recipient,
             rewardAmount: event[2],
-            stakeAmount: event[3],
-            reason: event[4]
+            reason: event[3]
           },
           chainQuestId
         };

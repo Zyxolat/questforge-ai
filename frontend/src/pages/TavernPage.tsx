@@ -55,7 +55,7 @@ export default function TavernPage() {
       <div className="rounded-[2rem] border border-white/10 bg-white/5 p-8 shadow-strong backdrop-blur-xl">
         <div className="mb-8">
           <p className="text-sm uppercase tracking-[0.35em] text-glowyellow">Forge Tavern</p>
-          <h1 className="mt-3 text-4xl font-black text-white">AI NPC Interaction</h1>
+          <h1 className="mt-3 text-4xl font-black text-white">NPC Interaction</h1>
           <p className="mt-3 text-slate-300">Chat with storytellers, blacksmiths, and guild masters to unlock lore, hints, and dynamic missions.</p>
           <p className="mt-4 text-sm text-softyellow">
             Feed hydration: {hydrationStatus} • socket: {connectionStatus}

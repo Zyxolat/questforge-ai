@@ -55,7 +55,7 @@ type DeploymentAddresses = {
 
 const AUTH_CHAIN_ID = Number(process.env.AUTH_CHAIN_ID || '42220');
 const RPC_CHAIN_ID = Number(process.env.RPC_CHAIN_ID || '42220');
-const API_ROOT = (process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app').replace(/\/$/, '');
+const API_ROOT = (process.env.API_URL || process.env.BACKEND_URL || 'https://forgequest-online-production.up.railway.app').replace(/\/$/, '');
 const API_BASE = API_ROOT.endsWith('/api') ? API_ROOT : `${API_ROOT}/api`;
 const RPC_URL = process.env.VALIDATION_RPC_URL || process.env.CELO_RPC_URL || 'https://forno.celo.org';
 const DEPLOYMENT_FILE = process.env.DEPLOYMENT_ADDRESSES_FILE?.trim()
@@ -63,7 +63,7 @@ const DEPLOYMENT_FILE = process.env.DEPLOYMENT_ADDRESSES_FILE?.trim()
   : path.join(process.cwd(), 'contracts/deployments/celo-addresses.json');
 
 const FORGE_QUEST_MANAGER_ABI = [
-  'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
+  'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
   'function startQuest(uint256 questId) external payable',
   'function submitQuest(uint256 questId,string proofUri) external',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
@@ -161,10 +161,12 @@ async function createStartedQuest(
   const createTx = await contract.createQuest(
     quest.title,
     quest.metadataUri,
-    ethers.parseEther(String(quest.stakeAmount)),
     ethers.parseEther(String(quest.rewardAmount)),
     BigInt(quest.xpReward),
-    BigInt(quest.durationSeconds)
+    BigInt(quest.durationSeconds),
+    {
+      value: ethers.parseEther('0.001')
+    }
   );
   const createReceipt = await createTx.wait();
   const parsedCreatedLog = createReceipt?.logs
@@ -188,21 +190,9 @@ async function createStartedQuest(
     creationTxHash: createTx.hash
   });
 
-  const onchainQuest = await contract.quests(BigInt(chainQuestId));
-  const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
-  const startTx = await contract.startQuest(BigInt(chainQuestId), { value: stakeValue });
-  await startTx.wait();
-
-  await client.post('/quests/register-start', {
-    questId: quest.id,
-    chainQuestId,
-    startTxHash: startTx.hash
-  });
-
   return {
     quest,
-    chainQuestId,
-    startTxHash: startTx.hash
+    chainQuestId
   };
 }
 

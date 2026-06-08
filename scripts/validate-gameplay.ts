@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Wallet-Driven Gameplay Validation
+ * ForgeQuest Online - Wallet-Driven Gameplay Validation
  *
  * Validates the current production gameplay path:
  * 1. Backend health
@@ -7,7 +7,7 @@
  * 3. Quest generation API
  * 4. Realtime/bootstrap visibility
  * 5. Contract deployment configuration
- * 6. Optional onchain create -> register -> start -> register-start flow
+ * 6. Optional onchain create -> register -> immediate active quest -> proof submission flow
  *
  * Usage:
  *   npx ts-node scripts/validate-gameplay.ts
@@ -114,7 +114,7 @@ const RPC_CHAIN_ID = Number(process.env.RPC_CHAIN_ID || process.env.VALIDATION_C
 const DEFAULT_RPC_URL = process.env.VALIDATION_RPC_URL || process.env.CELO_RPC_URL || 'https://forno.celo.org';
 
 const FORGE_QUEST_MANAGER_ABI = [
-  'function createQuest(string title,string metadataUri,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external',
+  'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
   'function startQuest(uint256 questId) external payable',
   'function submitQuest(uint256 questId,string proofUri) external',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
@@ -299,14 +299,14 @@ async function authenticateWallet(client: AxiosInstance, wallet: SignableWallet)
 }
 
 async function main() {
-  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://questforge-ai-production.up.railway.app';
+  const rawBase = process.env.API_URL || process.env.BACKEND_URL || 'https://forgequest-online-production.up.railway.app';
   const { rootUrl, apiUrl } = resolveUrls(rawBase);
   const deployment = loadDeploymentAddresses();
   const validationPrivateKey = process.env.VALIDATION_PRIVATE_KEY?.trim();
   const authWallet = validationPrivateKey ? new ethers.Wallet(validationPrivateKey) : ethers.Wallet.createRandom();
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║      QuestForge AI - Wallet Gameplay Validation           ║');
+  console.log('║      ForgeQuest Online - Wallet Gameplay Validation           ║');
   console.log('║            Current Celo Mainnet Production Flow           ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
@@ -405,7 +405,7 @@ async function main() {
       recordTest(
         'Wallet Tx Flow',
         'pending',
-        'Set VALIDATION_PRIVATE_KEY to execute createQuest -> register-onchain -> startQuest -> register-start against the live deployment.'
+        'Set VALIDATION_PRIVATE_KEY to execute createQuest -> register-onchain -> active quest -> proof submission against the live deployment.'
       );
     } else {
       const baseSigner = new ethers.Wallet(validationPrivateKey, provider);
@@ -425,10 +425,12 @@ async function main() {
       const createTx = await contract.createQuest(
         generatedQuest.title,
         generatedQuest.metadataUri,
-        ethers.parseEther(String(generatedQuest.stakeAmount)),
         ethers.parseEther(String(generatedQuest.rewardAmount)),
         BigInt(generatedQuest.xpReward),
-        BigInt(generatedQuest.durationSeconds)
+        BigInt(generatedQuest.durationSeconds),
+        {
+          value: ethers.parseEther('0.001')
+        }
       );
       const createReceipt = await createTx.wait();
 
@@ -464,32 +466,13 @@ async function main() {
         }
       );
 
-      startedAt = Date.now();
-      const onchainQuest = await contract.quests(BigInt(chainQuestId));
-      const stakeValue = BigInt(onchainQuest.stakeAmount.toString());
-      const gasEstimate = await contract.startQuest.estimateGas(BigInt(chainQuestId), { value: stakeValue });
-      const startTx = await contract.startQuest(BigInt(chainQuestId), {
-        value: stakeValue,
-        gasLimit: gasEstimate + gasEstimate / 5n
-      });
-      await startTx.wait();
-
-      await authenticatedClient.post('/quests/register-start', {
-        questId: generatedQuest.id,
-        chainQuestId,
-        startTxHash: startTx.hash
-      });
-
       recordTest(
         'Onchain Quest Start',
         'pass',
-        `Started and registered chain quest ${chainQuestId}`,
+        `Quest ${chainQuestId} is active immediately after creation`,
         Date.now() - startedAt,
         {
-          txHash: startTx.hash,
-          chainQuestId,
-          stakeValueWei: stakeValue.toString(),
-          gasEstimate: gasEstimate.toString()
+          chainQuestId
         }
       );
 
@@ -573,8 +556,16 @@ async function main() {
         }
       );
     }
-  } catch (error) {
-    recordTest('Gameplay Validation', 'fail', error instanceof Error ? error.message : String(error));
+  } catch (error: unknown) {
+    let message = error instanceof Error ? error.message : String(error);
+    if (typeof error === 'object' && error !== null && 'response' in error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const axiosError = error as any;
+      if (axiosError.response) {
+        message += ` | response=${JSON.stringify(axiosError.response.data)}`;
+      }
+    }
+    recordTest('Gameplay Validation', 'fail', message);
   }
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');

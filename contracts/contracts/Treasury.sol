@@ -14,23 +14,19 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
     enum QuestFundState {
         None,
         Reserved,
-        Locked,
         Paid,
         Refunded
     }
 
     struct QuestFund {
         uint256 reservedReward;
-        uint256 lockedStake;
         address player;
         QuestFundState state;
     }
 
     uint256 public rewardReserveCap = 0.5 ether;
-    uint256 public stakeLockCap = 10 ether;
-    uint256 public payoutCap = 10.5 ether;
+    uint256 public payoutCap = 0.5 ether;
     uint256 public totalReservedRewards;
-    uint256 public totalLockedStakes;
 
     mapping(uint256 => QuestFund) public questFunds;
 
@@ -41,31 +37,22 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         uint256 amount,
         uint256 totalReservedRewards
     );
-    event StakeLocked(
-        uint256 indexed questId,
-        address indexed player,
-        uint256 amount,
-        uint256 totalLockedStakes
-    );
     event RewardReleased(
         uint256 indexed questId,
         address indexed player,
         uint256 rewardAmount,
-        uint256 stakeAmount,
         uint256 totalPayout
     );
     event RewardPaid(
         uint256 indexed questId,
         address indexed player,
         uint256 rewardAmount,
-        uint256 stakeAmount,
         uint256 totalPayout
     );
     event RewardRefunded(
         uint256 indexed questId,
         address indexed recipient,
         uint256 rewardAmount,
-        uint256 stakeAmount,
         bytes32 reason
     );
     event EmergencyWithdrawal(
@@ -75,7 +62,7 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         uint256 amount
     );
     event CircuitBreakerTriggered(address indexed operator, string reason);
-    event PayoutCapsUpdated(uint256 rewardReserveCap, uint256 stakeLockCap, uint256 payoutCap);
+    event PayoutCapsUpdated(uint256 rewardReserveCap, uint256 payoutCap);
 
     constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
@@ -98,6 +85,7 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         require(_hasRewardLiquidity(rewardAmount), "Insufficient treasury liquidity");
 
         questFund.reservedReward = rewardAmount;
+        questFund.player = creator;
         questFund.state = QuestFundState.Reserved;
 
         totalReservedRewards += rewardAmount;
@@ -105,93 +93,52 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
         emit RewardReserved(questId, creator, rewardAmount, totalReservedRewards);
     }
 
-    function lockStake(
-        uint256 questId,
-        address player,
-        uint256 expectedStakeAmount
-    ) external payable onlyRole(QUEST_MANAGER_ROLE) whenNotPaused {
-        require(questId != 0, "Invalid quest");
-        require(player != address(0), "Invalid player");
-        require(expectedStakeAmount > 0, "Invalid stake amount");
-        require(expectedStakeAmount <= stakeLockCap, "Stake lock cap exceeded");
-        require(msg.value == expectedStakeAmount, "Incorrect stake amount");
-
-        QuestFund storage questFund = questFunds[questId];
-        require(questFund.state == QuestFundState.Reserved, "Quest not reservable");
-        require(questFund.player == address(0), "Stake already locked");
-
-        questFund.player = player;
-        questFund.lockedStake = expectedStakeAmount;
-        questFund.state = QuestFundState.Locked;
-
-        totalLockedStakes += expectedStakeAmount;
-
-        emit StakeLocked(questId, player, expectedStakeAmount, totalLockedStakes);
-    }
-
     function settleQuestPayout(
         uint256 questId,
         address payable player,
-        uint256 expectedRewardAmount,
-        uint256 expectedStakeAmount
+        uint256 expectedRewardAmount
     ) external onlyRole(QUEST_MANAGER_ROLE) whenNotPaused nonReentrant returns (uint256 totalPayout) {
         require(player != address(0), "Invalid player");
 
         QuestFund storage questFund = questFunds[questId];
-        require(questFund.state == QuestFundState.Locked, "Quest not payable");
+        require(questFund.state == QuestFundState.Reserved, "Quest not payable");
         require(questFund.player == player, "Player mismatch");
         require(questFund.reservedReward == expectedRewardAmount, "Reward mismatch");
-        require(questFund.lockedStake == expectedStakeAmount, "Stake mismatch");
 
-        totalPayout = expectedRewardAmount + expectedStakeAmount;
+        totalPayout = expectedRewardAmount;
         require(totalPayout <= payoutCap, "Payout cap exceeded");
         require(isSolvent(), "Treasury insolvent");
 
         totalReservedRewards -= expectedRewardAmount;
-        totalLockedStakes -= expectedStakeAmount;
+        questFund.reservedReward = 0;
+        questFund.player = address(0);
         questFund.state = QuestFundState.Paid;
 
-        emit RewardReleased(questId, player, expectedRewardAmount, expectedStakeAmount, totalPayout);
+        emit RewardReleased(questId, player, expectedRewardAmount, totalPayout);
 
         _safeNativeTransfer(player, totalPayout, "Payout transfer failed");
 
-        emit RewardPaid(questId, player, expectedRewardAmount, expectedStakeAmount, totalPayout);
+        emit RewardPaid(questId, player, expectedRewardAmount, totalPayout);
     }
 
     function refundQuest(
         uint256 questId,
         address payable recipient,
         uint256 expectedRewardAmount,
-        uint256 expectedStakeAmount,
         bytes32 reason
     ) external onlyRole(QUEST_MANAGER_ROLE) nonReentrant returns (uint256 refundedStakeAmount) {
         QuestFund storage questFund = questFunds[questId];
-        require(
-            questFund.state == QuestFundState.Reserved || questFund.state == QuestFundState.Locked,
-            "Quest not refundable"
-        );
+        require(questFund.state == QuestFundState.Reserved, "Quest not refundable");
         require(questFund.reservedReward == expectedRewardAmount, "Reward mismatch");
-        require(questFund.lockedStake == expectedStakeAmount, "Stake mismatch");
-
-        if (expectedStakeAmount > 0) {
-            require(recipient != address(0), "Invalid recipient");
-            require(questFund.player == recipient, "Player mismatch");
-        }
 
         totalReservedRewards -= expectedRewardAmount;
-
-        if (expectedStakeAmount > 0) {
-            totalLockedStakes -= expectedStakeAmount;
-        }
-
+        questFund.reservedReward = 0;
+        questFund.player = address(0);
         questFund.state = QuestFundState.Refunded;
-        refundedStakeAmount = expectedStakeAmount;
 
-        if (refundedStakeAmount > 0) {
-            _safeNativeTransfer(recipient, refundedStakeAmount, "Refund transfer failed");
-        }
+        refundedStakeAmount = 0;
 
-        emit RewardRefunded(questId, recipient, expectedRewardAmount, expectedStakeAmount, reason);
+        emit RewardRefunded(questId, recipient, expectedRewardAmount, reason);
     }
 
     function fundNativeRewardPool() external payable onlyOwner whenNotPaused {
@@ -201,18 +148,15 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
 
     function setPayoutCaps(
         uint256 newRewardReserveCap,
-        uint256 newStakeLockCap,
         uint256 newPayoutCap
     ) external onlyOwner {
         require(newRewardReserveCap > 0, "Invalid reward cap");
-        require(newStakeLockCap > 0, "Invalid stake cap");
-        require(newPayoutCap >= newRewardReserveCap + newStakeLockCap, "Invalid payout cap");
+        require(newPayoutCap >= newRewardReserveCap, "Invalid payout cap");
 
         rewardReserveCap = newRewardReserveCap;
-        stakeLockCap = newStakeLockCap;
         payoutCap = newPayoutCap;
 
-        emit PayoutCapsUpdated(newRewardReserveCap, newStakeLockCap, newPayoutCap);
+        emit PayoutCapsUpdated(newRewardReserveCap, newPayoutCap);
     }
 
     function tripCircuitBreaker(string calldata reason) external onlyRole(GUARDIAN_ROLE) {
@@ -244,7 +188,7 @@ contract Treasury is Ownable, AccessControl, ReentrancyGuard, Pausable {
     }
 
     function obligations() public view returns (uint256) {
-        return totalReservedRewards + totalLockedStakes;
+        return totalReservedRewards;
     }
 
     function isSolvent() public view returns (bool) {

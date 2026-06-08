@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Treasury Validation and Health Check
+ * ForgeQuest Online - Treasury Validation and Health Check
  * 
  * Validates treasury funding, solvency, and operational health.
  * Performs comprehensive checks on:
@@ -302,7 +302,7 @@ async function validateTreasury(): Promise<TreasuryHealth> {
 
 async function main() {
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║        QuestForge AI - Treasury Health Check                ║');
+  console.log('║        ForgeQuest Online - Treasury Health Check                ║');
   console.log('║                 Celo Mainnet Validation                     ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 

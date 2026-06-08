@@ -1,4 +1,4 @@
-# QuestForge AI - Critical Production Fixes Summary
+# ForgeQuest Online - Critical Production Fixes Summary
 
 **Date:** May 24, 2026  
 **Status:** ✅ All Critical Issues Resolved  
@@ -50,7 +50,7 @@ The table `public.WorldEvent` does not exist in the current database.
 #!/bin/bash
 set -e
 
-echo "[ENTRYPOINT] Starting QuestForge AI Backend"
+echo "[ENTRYPOINT] Starting ForgeQuest Online Backend"
 echo "[ENTRYPOINT] Running database migrations..."
 
 npm run prisma:migrate:deploy

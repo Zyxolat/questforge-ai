@@ -26,13 +26,13 @@ import type {
 export interface ForgeQuestManagerInterface extends Interface {
   getFunction(
     nameOrSignature:
+      | "ACCEPTANCE_FEE"
       | "DEFAULT_ADMIN_ROLE"
       | "MAX_QUEST_DURATION"
       | "MAX_SINGLE_REWARD"
-      | "MAX_SINGLE_STAKE"
-      | "MIN_SINGLE_STAKE"
       | "VERIFIER_ROLE"
       | "cancelQuest"
+      | "claimReward"
       | "createQuest"
       | "getRoleAdmin"
       | "grantRole"
@@ -55,7 +55,6 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "rewardNFT"
       | "rewardSystemHealthy"
       | "setTreasury"
-      | "startQuest"
       | "submitQuest"
       | "supportsInterface"
       | "transferOwnership"
@@ -71,9 +70,8 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "CircuitBreakerTriggered"
       | "OwnershipTransferred"
       | "Paused"
-      | "QuestCancelled"
       | "QuestCreated"
-      | "QuestStarted"
+      | "QuestRewarded"
       | "QuestSubmitted"
       | "QuestVerified"
       | "RoleAdminChanged"
@@ -83,6 +81,10 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "Unpaused"
   ): EventFragment;
 
+  encodeFunctionData(
+    functionFragment: "ACCEPTANCE_FEE",
+    values?: undefined
+  ): string;
   encodeFunctionData(
     functionFragment: "DEFAULT_ADMIN_ROLE",
     values?: undefined
@@ -96,14 +98,6 @@ export interface ForgeQuestManagerInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "MAX_SINGLE_STAKE",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
-    functionFragment: "MIN_SINGLE_STAKE",
-    values?: undefined
-  ): string;
-  encodeFunctionData(
     functionFragment: "VERIFIER_ROLE",
     values?: undefined
   ): string;
@@ -112,15 +106,12 @@ export interface ForgeQuestManagerInterface extends Interface {
     values: [BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "claimReward",
+    values: [BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "createQuest",
-    values: [
-      string,
-      string,
-      BigNumberish,
-      BigNumberish,
-      BigNumberish,
-      BigNumberish
-    ]
+    values: [string, string, BigNumberish, BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getRoleAdmin",
@@ -195,10 +186,6 @@ export interface ForgeQuestManagerInterface extends Interface {
     values: [AddressLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "startQuest",
-    values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "submitQuest",
     values: [BigNumberish, string]
   ): string;
@@ -226,6 +213,10 @@ export interface ForgeQuestManagerInterface extends Interface {
   ): string;
 
   decodeFunctionResult(
+    functionFragment: "ACCEPTANCE_FEE",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "DEFAULT_ADMIN_ROLE",
     data: BytesLike
   ): Result;
@@ -238,19 +229,15 @@ export interface ForgeQuestManagerInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "MAX_SINGLE_STAKE",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "MIN_SINGLE_STAKE",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "VERIFIER_ROLE",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "cancelQuest",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "claimReward",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -314,7 +301,6 @@ export interface ForgeQuestManagerInterface extends Interface {
     functionFragment: "setTreasury",
     data: BytesLike
   ): Result;
-  decodeFunctionResult(functionFragment: "startQuest", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "submitQuest",
     data: BytesLike
@@ -380,18 +366,6 @@ export namespace PausedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace QuestCancelledEvent {
-  export type InputTuple = [questId: BigNumberish];
-  export type OutputTuple = [questId: bigint];
-  export interface OutputObject {
-    questId: bigint;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
 export namespace QuestCreatedEvent {
   export type InputTuple = [
     questId: BigNumberish,
@@ -420,24 +394,27 @@ export namespace QuestCreatedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace QuestStartedEvent {
+export namespace QuestRewardedEvent {
   export type InputTuple = [
     questId: BigNumberish,
-    creator: AddressLike,
     player: AddressLike,
-    stakeAmount: BigNumberish
+    rewardAmount: BigNumberish,
+    xpReward: BigNumberish,
+    proofHash: BytesLike
   ];
   export type OutputTuple = [
     questId: bigint,
-    creator: string,
     player: string,
-    stakeAmount: bigint
+    rewardAmount: bigint,
+    xpReward: bigint,
+    proofHash: string
   ];
   export interface OutputObject {
     questId: bigint;
-    creator: string;
     player: string;
-    stakeAmount: bigint;
+    rewardAmount: bigint;
+    xpReward: bigint;
+    proofHash: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -627,15 +604,13 @@ export interface ForgeQuestManager extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  ACCEPTANCE_FEE: TypedContractMethod<[], [bigint], "view">;
+
   DEFAULT_ADMIN_ROLE: TypedContractMethod<[], [string], "view">;
 
   MAX_QUEST_DURATION: TypedContractMethod<[], [bigint], "view">;
 
   MAX_SINGLE_REWARD: TypedContractMethod<[], [bigint], "view">;
-
-  MAX_SINGLE_STAKE: TypedContractMethod<[], [bigint], "view">;
-
-  MIN_SINGLE_STAKE: TypedContractMethod<[], [bigint], "view">;
 
   VERIFIER_ROLE: TypedContractMethod<[], [string], "view">;
 
@@ -645,17 +620,22 @@ export interface ForgeQuestManager extends BaseContract {
     "nonpayable"
   >;
 
+  claimReward: TypedContractMethod<
+    [questId: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
+
   createQuest: TypedContractMethod<
     [
       title: string,
       metadataUri: string,
-      stakeAmount: BigNumberish,
       rewardAmount: BigNumberish,
       xpReward: BigNumberish,
       durationSeconds: BigNumberish
     ],
     [void],
-    "nonpayable"
+    "payable"
   >;
 
   getRoleAdmin: TypedContractMethod<[role: BytesLike], [string], "view">;
@@ -772,8 +752,6 @@ export interface ForgeQuestManager extends BaseContract {
     "nonpayable"
   >;
 
-  startQuest: TypedContractMethod<[questId: BigNumberish], [void], "payable">;
-
   submitQuest: TypedContractMethod<
     [questId: BigNumberish, proofUri: string],
     [void],
@@ -811,6 +789,9 @@ export interface ForgeQuestManager extends BaseContract {
   ): T;
 
   getFunction(
+    nameOrSignature: "ACCEPTANCE_FEE"
+  ): TypedContractMethod<[], [bigint], "view">;
+  getFunction(
     nameOrSignature: "DEFAULT_ADMIN_ROLE"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
@@ -820,16 +801,13 @@ export interface ForgeQuestManager extends BaseContract {
     nameOrSignature: "MAX_SINGLE_REWARD"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
-    nameOrSignature: "MAX_SINGLE_STAKE"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "MIN_SINGLE_STAKE"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
     nameOrSignature: "VERIFIER_ROLE"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "cancelQuest"
+  ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "claimReward"
   ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "createQuest"
@@ -837,13 +815,12 @@ export interface ForgeQuestManager extends BaseContract {
     [
       title: string,
       metadataUri: string,
-      stakeAmount: BigNumberish,
       rewardAmount: BigNumberish,
       xpReward: BigNumberish,
       durationSeconds: BigNumberish
     ],
     [void],
-    "nonpayable"
+    "payable"
   >;
   getFunction(
     nameOrSignature: "getRoleAdmin"
@@ -969,9 +946,6 @@ export interface ForgeQuestManager extends BaseContract {
     nameOrSignature: "setTreasury"
   ): TypedContractMethod<[newTreasury: AddressLike], [void], "nonpayable">;
   getFunction(
-    nameOrSignature: "startQuest"
-  ): TypedContractMethod<[questId: BigNumberish], [void], "payable">;
-  getFunction(
     nameOrSignature: "submitQuest"
   ): TypedContractMethod<
     [questId: BigNumberish, proofUri: string],
@@ -1026,13 +1000,6 @@ export interface ForgeQuestManager extends BaseContract {
     PausedEvent.OutputObject
   >;
   getEvent(
-    key: "QuestCancelled"
-  ): TypedContractEvent<
-    QuestCancelledEvent.InputTuple,
-    QuestCancelledEvent.OutputTuple,
-    QuestCancelledEvent.OutputObject
-  >;
-  getEvent(
     key: "QuestCreated"
   ): TypedContractEvent<
     QuestCreatedEvent.InputTuple,
@@ -1040,11 +1007,11 @@ export interface ForgeQuestManager extends BaseContract {
     QuestCreatedEvent.OutputObject
   >;
   getEvent(
-    key: "QuestStarted"
+    key: "QuestRewarded"
   ): TypedContractEvent<
-    QuestStartedEvent.InputTuple,
-    QuestStartedEvent.OutputTuple,
-    QuestStartedEvent.OutputObject
+    QuestRewardedEvent.InputTuple,
+    QuestRewardedEvent.OutputTuple,
+    QuestRewardedEvent.OutputObject
   >;
   getEvent(
     key: "QuestSubmitted"
@@ -1130,17 +1097,6 @@ export interface ForgeQuestManager extends BaseContract {
       PausedEvent.OutputObject
     >;
 
-    "QuestCancelled(uint256)": TypedContractEvent<
-      QuestCancelledEvent.InputTuple,
-      QuestCancelledEvent.OutputTuple,
-      QuestCancelledEvent.OutputObject
-    >;
-    QuestCancelled: TypedContractEvent<
-      QuestCancelledEvent.InputTuple,
-      QuestCancelledEvent.OutputTuple,
-      QuestCancelledEvent.OutputObject
-    >;
-
     "QuestCreated(uint256,address,string,uint256,uint256)": TypedContractEvent<
       QuestCreatedEvent.InputTuple,
       QuestCreatedEvent.OutputTuple,
@@ -1152,15 +1108,15 @@ export interface ForgeQuestManager extends BaseContract {
       QuestCreatedEvent.OutputObject
     >;
 
-    "QuestStarted(uint256,address,address,uint256)": TypedContractEvent<
-      QuestStartedEvent.InputTuple,
-      QuestStartedEvent.OutputTuple,
-      QuestStartedEvent.OutputObject
+    "QuestRewarded(uint256,address,uint256,uint256,bytes32)": TypedContractEvent<
+      QuestRewardedEvent.InputTuple,
+      QuestRewardedEvent.OutputTuple,
+      QuestRewardedEvent.OutputObject
     >;
-    QuestStarted: TypedContractEvent<
-      QuestStartedEvent.InputTuple,
-      QuestStartedEvent.OutputTuple,
-      QuestStartedEvent.OutputObject
+    QuestRewarded: TypedContractEvent<
+      QuestRewardedEvent.InputTuple,
+      QuestRewardedEvent.OutputTuple,
+      QuestRewardedEvent.OutputObject
     >;
 
     "QuestSubmitted(uint256,address,bytes32)": TypedContractEvent<

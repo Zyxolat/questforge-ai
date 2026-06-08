@@ -17,29 +17,6 @@ const _abi = [
         type: "uint256",
       },
       {
-        internalType: "address",
-        name: "player",
-        type: "address",
-      },
-      {
-        internalType: "uint256",
-        name: "expectedStakeAmount",
-        type: "uint256",
-      },
-    ],
-    name: "lockStake",
-    outputs: [],
-    stateMutability: "payable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        internalType: "uint256",
-        name: "questId",
-        type: "uint256",
-      },
-      {
         internalType: "address payable",
         name: "recipient",
         type: "address",
@@ -50,24 +27,13 @@ const _abi = [
         type: "uint256",
       },
       {
-        internalType: "uint256",
-        name: "expectedStakeAmount",
-        type: "uint256",
-      },
-      {
         internalType: "bytes32",
         name: "reason",
         type: "bytes32",
       },
     ],
     name: "refundQuest",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "refundedStakeAmount",
-        type: "uint256",
-      },
-    ],
+    outputs: [],
     stateMutability: "nonpayable",
     type: "function",
   },
@@ -109,11 +75,6 @@ const _abi = [
       {
         internalType: "uint256",
         name: "expectedRewardAmount",
-        type: "uint256",
-      },
-      {
-        internalType: "uint256",
-        name: "expectedStakeAmount",
         type: "uint256",
       },
     ],

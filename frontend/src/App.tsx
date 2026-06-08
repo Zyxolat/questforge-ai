@@ -31,8 +31,8 @@ function App() {
       <header className="sticky top-0 z-40 border-b border-white/10 bg-navy/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-6 py-4">
           <div>
-            <div className="text-sm uppercase tracking-[0.35em] text-softyellow">QuestForge AI</div>
-            <div className="text-2xl font-extrabold tracking-tight text-white">Forge Your Destiny Onchain</div>
+            <div className="text-sm uppercase tracking-[0.35em] text-softyellow">Online ForgeQuest Game</div>
+            <div className="text-2xl font-extrabold tracking-tight text-white">Browse. Complete. Claim. Repeat.</div>
             {status === 'connected' ? (
               <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-300">
                 <span>Feed {hydrationStatus}</span>

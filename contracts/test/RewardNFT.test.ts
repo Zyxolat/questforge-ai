@@ -37,7 +37,7 @@ describe('RewardNFT', function () {
 
   describe('Deployment', function () {
     it('should have correct name and symbol', async function () {
-      expect(await rewardNFT.name()).to.equal('QuestForge Reward');
+      expect(await rewardNFT.name()).to.equal('ForgeQuest Reward');
       expect(await rewardNFT.symbol()).to.equal('QFR');
     });
 

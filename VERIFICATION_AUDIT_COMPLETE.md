@@ -30,7 +30,7 @@
 
 ### 1. OnboardingFlow.tsx
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/frontend/src/components/OnboardingFlow.tsx`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/frontend/src/components/OnboardingFlow.tsx`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -67,7 +67,7 @@ interface OnboardingFlowProps {
 
 ### 2. DailyLoginBonus.tsx
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/frontend/src/components/DailyLoginBonus.tsx`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/frontend/src/components/DailyLoginBonus.tsx`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -102,7 +102,7 @@ const handleClaimBonus = async () => {
 
 ### 3. HomePage.tsx Enhancements
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/frontend/src/pages/HomePage.tsx`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/frontend/src/pages/HomePage.tsx`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -183,7 +183,7 @@ function SampleQuestCard({ quest }: { quest: (typeof SAMPLE_QUESTS)[0] }) {
 
 ### 4. CommandCenter.tsx Integration
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/frontend/src/pages/CommandCenter.tsx`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/frontend/src/pages/CommandCenter.tsx`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -230,7 +230,7 @@ const [onboardingOpen, setOnboardingOpen] = useState(() => {
 
 ### 5. Backend Route Registration
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/backend/src/routes/api.ts`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/backend/src/routes/api.ts`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -259,7 +259,7 @@ apiRouter.post("/player/daily-bonus", requireAuth, claimDailyLoginBonus);
 
 ### 6. Backend Controller Logic
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/backend/src/controllers/userController.ts`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/backend/src/controllers/userController.ts`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 
@@ -399,7 +399,7 @@ export async function claimDailyLoginBonus(req: Request, res: Response) {
 
 ### 7. Frontend API Client
 
-**File Path:** `/home/zyxolat/Desktop/QuestForge AI/frontend/src/lib/api.ts`
+**File Path:** `/home/zyxolat/Desktop/ForgeQuest Online/frontend/src/lib/api.ts`
 
 **Status:** ✅ EXISTS AND FUNCTIONAL
 

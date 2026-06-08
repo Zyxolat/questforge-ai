@@ -1,4 +1,4 @@
-# QuestForge AI Production Upgrade - Implementation Plan
+# ForgeQuest Online Production Upgrade - Implementation Plan
 
 **Status**: Starting Full Implementation  
 **Date**: May 13, 2026  
@@ -538,7 +538,7 @@ async function distributeClanReward(
 **Implementation Location**: `frontend/src/lib/socket.ts`
 
 ```typescript
-export class QuestForgeSocket {
+export class ForgeQuestSocket {
   private socket: Socket;
 
   constructor() {

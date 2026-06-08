@@ -1,8 +1,8 @@
-# QuestForge AI - Railway Production Deployment Guide (FIXED)
+# ForgeQuest Online - Railway Production Deployment Guide (FIXED)
 
 **Status:** ✅ CRITICAL ISSUES RESOLVED - May 24, 2026
 
-This document provides the complete deployment procedure to get QuestForge AI running on Railway with Celo Mainnet and MiniPay support.
+This document provides the complete deployment procedure to get ForgeQuest Online running on Railway with Celo Mainnet and MiniPay support.
 
 ## Critical Issues Fixed
 
@@ -39,7 +39,7 @@ This document provides the complete deployment procedure to get QuestForge AI ru
 ### Step 1: Create Railway Project & Plugins
 
 1. Go to [railway.app](https://railway.app)
-2. Create new project: "QuestForge AI"
+2. Create new project: "ForgeQuest Online"
 3. Add plugins:
    - **PostgreSQL** (latest)
    - **Redis** (optional, for event streaming)
@@ -142,7 +142,7 @@ REDIS_URL=${{Redis.REDIS_URL}}  # Only if using Redis and ENABLE_EVENT_STREAM=tr
 Railway Dashboard → Service → Logs
 
 Expected successful output:
-[ENTRYPOINT] Starting QuestForge AI Backend
+[ENTRYPOINT] Starting ForgeQuest Online Backend
 [ENTRYPOINT] Running database migrations...
 [STARTUP] Service initializing: database
 [STARTUP] Service ready: database

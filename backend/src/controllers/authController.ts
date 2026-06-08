@@ -148,7 +148,7 @@ export async function createAuthNonce(req: Request, res: Response) {
     });
     return sendAuthError(
       res,
-      new AuthError('AUTH_CHAIN_MISMATCH', `QuestForge AI supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
+      new AuthError('AUTH_CHAIN_MISMATCH', `Online ForgeQuest Game supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
     );
   }
 
@@ -220,7 +220,7 @@ export async function verifyAuthSignature(req: Request, res: Response) {
     });
     return sendAuthError(
       res,
-      new AuthError('AUTH_CHAIN_MISMATCH', `QuestForge AI supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
+      new AuthError('AUTH_CHAIN_MISMATCH', `Online ForgeQuest Game supports only Celo Mainnet (${env.CELO_CHAIN_ID})`, 401, 'sign')
     );
   }
 

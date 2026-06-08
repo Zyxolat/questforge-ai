@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# QuestForge AI - Railway Deployment Validation Script
+# ForgeQuest Online - Railway Deployment Validation Script
 # This script validates that all required components are properly deployed and configured
 
 set -e
 
 echo "╔════════════════════════════════════════════════════════════╗"
-echo "║    QuestForge AI - Railway Production Deployment Check     ║"
+echo "║   ForgeQuest Online - Railway Production Deployment Check  ║"
 echo "║                    May 24, 2026                            ║"
 echo "╚════════════════════════════════════════════════════════════╝"
 echo ""
@@ -154,17 +154,7 @@ else
   check_warn "Event streaming disabled (ENABLE_EVENT_STREAM not set to true)"
 fi
 
-if [ -n "$GROQ_API_KEY" ]; then
-  check_pass "Groq API configured"
-else
-  check_warn "Groq API not configured (deterministic fallback quests enabled)"
-fi
-
-if [ -n "$GROQ_MODEL" ]; then
-  check_pass "Groq model configured: $GROQ_MODEL"
-else
-  check_warn "GROQ_MODEL not set (backend defaults to llama-3.3-70b-versatile)"
-fi
+check_pass "Rule-based quest engine enabled"
 
 echo ""
 echo "5. BLOCKCHAIN CONFIGURATION"

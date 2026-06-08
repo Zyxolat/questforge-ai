@@ -20,7 +20,7 @@
 **Script:**
 
 ```
-"This is QuestForge AI - a mobile-first game built for MiniPay on Celo.
+"This is ForgeQuest Online - a mobile-first game built for MiniPay on Celo.
 
 Notice three things:
 1. You see actual quests BEFORE connecting wallet
@@ -232,7 +232,7 @@ This creates healthy competition."
 
 ### MiniPay Alignment
 
-> "QuestForge is built FOR MiniPay, not ported FROM web.
+> "ForgeQuest is built FOR MiniPay, not ported FROM web.
 > Everything is optimized for mobile - UI, UX, transactions, costs.
 > MiniPay users will feel at home here."
 
@@ -354,7 +354,7 @@ This creates healthy competition."
 ## ✨ CLOSING STATEMENT
 
 ```
-"QuestForge AI represents the future of mobile gaming on blockchain.
+"ForgeQuest Online represents the future of mobile gaming on blockchain.
 
 We took three opportunities:
 1. MiniPay - fastest mobile wallet
@@ -394,7 +394,7 @@ Thank you."
 
 ## 🎊 GOOD LUCK!
 
-You've got this! QuestForge AI is production-ready, MiniPay-optimized, and ready to impress the judges.
+You've got this! ForgeQuest Online is production-ready, MiniPay-optimized, and ready to impress the judges.
 
 **Final Score: 87/100** ✅ **READY TO WIN**
 

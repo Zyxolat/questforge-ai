@@ -1,4 +1,4 @@
-# 🎮 QuestForge AI - Feature Verification Checklist
+# 🎮 ForgeQuest Online - Feature Verification Checklist
 
 **Last Updated:** May 25, 2026  
 **Status:** ✅ ALL SYSTEMS GO

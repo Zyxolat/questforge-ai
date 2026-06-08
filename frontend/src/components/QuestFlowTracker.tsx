@@ -18,12 +18,12 @@ interface QuestFlowTrackerProps {
 export default function QuestFlowTracker({ currentStep, statusLabel }: QuestFlowTrackerProps) {
   const steps: { step: QuestFlowStep; label: string; description: string }[] = [
     { step: 'PENDING', label: 'Connected', description: 'Wallet ready' },
-    { step: 'GENERATED', label: 'Quest Generated', description: 'AI forged the mission' },
-    { step: 'ACCEPTED', label: 'Quest Accepted', description: 'Adventure locked in' },
-    { step: 'ACTIVE', label: 'In Progress', description: 'Complete objectives' },
-    { step: 'SUBMITTED', label: 'Proof Submitted', description: 'Awaiting verification' },
+    { step: 'GENERATED', label: 'Quest Generated', description: 'Rules engine selected the mission' },
+    { step: 'ACCEPTED', label: 'Quest Ready', description: 'Quest is queued for completion' },
+    { step: 'ACTIVE', label: 'In Progress', description: 'Complete the objective' },
+    { step: 'SUBMITTED', label: 'Completion Submitted', description: 'Awaiting verification' },
     { step: 'VERIFIED', label: 'Verified', description: 'Backend confirmed success' },
-    { step: 'REWARDED', label: 'Rewarded', description: 'Celebration sequence live' },
+    { step: 'REWARDED', label: 'Rewarded', description: 'Reward settlement complete' },
     { step: 'COMPLETED', label: 'Completed', description: 'Ready for the next quest' }
   ];
 

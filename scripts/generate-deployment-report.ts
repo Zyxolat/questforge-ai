@@ -192,7 +192,7 @@ function buildReport(addresses: DeploymentAddresses): DeploymentReport {
 }
 
 function buildMarkdown(report: DeploymentReport) {
-  return `# QuestForge AI Deployment Report
+  return `# ForgeQuest Online Deployment Report
 
 Generated: ${report.generatedAt}
 Environment: ${report.environment}

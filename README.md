@@ -1,20 +1,20 @@
-# QuestForge AI
+# ForgeQuest Online
 
-QuestForge AI is a premium onchain fantasy RPG platform built for hackathons. Players connect real wallets, accept AI-generated quests, complete blockchain missions, stake tokens, and earn NFT rewards on Celo.
+ForgeQuest Online is a rule-based onchain quest and reward platform built on Celo. Players connect real wallets, browse quests, complete blockchain missions, submit proof, and earn XP, CELO, and NFT rewards.
 
 ## Project Structure
 
 - `frontend/` — Vite + React + TypeScript + Tailwind + Framer Motion.
-- `backend/` — Express + TypeScript + Prisma + PostgreSQL + Groq AI integration.
+- `backend/` — Express + TypeScript + Prisma + PostgreSQL backend with a deterministic rule-based quest engine.
 - `contracts/` — Solidity smart contracts with Hardhat, ERC20 reward support, ERC721 achievement NFTs, treasury, reputation, and quest management.
 
 ## Highlights
 
 - WalletConnect and MiniPay wallet support
 - Celo chain detection and network switching
-- AI-powered Quest Forge Master agent
+- Rule-based quest templates and deterministic generation
 - Dynamic daily quests, NPC dialogue, and lore
-- Multi-transaction quest lifecycle
+- Single-transaction proof flow with backend verification
 - Onchain staking, reward payout, NFT minting
 - Leaderboards, achievements, player progression
 - Glassmorphism UI with cinematic yellow / navy theme
@@ -69,9 +69,9 @@ Set the deployed contract addresses in `frontend/.env` before launching the app.
 ## Deployment
 
 - Frontend: Vercel deploy from `frontend/`, use `VITE_API_BASE_URL` in environment variables.
-- Backend: Railway deploy from `backend/`, use `DATABASE_URL`, `GROQ_API_KEY`, `GROQ_MODEL`, `PRIVATE_KEY`, and contract address variables from `.env.example`.
+- Backend: Railway deploy from `backend/`, use `DATABASE_URL`, `PRIVATE_KEY`, and contract address variables from `.env.example`.
 - Contracts: deploy with Hardhat and set `FORGE_QUEST_MANAGER_ADDRESS`, `REWARD_NFT_ADDRESS`, `REPUTATION_ADDRESS`, and `TREASURY_ADDRESS` in backend and frontend env files.
 
 ## Notes
 
-The application is designed to maximize meaningful onchain activity while delivering an immersive AI-driven fantasy adventure experience.
+The application is designed to maximize meaningful onchain activity while delivering a fast, auditable, rule-based quest experience.

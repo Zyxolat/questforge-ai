@@ -1,8 +1,8 @@
-# QuestForge AI - Railway Deployment Checklist
+# ForgeQuest Online - Railway Deployment Checklist
 
 **Status:** ✅ Ready for Deployment (May 24, 2026)
 
-Use this checklist to deploy QuestForge AI to Railway with all fixes applied.
+Use this checklist to deploy ForgeQuest Online to Railway with all fixes applied.
 
 ---
 
@@ -38,7 +38,7 @@ Use this checklist to deploy QuestForge AI to Railway with all fixes applied.
 ### 1. Create Railway Project
 
 - [ ] Go to https://railway.app
-- [ ] Create new project: "QuestForge AI"
+- [ ] Create new project: "ForgeQuest Online"
 - [ ] Accept Railway terms
 
 ### 2. Add PostgreSQL Plugin
@@ -62,7 +62,7 @@ Use this checklist to deploy QuestForge AI to Railway with all fixes applied.
 
 - [ ] Click "New Service"
 - [ ] Select "GitHub" → Connect your repo
-- [ ] Select repository containing QuestForge AI
+- [ ] Select repository containing ForgeQuest Online
 - [ ] Root directory: (leave empty)
 - [ ] GitHub branch: (your deployment branch, usually `main`)
 - [ ] Name: `questforge-backend`

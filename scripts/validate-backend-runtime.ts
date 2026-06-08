@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Backend Runtime Validation
+ * ForgeQuest Online - Backend Runtime Validation
  *
  * Starts the built backend in a child process, validates startup behavior,
  * verifies the exported health endpoints, and confirms graceful shutdown.
@@ -348,7 +348,7 @@ async function main() {
   const baseUrl = `http://127.0.0.1:${port}`;
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║          QuestForge AI - Backend Runtime Validation         ║');
+  console.log('║          ForgeQuest Online - Backend Runtime Validation         ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
   console.log(`Using env file: ${envFile ?? 'process environment only'}`);
   console.log(`Testing backend on: ${baseUrl}\n`);

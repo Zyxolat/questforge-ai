@@ -271,7 +271,7 @@ export function validateRewardBounds(stakeAmount: number, rewardAmount: number):
 } {
   const errors: string[] = [];
 
-  if (stakeAmount < QUEST_CONFIG.MIN_SINGLE_STAKE_CELO) {
+  if (stakeAmount < QUEST_CONFIG.MIN_SINGLE_STAKE_CELO && stakeAmount !== 0) {
     errors.push(`Stake below minimum: ${QUEST_CONFIG.MIN_SINGLE_STAKE_CELO} CELO`);
   }
 

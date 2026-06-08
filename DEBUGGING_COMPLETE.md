@@ -1,4 +1,4 @@
-# QuestForge AI - Generate Quest Flow Debugging - COMPLETE
+# ForgeQuest Online - Generate Quest Flow Debugging - COMPLETE
 
 ## Executive Summary
 

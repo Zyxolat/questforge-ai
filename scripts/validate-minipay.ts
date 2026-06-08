@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - MiniPay Flow Validation
+ * ForgeQuest Online - MiniPay Flow Validation
  * 
  * Validates MiniPay mobile wallet integration:
  * 1. Wallet connection on mobile
@@ -44,7 +44,7 @@ function recordTest(name: string, status: 'pass' | 'fail' | 'pending' | 'manual'
 
 async function validateMiniPay() {
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║       QuestForge AI - MiniPay Flow Validation               ║');
+  console.log('║       ForgeQuest Online - MiniPay Flow Validation               ║');
   console.log('║           Celo Mobile Wallet Integration Test              ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 
@@ -128,7 +128,7 @@ async function validateMiniPay() {
     '1. Connect wallet in MiniPay dapp',
     '2. Close MiniPay completely',
     '3. Reopen MiniPay',
-    '4. Navigate back to QuestForge',
+    '4. Navigate back to ForgeQuest',
     '5. Verify session is still active',
     '6. Wallet address should still be connected',
   ]);

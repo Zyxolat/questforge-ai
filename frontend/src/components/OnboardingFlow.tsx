@@ -10,18 +10,18 @@ interface OnboardingFlowProps {
 
 const steps: Record<OnboardingStep, { title: string; description: string; icon: string; tips: string[] }> = {
   welcome: {
-    title: '⚔️ Welcome to the Forge',
-    description: 'You\'re about to enter a realm where AI-generated quests become real blockchain activity. Every decision matters, and every victory is rewarded on-chain.',
+    title: '⚔️ Welcome to Online ForgeQuest Game',
+    description: 'You\'re about to enter a realm where rule-based quests become real blockchain activity. Every decision matters, and every victory is rewarded on-chain.',
     icon: '🏰',
     tips: [
-      'Quests are uniquely generated just for you',
+      'Quests come from deterministic templates',
       'Complete challenges to earn real CELO tokens',
       'Collect NFTs and climb the leaderboard'
     ]
   },
   minipay: {
     title: '📱 MiniPay Magic',
-    description: 'QuestForge is optimized for MiniPay on Celo. Your wallet is already connected and secure. Every transaction is instant and low-cost.',
+    description: 'Online ForgeQuest Game is optimized for MiniPay on Celo. Your wallet is already connected and secure. Every transaction is instant and low-cost.',
     icon: '🔐',
     tips: [
       'MiniPay handles all wallet security',
@@ -31,10 +31,9 @@ const steps: Record<OnboardingStep, { title: string; description: string; icon: 
   },
   howitworks: {
     title: '🎮 How Quests Work',
-    description: 'Accept a quest → Stake CELO → Complete the challenge → Submit proof → Earn rewards. It\'s that simple, and it all settles on-chain.',
+    description: 'Generate a rule-based quest → Complete the challenge → Submit proof → Earn rewards. It\'s that simple, and it all settles on-chain.',
     icon: '✨',
     tips: [
-      'Stake: Lock tokens to secure your quest',
       'Prove: Submit transaction hash or URL as proof',
       'Earn: Verified proofs = instant CELO + NFT rewards'
     ]
@@ -51,7 +50,7 @@ const steps: Record<OnboardingStep, { title: string; description: string; icon: 
   },
   complete: {
     title: '🚀 Ready to Begin?',
-    description: 'You\'re all set to forge your destiny. Generate your first quest, stake your tokens, and prove yourself worthy of the Forge.',
+    description: 'You\'re all set to forge your destiny. Generate your first quest, complete it, and prove yourself worthy of the game.',
     icon: '💎',
     tips: [
       'Your first quest is ready to generate',
@@ -77,7 +76,7 @@ export default function OnboardingFlow({ open, onComplete }: OnboardingFlowProps
 
   const handleNext = () => {
     if (isLast) {
-      localStorage.setItem('questforge:onboarding-complete', 'true');
+      localStorage.setItem('online-forgequest:onboarding-complete', 'true');
       onComplete();
     } else {
       setCurrentStepIndex(prev => prev + 1);
@@ -85,7 +84,7 @@ export default function OnboardingFlow({ open, onComplete }: OnboardingFlowProps
   };
 
   const handleSkip = () => {
-    localStorage.setItem('questforge:onboarding-complete', 'true');
+    localStorage.setItem('online-forgequest:onboarding-complete', 'true');
     onComplete();
   };
 

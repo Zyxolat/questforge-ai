@@ -1,8 +1,8 @@
-# QuestForge AI - Production Deployment Execution Checklist
+# ForgeQuest Online - Production Deployment Execution Checklist
 
 **Date:** May 10, 2026  
 **Version:** 1.0.0  
-**Status:** Ready for Live Deployment  
+**Status:** Ready for Live Deployment
 
 ---
 
@@ -11,6 +11,7 @@
 ### ✅ PHASE 1: Deployment Pipeline Ready (COMPLETE)
 
 Deliverables:
+
 - [x] 8 validation scripts created
 - [x] Production deployment orchestrator ready
 - [x] Comprehensive documentation written
@@ -19,6 +20,7 @@ Deliverables:
 - [x] TypeScript build system configured
 
 Key Files:
+
 - ✅ `scripts/validate-production-env.ts` (305 lines)
 - ✅ `scripts/deploy-production.ts` (280 lines)
 - ✅ `scripts/validate-treasury.ts` (345 lines)
@@ -29,6 +31,7 @@ Key Files:
 - ✅ `scripts/generate-deployment-report.ts` (310 lines)
 
 Documentation:
+
 - ✅ `PRODUCTION_DEPLOYMENT_GUIDE.md` (450+ lines)
 - ✅ `DEPLOYMENT_PLAYBOOK.md` (350+ lines)
 - ✅ `.env.production.example` (100+ lines)
@@ -40,6 +43,7 @@ Documentation:
 **Status:** READY - Execute when authorized
 
 **Prerequisites:**
+
 - [ ] Deployer wallet funded with 2-5 CELO
 - [ ] `.env.production` configured with PRIVATE_KEY
 - [ ] RPC_URL_MAINNET set to https://forno.celo.org
@@ -47,6 +51,7 @@ Documentation:
 - [ ] All tests passing
 
 **Execution Steps:**
+
 ```bash
 # 1. Validate environment
 npm run validate:production-env
@@ -68,6 +73,7 @@ nano .env.production
 ```
 
 **Success Criteria:**
+
 - ✓ All 4 contracts deployed
 - ✓ Contract addresses verified on Celoscan
 - ✓ All roles configured
@@ -82,11 +88,13 @@ nano .env.production
 **Status:** READY - Execute after Phase 2
 
 **Prerequisites:**
+
 - [ ] Contracts deployed
 - [ ] Contract addresses saved
 - [ ] Admin wallet has 100+ CELO
 
 **Execution Steps:**
+
 ```bash
 # 1. Transfer CELO to Treasury
 celocli transfer:dollars \
@@ -104,6 +112,7 @@ npm run validate:treasury
 ```
 
 **Success Criteria:**
+
 - ✓ Treasury balance ≥ 100 CELO
 - ✓ Solvency: SOLVENT
 - ✓ Payout capability: CAPABLE
@@ -118,12 +127,14 @@ npm run validate:treasury
 **Status:** READY - Execute after backend startup
 
 **Prerequisites:**
+
 - [ ] Backend service running
 - [ ] Frontend deployed
 - [ ] Player can connect wallet
 - [ ] Treasury funded
 
 **Execution Steps:**
+
 ```bash
 # 1. Start backend service
 cd backend && npm start
@@ -149,6 +160,7 @@ npm run validate:gameplay
 ```
 
 **Success Criteria:**
+
 - ✓ Wallet connects successfully
 - ✓ Quest generation works
 - ✓ Transaction #1 (start) confirms
@@ -168,11 +180,13 @@ npm run validate:gameplay
 **Status:** READY - Execute after Phase 4
 
 **Prerequisites:**
+
 - [ ] Full gameplay validated
 - [ ] No errors in logs
 - [ ] All services running smoothly
 
 **Execution Steps:**
+
 ```bash
 # Run security tests
 npm run validate:security
@@ -188,6 +202,7 @@ npm run validate:security
 ```
 
 **Success Criteria:**
+
 - ✓ Replay attacks blocked
 - ✓ Double rewards prevented
 - ✓ Invalid proofs rejected
@@ -205,11 +220,13 @@ npm run validate:security
 **Status:** READY - Execute with test device
 
 **Prerequisites:**
+
 - [ ] MiniPay app installed on test device
 - [ ] Test wallet with CELO balance
 - [ ] App accessible via HTTPS
 
 **Execution Steps:**
+
 ```bash
 # Generate MiniPay validation checklist
 npm run validate:minipay
@@ -228,6 +245,7 @@ npm run validate:minipay
 ```
 
 **Success Criteria:**
+
 - ✓ MiniPay wallet connects
 - ✓ Transactions confirm properly
 - ✓ Network switching works
@@ -246,11 +264,13 @@ npm run validate:minipay
 **Status:** READY - Execute after Phase 4
 
 **Prerequisites:**
+
 - [ ] Contracts deployed on Celo
 - [ ] Transactions confirmed
 - [ ] Celoscan accessible
 
 **Execution Steps:**
+
 ```bash
 # Verify on Celoscan
 # 1. Contract addresses visible
@@ -267,6 +287,7 @@ npm run validate:minipay
 ```
 
 **Success Criteria:**
+
 - ✓ All 4 contracts appear on Celoscan
 - ✓ Contract verification status correct
 - ✓ Transaction links work from UI
@@ -283,11 +304,13 @@ npm run validate:minipay
 **Status:** READY - Execute after Phase 4
 
 **Prerequisites:**
+
 - [ ] Backend running for 15+ minutes
 - [ ] Active players generating data
 - [ ] No critical errors in logs
 
 **Execution Steps:**
+
 ```bash
 # Run backend runtime validation
 npm run validate:backend-runtime
@@ -305,6 +328,7 @@ npm run validate:backend-runtime
 ```
 
 **Success Criteria:**
+
 - ✓ Health endpoint responds < 500ms
 - ✓ Database pool healthy
 - ✓ Indexer catching up with blocks
@@ -323,11 +347,13 @@ npm run validate:backend-runtime
 **Status:** READY - Execute after all validations
 
 **Prerequisites:**
+
 - [ ] All previous phases complete
 - [ ] All tests passing
 - [ ] All validations successful
 
 **Execution Steps:**
+
 ```bash
 # Generate comprehensive report
 npm run generate:report
@@ -344,6 +370,7 @@ npm run generate:report
 ```
 
 **Report Should Show:**
+
 - ✓ Status: SUCCESS
 - ✓ Readiness Score: 93+/100
 - ✓ All validations PASSED
@@ -362,6 +389,7 @@ npm run generate:report
 **Status:** READY - Execute when all phases complete
 
 **Prerequisites:**
+
 - [ ] All 9 phases complete
 - [ ] All tests passing
 - [ ] All validations successful
@@ -371,6 +399,7 @@ npm run generate:report
 **Final Checklist:**
 
 Deployment Preparation:
+
 - [ ] .env.production configured correctly
 - [ ] Contract addresses saved securely
 - [ ] Treasury funded verified
@@ -381,6 +410,7 @@ Deployment Preparation:
 - [ ] DNS records pointing correctly
 
 Team & Communication:
+
 - [ ] Deployment leader designated
 - [ ] On-call support available
 - [ ] Team notified of deployment
@@ -389,6 +419,7 @@ Team & Communication:
 - [ ] Rollback procedure documented
 
 Post-Deployment Monitoring:
+
 - [ ] Dashboards configured
 - [ ] Logs being collected
 - [ ] Alerts configured
@@ -396,6 +427,7 @@ Post-Deployment Monitoring:
 - [ ] User feedback channel open
 
 **Go-Live Steps:**
+
 1. Verify all systems ready
 2. Announce deployment to team
 3. Monitor closely for 24 hours
@@ -410,19 +442,19 @@ Post-Deployment Monitoring:
 
 ## 📈 Overall Timeline
 
-| Phase | Component | Time | Status |
-|-------|-----------|------|--------|
-| 1 | Pipeline Setup | 1h | ✅ COMPLETE |
-| 2 | Contract Deployment | 15m | ⏳ READY |
-| 3 | Treasury Funding | 5m | ⏳ READY |
-| 4 | Gameplay Validation | 20m | ⏳ READY |
-| 5 | Security Testing | 10m | ⏳ READY |
-| 6 | MiniPay Testing | 45m | ⏳ READY |
-| 7 | Explorer Validation | 5m | ⏳ READY |
-| 8 | Runtime Health | 5m | ⏳ READY |
-| 9 | Generate Report | 2m | ⏳ READY |
-| 10 | Final Sign-Off | 60m | ⏳ READY |
-| **TOTAL** | **Full Deployment** | **2.5-3 hours** | **READY** |
+| Phase     | Component           | Time            | Status      |
+| --------- | ------------------- | --------------- | ----------- |
+| 1         | Pipeline Setup      | 1h              | ✅ COMPLETE |
+| 2         | Contract Deployment | 15m             | ⏳ READY    |
+| 3         | Treasury Funding    | 5m              | ⏳ READY    |
+| 4         | Gameplay Validation | 20m             | ⏳ READY    |
+| 5         | Security Testing    | 10m             | ⏳ READY    |
+| 6         | MiniPay Testing     | 45m             | ⏳ READY    |
+| 7         | Explorer Validation | 5m              | ⏳ READY    |
+| 8         | Runtime Health      | 5m              | ⏳ READY    |
+| 9         | Generate Report     | 2m              | ⏳ READY    |
+| 10        | Final Sign-Off      | 60m             | ⏳ READY    |
+| **TOTAL** | **Full Deployment** | **2.5-3 hours** | **READY**   |
 
 ---
 
@@ -441,13 +473,13 @@ Post-Deployment Monitoring:
 
 ## 📞 Escalation Procedures
 
-| Issue | Action | Contact |
-|-------|--------|---------|
-| Contracts won't deploy | Review errors, check RPC | Smart Contract Lead |
-| Treasury issues | Verify funding, check contract | Treasury Admin |
-| Gameplay failures | Check backend logs, test manually | Backend Lead |
-| Security alerts | Pause system, investigate | Security Lead |
-| Performance issues | Check database, monitor RPC | DevOps Lead |
+| Issue                  | Action                            | Contact             |
+| ---------------------- | --------------------------------- | ------------------- |
+| Contracts won't deploy | Review errors, check RPC          | Smart Contract Lead |
+| Treasury issues        | Verify funding, check contract    | Treasury Admin      |
+| Gameplay failures      | Check backend logs, test manually | Backend Lead        |
+| Security alerts        | Pause system, investigate         | Security Lead       |
+| Performance issues     | Check database, monitor RPC       | DevOps Lead         |
 
 ---
 

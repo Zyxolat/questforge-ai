@@ -351,7 +351,7 @@ async function insertProofSubmission(input: {
 
 async function updateQuestSubmissionState(input: {
   questId: string;
-  status: 'SUBMITTED' | 'VERIFIED' | 'FAILED';
+  status: 'COMPLETED' | 'CLAIMABLE' | 'ACCEPTED';
   proofTx?: string;
   proofTxHash?: string;
   verificationTx?: string;
@@ -390,7 +390,8 @@ async function syncSuccessfulSettlementArtifacts(input: {
   const rewardMinted = findReceiptEvents(contracts.rewardNFT, input.receipt, 'RewardMinted').at(-1);
 
   const rewardAmount = Number(ethers.formatEther(input.onchainQuest.rewardAmount));
-  const stakeAmount = Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const acceptanceFee = Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const stakeAmount = acceptanceFee;
   const totalAmount = rewardAmount + stakeAmount;
 
   logger.info('Proof verification reward settlement started', {
@@ -402,6 +403,7 @@ async function syncSuccessfulSettlementArtifacts(input: {
     rewardPaid: Boolean(rewardPaid),
     rewardMinted: Boolean(rewardMinted),
     rewardAmount,
+    acceptanceFee,
     stakeAmount,
     totalAmount
   });
@@ -568,9 +570,8 @@ async function syncFailedSettlementArtifacts(input: {
   const rewardAmount = refundEvent
     ? Number(ethers.formatEther(refundEvent.args?.rewardAmount ?? 0n))
     : Number(ethers.formatEther(input.onchainQuest.rewardAmount));
-  const stakeAmount = refundEvent
-    ? Number(ethers.formatEther(refundEvent.args?.stakeAmount ?? 0n))
-    : Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const acceptanceFee = Number(ethers.formatEther(input.onchainQuest.stakeAmount));
+  const stakeAmount = acceptanceFee;
   const totalAmount = rewardAmount + stakeAmount;
 
   if (input.verificationTxHash) {
@@ -787,7 +788,7 @@ async function markProofResult(input: {
 
   await updateQuestSubmissionState({
     questId: input.questId,
-    status: input.result === 'VERIFIED' ? 'VERIFIED' : 'FAILED',
+    status: input.result === 'VERIFIED' ? 'CLAIMABLE' : 'ACCEPTED',
     verificationTx: input.verificationTx,
     completedAt: input.result === 'VERIFIED' ? now : null,
     failedAt: input.result === 'REJECTED' ? now : null
@@ -1168,7 +1169,7 @@ export async function queueProofVerification(params: {
 
   await updateQuestSubmissionState({
     questId: params.questId,
-    status: 'SUBMITTED',
+    status: 'COMPLETED',
     proofTx: canonicalProofTxHash,
     proofTxHash: normalizedSubmissionTxHash
   });

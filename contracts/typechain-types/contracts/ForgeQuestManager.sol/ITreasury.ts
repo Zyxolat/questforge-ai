@@ -23,20 +23,12 @@ import type {
 
 export interface ITreasuryInterface extends Interface {
   getFunction(
-    nameOrSignature:
-      | "lockStake"
-      | "refundQuest"
-      | "reserveReward"
-      | "settleQuestPayout"
+    nameOrSignature: "refundQuest" | "reserveReward" | "settleQuestPayout"
   ): FunctionFragment;
 
   encodeFunctionData(
-    functionFragment: "lockStake",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "refundQuest",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
+    values: [BigNumberish, AddressLike, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "reserveReward",
@@ -44,10 +36,9 @@ export interface ITreasuryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "settleQuestPayout",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish]
+    values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
 
-  decodeFunctionResult(functionFragment: "lockStake", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "refundQuest",
     data: BytesLike
@@ -105,25 +96,14 @@ export interface ITreasury extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
-  lockStake: TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-
   refundQuest: TypedContractMethod<
     [
       questId: BigNumberish,
       recipient: AddressLike,
       expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
       reason: BytesLike
     ],
-    [bigint],
+    [void],
     "nonpayable"
   >;
 
@@ -137,8 +117,7 @@ export interface ITreasury extends BaseContract {
     [
       questId: BigNumberish,
       player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
+      expectedRewardAmount: BigNumberish
     ],
     [bigint],
     "nonpayable"
@@ -149,27 +128,15 @@ export interface ITreasury extends BaseContract {
   ): T;
 
   getFunction(
-    nameOrSignature: "lockStake"
-  ): TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-  getFunction(
     nameOrSignature: "refundQuest"
   ): TypedContractMethod<
     [
       questId: BigNumberish,
       recipient: AddressLike,
       expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
       reason: BytesLike
     ],
-    [bigint],
+    [void],
     "nonpayable"
   >;
   getFunction(
@@ -185,8 +152,7 @@ export interface ITreasury extends BaseContract {
     [
       questId: BigNumberish,
       player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
+      expectedRewardAmount: BigNumberish
     ],
     [bigint],
     "nonpayable"

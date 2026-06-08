@@ -23,7 +23,6 @@ describe('Smart Contracts Integration', function () {
   let verifier: SignerWithAddress;
   let player: SignerWithAddress;
 
-  const stake = ethers.parseEther('0.01');
   const reward = ethers.parseEther('0.03');
 
   beforeEach(async function () {
@@ -66,10 +65,12 @@ describe('Smart Contracts Integration', function () {
     await forgeQuestManager.connect(player).createQuest(
       'Test Quest',
       'ipfs://metadata',
-      stake,
       reward,
       1000,
-      86400
+      86400,
+      {
+        value: ethers.parseEther('0.001')
+      }
     );
   }
 
@@ -80,16 +81,15 @@ describe('Smart Contracts Integration', function () {
     const questFund = await treasury.questFunds(1);
 
     expect(quest.title).to.equal('Test Quest');
-    expect(quest.status).to.equal(0);
+    expect(quest.status).to.equal(1);
+    expect(quest.player).to.equal(player.address);
     expect(questFund.reservedReward).to.equal(reward);
-    expect(questFund.lockedStake).to.equal(0);
+    expect(questFund.player).to.equal(player.address);
     expect(questFund.state).to.equal(1);
   });
 
-  it('starts a quest by locking native stake in treasury instead of holding funds in the manager', async function () {
+  it('activates a quest immediately on creation and reserves the reward in treasury', async function () {
     await createQuest();
-
-    await forgeQuestManager.connect(player).startQuest(1, { value: stake });
 
     const quest = await forgeQuestManager.quests(1);
     const questFund = await treasury.questFunds(1);
@@ -97,14 +97,13 @@ describe('Smart Contracts Integration', function () {
     expect(quest.player).to.equal(player.address);
     expect(quest.status).to.equal(1);
     expect(questFund.player).to.equal(player.address);
-    expect(questFund.lockedStake).to.equal(stake);
-    expect(questFund.state).to.equal(2);
+    expect(questFund.reservedReward).to.equal(reward);
+    expect(questFund.state).to.equal(1);
     expect(await ethers.provider.getBalance(await forgeQuestManager.getAddress())).to.equal(0);
   });
 
   it('settles a verified completion entirely through treasury payout flow', async function () {
     await createQuest();
-    await forgeQuestManager.connect(player).startQuest(1, { value: stake });
 
     const proofUri = '0x3333333333333333333333333333333333333333333333333333333333333333';
     await forgeQuestManager.connect(player).submitQuest(1, proofUri);
@@ -112,20 +111,27 @@ describe('Smart Contracts Integration', function () {
     const playerBalanceBefore = await ethers.provider.getBalance(player.address);
     const treasuryBalanceBefore = await ethers.provider.getBalance(await treasury.getAddress());
 
-    await expect(forgeQuestManager.connect(verifier).verifyQuest(1, true, questBeforeVerification.proofVerificationHash))
-      .to.emit(treasury, 'RewardPaid')
-      .withArgs(1, player.address, reward, stake, reward + stake);
+    await forgeQuestManager.connect(verifier).verifyQuest(1, true, questBeforeVerification.proofVerificationHash);
 
+    const claimTx = await forgeQuestManager.connect(player).claimReward(1);
+    const receipt = await claimTx.wait();
+
+    await expect(claimTx)
+      .to.emit(treasury, 'RewardPaid')
+      .withArgs(1, player.address, reward, reward);
+
+    const gasPrice = receipt.effectiveGasPrice ?? receipt.gasPrice ?? 0n;
+    const gasCost = BigInt(receipt.gasUsed) * BigInt(gasPrice);
     const playerBalanceAfter = await ethers.provider.getBalance(player.address);
     const treasuryBalanceAfter = await ethers.provider.getBalance(await treasury.getAddress());
     const verifiedQuest = await forgeQuestManager.quests(1);
     const questFund = await treasury.questFunds(1);
     const profile = await reputation.profileFor(player.address);
 
-    expect(playerBalanceAfter - playerBalanceBefore).to.equal(reward + stake);
-    expect(treasuryBalanceBefore - treasuryBalanceAfter).to.equal(reward + stake);
-    expect(verifiedQuest.status).to.equal(3);
-    expect(questFund.state).to.equal(3);
+    expect((playerBalanceAfter - playerBalanceBefore) + gasCost).to.equal(reward);
+    expect(treasuryBalanceBefore - treasuryBalanceAfter).to.equal(reward);
+    expect(verifiedQuest.status).to.equal(4);
+    expect(questFund.state).to.equal(2);
     expect(await rewardNFT.balanceOf(player.address)).to.equal(1);
     // proofUri is a hash, not a valid http/https URI, so it falls back to metadataUri
     expect(await rewardNFT.tokenURI(1)).to.equal('ipfs://metadata');
@@ -134,9 +140,8 @@ describe('Smart Contracts Integration', function () {
     expect(await ethers.provider.getBalance(await forgeQuestManager.getAddress())).to.equal(0);
   });
 
-  it('refunds the player stake and releases the reward reservation on failed verification', async function () {
+  it('releases the reserved reward on failed verification without stake', async function () {
     await createQuest();
-    await forgeQuestManager.connect(player).startQuest(1, { value: stake });
 
     const proofUri = '0x4444444444444444444444444444444444444444444444444444444444444444';
     await forgeQuestManager.connect(player).submitQuest(1, proofUri);
@@ -150,22 +155,20 @@ describe('Smart Contracts Integration', function () {
         1,
         player.address,
         reward,
-        stake,
-        ethers.keccak256(ethers.toUtf8Bytes('QUEST_FAILED'))
+        ethers.keccak256(ethers.toUtf8Bytes('VERIFICATION_FAILED'))
       );
 
     const playerBalanceAfter = await ethers.provider.getBalance(player.address);
     const failedQuest = await forgeQuestManager.quests(1);
     const questFund = await treasury.questFunds(1);
 
-    expect(playerBalanceAfter - playerBalanceBefore).to.equal(stake);
-    expect(failedQuest.status).to.equal(5);
-    expect(questFund.state).to.equal(4);
+    expect(playerBalanceAfter - playerBalanceBefore).to.equal(0);
+    expect(failedQuest.status).to.equal(1);
+    expect(questFund.state).to.equal(3);
   });
 
-  it('cancels an active quest by refunding locked stake from treasury', async function () {
+  it('cancels an active quest by releasing the reserved reward when no stake is locked', async function () {
     await createQuest();
-    await forgeQuestManager.connect(player).startQuest(1, { value: stake });
 
     const treasuryBalanceBefore = await ethers.provider.getBalance(await treasury.getAddress());
     await forgeQuestManager.connect(player).cancelQuest(1);
@@ -174,9 +177,9 @@ describe('Smart Contracts Integration', function () {
     const cancelledQuest = await forgeQuestManager.quests(1);
     const questFund = await treasury.questFunds(1);
 
-    expect(treasuryBalanceBefore - treasuryBalanceAfter).to.equal(stake);
-    expect(cancelledQuest.status).to.equal(4);
-    expect(questFund.state).to.equal(4);
+    expect(treasuryBalanceBefore - treasuryBalanceAfter).to.equal(0);
+    expect(cancelledQuest.status).to.equal(5);
+    expect(questFund.state).to.equal(3);
   });
 
   it('rejects invalid quest creation when the treasury reward pool is underfunded', async function () {

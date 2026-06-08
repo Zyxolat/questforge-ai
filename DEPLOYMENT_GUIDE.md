@@ -1,4 +1,4 @@
-# QuestForge AI - Production Deployment Guide
+# ForgeQuest Online - Production Deployment Guide
 
 **Target Network:** Celo (mainnet)  
 **Last Updated:** 2026-05-09  

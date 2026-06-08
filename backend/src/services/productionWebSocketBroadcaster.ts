@@ -228,7 +228,6 @@ class ProductionWebSocketBroadcaster {
       reward_claimed: 'reward:claimed',
       nft_minted: 'nft:minted',
       reward_reserved: 'reward:reserved',
-      stake_locked: 'stake:locked',
       reward_released: 'reward:released',
       reward_paid: 'reward:paid',
       reward_refunded: 'reward:refunded'

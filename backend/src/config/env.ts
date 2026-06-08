@@ -22,9 +22,6 @@ export type AppEnv = {
   NODE_ENV: string;
   PORT: number;
   DATABASE_URL: string;
-  GROQ_API_KEY: string;
-  GROQ_MODEL: string;
-  ALLOW_AI_FALLBACK: boolean;
   FRONTEND_URL: string;
   FRONTEND_ORIGIN: string;
   CORS_ORIGINS: string[];
@@ -211,14 +208,6 @@ function parseOptionalPrivateKey(name: string, raw: string | undefined) {
   return new ethers.Wallet(raw).privateKey;
 }
 
-function parseGroqAPIKey(name: string, raw: string) {
-  if (/\s/.test(raw)) {
-    throw new Error(`${name} must not contain whitespace`);
-  }
-
-  return raw;
-}
-
 function parseBoolean(name: string, raw: string | undefined, fallback: boolean) {
   if (!raw) return fallback;
   const normalized = raw.trim().toLowerCase();
@@ -349,29 +338,6 @@ export function validateEnvironment(): EnvValidationResult {
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
   const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
-  const groqModel = optionalEnv('GROQ_MODEL') || 'llama-3.3-70b-versatile';
-  const allowAIFallback = parseBoolean('ALLOW_AI_FALLBACK', optionalEnv('ALLOW_AI_FALLBACK'), true);
-  const groqAPIKeyRaw = optionalEnv('GROQ_API_KEY');
-  let groqAPIKey: string | undefined;
-  if (groqAPIKeyRaw) {
-    try {
-      groqAPIKey = parseGroqAPIKey('GROQ_API_KEY', groqAPIKeyRaw);
-    } catch (error) {
-      addIssue(
-        warnings,
-        'AI Generation',
-        'GROQ_API_KEY',
-        `${error instanceof Error ? error.message : String(error)}. Ignoring value.`
-      );
-    }
-  } else {
-    addIssue(
-      warnings,
-      'AI Generation',
-      'GROQ_API_KEY',
-      'not configured; deterministic fallback quests remain enabled'
-    );
-  }
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
@@ -524,9 +490,6 @@ export function validateEnvironment(): EnvValidationResult {
         NODE_ENV: nodeEnv,
         PORT: parsePort('PORT', optionalEnv('PORT'), 4000),
         DATABASE_URL: databaseUrl!,
-        GROQ_API_KEY: groqAPIKey || '',
-        GROQ_MODEL: groqModel,
-        ALLOW_AI_FALLBACK: allowAIFallback,
         FRONTEND_URL: frontendUrl!.toString(),
         FRONTEND_ORIGIN: frontendUrl!.origin,
         CORS_ORIGINS: resolvedCorsOrigins,
@@ -557,8 +520,8 @@ export function validateEnvironment(): EnvValidationResult {
         AUTH_URI: resolvedAuthUri.toString(),
         AUTH_NONCE_TTL_MINUTES: parsePositiveInt('AUTH_NONCE_TTL_MINUTES', authNonceTtlRaw),
         AUTH_SESSION_TTL_HOURS: parsePositiveInt('AUTH_SESSION_TTL_HOURS', authSessionTtlRaw),
-        AUTH_STATEMENT: optionalEnv('AUTH_STATEMENT') || 'Sign in to QuestForge AI.',
-        AUTH_COOKIE_NAME: optionalEnv('AUTH_COOKIE_NAME') || 'questforge_session',
+        AUTH_STATEMENT: optionalEnv('AUTH_STATEMENT') || 'Sign in to Online ForgeQuest Game.',
+        AUTH_COOKIE_NAME: optionalEnv('AUTH_COOKIE_NAME') || 'forgequest_session',
         AUTH_COOKIE_DOMAIN: optionalEnv('AUTH_COOKIE_DOMAIN'),
         AUTH_COOKIE_PATH: optionalEnv('AUTH_COOKIE_PATH') || '/',
         AUTH_COOKIE_SECURE: resolvedCookieSecure,

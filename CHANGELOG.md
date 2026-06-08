@@ -1,14 +1,14 @@
-# QuestForge AI - Production Hardening Changelog
+# ForgeQuest Online - Production Hardening Changelog
 
 **Version:** 2.0.0 (Production Ready)  
 **Released:** 2026-05-09  
-**Status:** Ready for Deployment  
+**Status:** Ready for Deployment
 
 ---
 
 ## Overview
 
-Complete production-readiness overhaul transforming QuestForge AI from a hackathon prototype to enterprise-grade gaming infrastructure. 50+ vulnerabilities fixed, 15 major security features implemented, 3000+ lines of new code.
+Complete production-readiness overhaul transforming ForgeQuest Online from a hackathon prototype to enterprise-grade gaming infrastructure. 50+ vulnerabilities fixed, 15 major security features implemented, 3000+ lines of new code.
 
 ---
 
@@ -27,13 +27,20 @@ Complete production-readiness overhaul transforming QuestForge AI from a hackath
 - [x] Streak recovery (0.05x per success)
 
 **Database Tables:**
+
 - QuestCooldown (userId, cooldownUntil, reason)
 - DailyActivity (userId, date, questsAttempted, xpEarned, rewardsEarned)
 - ProofSubmission (userId, questId, proofUri, proofHash, verificationResult)
 
 **Usage:**
+
 ```typescript
-const validation = await validateQuestAttempt(userId, difficulty, stake, reward);
+const validation = await validateQuestAttempt(
+  userId,
+  difficulty,
+  stake,
+  reward,
+);
 if (!validation.allowed) {
   return res.status(400).json({ errors: validation.errors });
 }
@@ -53,6 +60,7 @@ const cooldown = await checkQuestCooldown(userId);
 - [x] RateLimit headers in responses
 
 **Rates:**
+
 - Auth nonce: 10 per 15 min
 - Auth verify: 5 per 15 min
 - Quest generation: 50 per hour
@@ -60,9 +68,10 @@ const cooldown = await checkQuestCooldown(userId);
 - Global: 150 per 15 min
 
 **Usage:**
+
 ```typescript
-app.post('/quests/generate', questGenerationLimiter, generateQuest);
-app.post('/auth/verify', authVerifyLimiter, verifyAuth);
+app.post("/quests/generate", questGenerationLimiter, generateQuest);
+app.post("/auth/verify", authVerifyLimiter, verifyAuth);
 ```
 
 ### 3. Enhanced Quest Controller (questController.ts updated)
@@ -74,6 +83,7 @@ app.post('/auth/verify', authVerifyLimiter, verifyAuth);
 - [x] Streak multiplier application
 
 **New Endpoint:**
+
 ```
 POST /quests/submit-proof
 {
@@ -95,6 +105,7 @@ Response: { success, questId, proofHash, aiValidation }
 - [x] Output sanitization (HTML removal, length limits)
 
 **Validators:**
+
 ```typescript
 const result = aiValidator.comprehensiveValidation(aiOutput, wallet);
 // Returns: { valid, errors, warnings, sanitized }
@@ -108,24 +119,28 @@ const objCheck = aiValidator.validateObjective(objective);
 **Changes:**
 
 #### a) Deterministic Proof Verification
+
 - [x] proofVerificationHash (player + proofUri + nonce)
 - [x] Proof must be submitted with hash
 - [x] Verification must match stored hash
 - [x] Prevents any proof manipulation
 
 #### b) Replay Attack Prevention
+
 - [x] playerNonces mapping tracks per-wallet nonce
 - [x] Nonce incremented on each quest start
 - [x] usedProofHashes prevents proof reuse
 - [x] proofHashToQuestId maps proof to quest
 
 #### c) Reward Bounds Enforcement
+
 - [x] MAX_SINGLE_REWARD = 0.5 ether
 - [x] MAX_SINGLE_STAKE = 10 ether
 - [x] MIN_SINGLE_STAKE = 0.001 ether
 - [x] Checked at quest creation AND verification
 
 #### d) Circuit Breaker
+
 - [x] rewardSystemHealthy flag
 - [x] totalRewardsDistributed tracking
 - [x] maxRewardPoolSize cap (default 1000 CELO)
@@ -133,11 +148,13 @@ const objCheck = aiValidator.validateObjective(objective);
 - [x] Owner can manually pause/unpause
 
 #### e) State Machine
+
 - [x] 6 states: Available, Active, Submitted, Verified, Cancelled, Failed
 - [x] All transitions enforced
 - [x] Cannot skip states
 
 #### f) Quest Expiration
+
 - [x] durationSeconds <= 7 days
 - [x] block.timestamp validation on submission
 - [x] Cannot submit/verify expired quests
@@ -154,8 +171,9 @@ const objCheck = aiValidator.validateObjective(objective);
 - [x] Comprehensive error reporting
 
 **Usage:**
+
 ```typescript
-import { env } from './config/production';
+import { env } from "./config/production";
 
 const port = env.PORT;
 const rpcUrl = env.RPC_URL_MAINNET;
@@ -165,6 +183,7 @@ const health = await performHealthCheck();
 ### 7. Database Schema Enhancements (20+ field additions)
 
 **User Model:**
+
 - streakDecayFactor (multiplier for rewards)
 - lastQuestCompletedAt
 - lastFailedAt
@@ -172,6 +191,7 @@ const health = await performHealthCheck();
 - totalQuestsFailed
 
 **Quest Model:**
+
 - maxRewardAmount (bounds)
 - minStakeAmount / maxStakeAmount
 - stakeTxHash / proofTxHash
@@ -180,6 +200,7 @@ const health = await performHealthCheck();
 - playerNonce
 
 **New Models:**
+
 - QuestCooldown
 - DailyActivity
 - ProofSubmission
@@ -189,6 +210,7 @@ const health = await performHealthCheck();
 **File:** `contracts/test/ForgeQuestManager.security.test.ts`
 
 Tests for:
+
 - [x] Replay attack prevention
 - [x] Reward bounds enforcement
 - [x] Circuit breaker functionality
@@ -208,12 +230,14 @@ Tests for:
 ## 🔒 Security Improvements
 
 ### Access Control
+
 - [x] onlyPlayer modifier for quest-specific operations
 - [x] rewardSystemActive modifier for reward checks
 - [x] VERIFIER_ROLE for verification operations
 - [x] Owner-only admin functions
 
 ### Authentication
+
 - [x] EIP-191 message signing with nonce
 - [x] Challenge message expiration (5 min default)
 - [x] Nonce consumed after verification
@@ -221,12 +245,14 @@ Tests for:
 - [x] Session expiration (7 days default)
 
 ### Transaction Safety
+
 - [x] ReentrancyGuard on state-changing functions
 - [x] SafeERC20 for token operations
 - [x] .call{} pattern for ETH transfers
 - [x] Proper error messages in reverts
 
 ### Input Validation
+
 - [x] Proof URI length limits (max 10KB)
 - [x] Proof URI format validation
 - [x] Empty string rejection
@@ -234,6 +260,7 @@ Tests for:
 - [x] Address format validation
 
 ### Rate Limiting
+
 - [x] Per-endpoint rate limiters
 - [x] Per-wallet rate limiting
 - [x] Per-IP rate limiting for auth
@@ -245,17 +272,20 @@ Tests for:
 ## 📊 Performance Improvements
 
 ### Database Optimization
+
 - [x] 15+ new indexes added
 - [x] Query optimization for hot paths
 - [x] Connection pooling (default 10)
 - [x] Pagination support (max 50 items)
 
 ### Caching Ready
+
 - [x] Redis integration prepared
 - [x] Rate limit Redis store ready
 - [x] Session metadata cacheable
 
 ### Monitoring Ready
+
 - [x] Health check endpoints
 - [x] Structured logging setup
 - [x] Sentry integration ready
@@ -266,12 +296,14 @@ Tests for:
 ## 🛠 Configuration & Deployment
 
 ### Environment Variables (50+ new)
+
 - [x] Production-specific validation
 - [x] Secure defaults
 - [x] Documentation in template
 - [x] All required fields checked
 
 ### Smart Contract Deployment
+
 - [x] Hardhat configuration
 - [x] Deployment script
 - [x] Alfajores testnet support
@@ -279,6 +311,7 @@ Tests for:
 - [x] Contract addresses stored
 
 ### Database Migrations
+
 - [x] Migration file created
 - [x] Schema changes documented
 - [x] Rollback procedures defined
@@ -289,6 +322,7 @@ Tests for:
 ## 📝 Dependencies Added
 
 **Backend:**
+
 ```json
 "ajv": "^8.12.0",           // JSON schema validation
 "redis": "^4.6.10",         // Redis client
@@ -296,6 +330,7 @@ Tests for:
 ```
 
 **DevDependencies:**
+
 ```json
 "@types/redis": "^4.0.11"   // Redis TypeScript types
 ```
@@ -305,6 +340,7 @@ Tests for:
 ## 🐛 Vulnerabilities Fixed (50 items)
 
 ### Critical (10)
+
 1. ✅ No proof validation → Deterministic on-chain verification
 2. ✅ No cooldown system → 5-min min cooldown + failure cooldown
 3. ✅ No daily caps → 20 quests, 3000 XP, 5 CELO per day
@@ -317,6 +353,7 @@ Tests for:
 10. ✅ Unbounded XP → Daily cap + reward multiplier
 
 ### High (15)
+
 11. ✅ No proof validation → Format + length checks
 12. ✅ No wallet verification → Nonce-based verification
 13. ✅ No tx verification → proofVerificationHash system
@@ -334,6 +371,7 @@ Tests for:
 25. ✅ No access control audit → VERIFIER_ROLE + modifiers
 
 ### Medium (8)
+
 26. ✅ No pagination → Query limits added
 27. ✅ No caching → Indexes + Redis ready
 28. ✅ No monitoring → Health checks + logging
@@ -348,6 +386,7 @@ Tests for:
 ## 📋 Migration Path
 
 ### For Mainnet
+
 1. Deploy contracts with `npm run deploy:mainnet`
 2. Smoke test all endpoints
 3. Run `npm run validate:mainnet`
@@ -359,6 +398,7 @@ Tests for:
 ## 🚦 Testing Checklist
 
 **Pre-Deployment:**
+
 - [ ] All unit tests passing
 - [ ] All security tests passing
 - [ ] TypeScript compilation successful
@@ -366,6 +406,7 @@ Tests for:
 - [ ] No console.log in production code
 
 **Mainnet Deployment:**
+
 - [ ] Contracts deploy successfully
 - [ ] Database migrations apply
 - [ ] Backend starts without errors
@@ -377,6 +418,7 @@ Tests for:
 - [ ] Daily limits enforced
 
 **Mainnet Pre-Launch:**
+
 - [ ] Load testing (100+ concurrent users)
 - [ ] Security audit (third-party)
 - [ ] Performance profiling
@@ -390,29 +432,33 @@ Tests for:
 
 **Critical Issues:** ops-oncall@questforge.example.com  
 **Security Issues:** security@questforge.example.com  
-**General Questions:** engineering@questforge.example.com  
+**General Questions:** engineering@questforge.example.com
 
 ---
 
 ## 🎯 Success Metrics
 
 ### Gameplay
+
 - Quest completion rate: >60%
 - Average daily active wallets: >1000
 - Player retention (day 7): >40%
 
 ### Economic
+
 - Average rewards per quest: 0.03-0.06 CELO
 - Daily rewards distributed: <5 CELO/wallet
 - Treasury solvency: >6 months supply
 
 ### Technical
+
 - API response time: <500ms p95
 - Error rate: <1%
 - Uptime: >99.9%
 - Indexer lag: <60 seconds
 
 ### Security
+
 - 0 exploits found
 - 0 fund losses
 - 100% rate limit enforcement

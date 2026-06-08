@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Security Validation
+ * ForgeQuest Online - Security Validation
  *
  * Validates the current authentication and protected-route security model:
  * 1. Auth nonce rate limiting
@@ -118,7 +118,7 @@ async function main() {
   const { apiUrl } = resolveUrls(rawBase);
 
   console.log('\n╔════════════════════════════════════════════════════════════╗');
-  console.log('║       QuestForge AI - Production Security Validation      ║');
+  console.log('║       ForgeQuest Online - Production Security Validation      ║');
   console.log('║             Current Auth And API Security Checks          ║');
   console.log('╚════════════════════════════════════════════════════════════╝\n');
 

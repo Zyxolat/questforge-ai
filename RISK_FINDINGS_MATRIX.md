@@ -1,4 +1,4 @@
-# QuestForge AI - Final Risk Report & Categorization
+# ForgeQuest Online - Final Risk Report & Categorization
 
 **Date:** June 1, 2026  
 **Audit Type:** Pre-Submission Production Readiness  
@@ -123,7 +123,7 @@ if (nodeEnv === "production" && !optionalEnv("GROQ_API_KEY")) {
     errors,
     "AI Generation",
     "GROQ_API_KEY",
-    "is required in production because QuestForge production readiness depends on live Groq AI quest generation",
+    "is required in production because ForgeQuest production readiness depends on live Groq AI quest generation",
   );
 }
 ```

@@ -8,7 +8,6 @@ import { webSocketBroadcaster } from './webSocketBroadcaster';
 
 const TREASURY_STATUS_BY_EVENT: Record<string, TreasuryPayoutStatus> = {
   reward_reserved: 'RESERVED',
-  stake_locked: 'LOCKED',
   reward_released: 'RELEASED',
   reward_paid: 'PAID',
   reward_refunded: 'REFUNDED'
@@ -195,7 +194,6 @@ class EventWorkerService {
         await this.handleNFTMinted(chainEvent);
         break;
       case 'reward_reserved':
-      case 'stake_locked':
       case 'reward_released':
       case 'reward_paid':
       case 'reward_refunded':

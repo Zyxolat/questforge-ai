@@ -63,17 +63,16 @@ model Quest {
   title           String
   description     String
   metadata        Json
+  metadataUri     String?
   difficulty      Int
   questType       String?
   objective       String?
   lore            String?
   worldStateVersion Int?             @default(1)
-  stakeAmount     Float
+  stakeAmount     Float             @default(0)
   rewardAmount    Float
   xpReward        Int               @default(150)
   maxRewardAmount Float?             // Max reward cap for this quest (security bound)
-  minStakeAmount  Float              @default(0.01) // Minimum stake
-  maxStakeAmount  Float              @default(10.0) // Maximum stake per quest
   chainQuestId    BigInt?            @db.BigInt
   status          QuestStatus        @default(AVAILABLE)
   creator         String
@@ -88,6 +87,7 @@ model Quest {
   // Multi-TX Quest Support
   transactionCount Int               @default(0)
   requiredTxTypes Json?              // array of required tx types for this quest
+  durationSeconds  Int?
   isEventQuest    Boolean            @default(false) // tied to world event
 
   startedAt       DateTime?
@@ -127,11 +127,10 @@ enum TreasuryPayoutStatus {
 
 enum QuestStatus {
   AVAILABLE
-  ACTIVE
-  SUBMITTED
-  VERIFIED
-  CANCELLED
-  FAILED
+  ACCEPTED
+  COMPLETED
+  CLAIMABLE
+  REWARDED
 }
 
 model QuestHistory {

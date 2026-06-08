@@ -280,17 +280,6 @@ export default function QuestRevealModal({
                         </div>
                       </motion.div>
 
-                      <motion.div
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: 0.85 }}
-                        className="rounded-xl border border-orange-500/30 bg-orange-500/10 p-4"
-                      >
-                        <p className="text-center text-sm text-orange-200">
-                          <span className="text-2xl font-bold text-orange-300">{quest.stakeAmount} CELO</span> stake required
-                        </p>
-                        <p className="mt-2 text-center text-xs text-orange-200">Returned if you succeed</p>
-                      </motion.div>
                     </div>
                   </div>
 
@@ -316,7 +305,7 @@ export default function QuestRevealModal({
                         disabled={loading}
                         className={`min-h-[44px] flex-1 rounded-xl bg-gradient-to-r ${colorClasses[color]} px-6 py-3 font-bold uppercase tracking-[0.2em] text-white shadow-lg transition hover:shadow-2xl disabled:opacity-50 sm:min-h-[48px]`}
                       >
-                        {loading ? 'Accepting...' : 'Accept Quest'}
+                        {loading ? 'Preparing...' : 'Continue'}
                       </motion.button>
                     </div>
                   </motion.div>

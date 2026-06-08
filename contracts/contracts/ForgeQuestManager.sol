@@ -11,22 +11,18 @@ import "./Reputation.sol";
 interface ITreasury {
     function reserveReward(uint256 questId, address creator, uint256 rewardAmount) external;
 
-    function lockStake(uint256 questId, address player, uint256 expectedStakeAmount) external payable;
-
     function settleQuestPayout(
         uint256 questId,
         address payable player,
-        uint256 expectedRewardAmount,
-        uint256 expectedStakeAmount
+        uint256 expectedRewardAmount
     ) external returns (uint256 totalPayout);
 
     function refundQuest(
         uint256 questId,
         address payable recipient,
         uint256 expectedRewardAmount,
-        uint256 expectedStakeAmount,
         bytes32 reason
-    ) external returns (uint256 refundedStakeAmount);
+    ) external;
 }
 
 contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl {
@@ -34,11 +30,11 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
 
     enum QuestStatus {
         Available,
-        Active,
-        Submitted,
-        Verified,
-        Cancelled,
-        Failed
+        Accepted,
+        Completed,
+        Claimable,
+        Rewarded,
+        Cancelled
     }
 
     struct Quest {
@@ -61,8 +57,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     }
 
     uint256 public constant MAX_SINGLE_REWARD = 0.5 ether;
-    uint256 public constant MAX_SINGLE_STAKE = 10 ether;
-    uint256 public constant MIN_SINGLE_STAKE = 0.001 ether;
+    uint256 public constant ACCEPTANCE_FEE = 0.001 ether;
     uint256 public constant MAX_QUEST_DURATION = 7 days;
 
     bool public rewardSystemHealthy = true;
@@ -85,12 +80,6 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 rewardAmount,
         uint256 xpReward
     );
-    event QuestStarted(
-        uint256 indexed questId,
-        address indexed creator,
-        address indexed player,
-        uint256 stakeAmount
-    );
     event QuestSubmitted(uint256 indexed questId, address indexed player, bytes32 proofHash);
     event QuestVerified(
         uint256 indexed questId,
@@ -100,7 +89,13 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 xpReward,
         bytes32 proofHash
     );
-    event QuestCancelled(uint256 indexed questId);
+    event QuestRewarded(
+        uint256 indexed questId,
+        address indexed player,
+        uint256 rewardAmount,
+        uint256 xpReward,
+        bytes32 proofHash
+    );
     event CircuitBreakerTriggered(string reason);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
 
@@ -136,15 +131,17 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     function createQuest(
         string calldata title,
         string calldata metadataUri,
-        uint256 stakeAmount,
         uint256 rewardAmount,
         uint256 xpReward,
         uint256 durationSeconds
-    ) external whenNotPaused rewardSystemActive nonReentrant {
+    ) external payable whenNotPaused rewardSystemActive nonReentrant {
         require(bytes(title).length > 0, "Title required");
         require(bytes(metadataUri).length > 0, "Metadata required");
-        require(stakeAmount >= MIN_SINGLE_STAKE, "Stake too small");
-        require(stakeAmount <= MAX_SINGLE_STAKE, "Stake exceeds maximum");
+        require(msg.value == ACCEPTANCE_FEE, "Accept fee required");
+
+        (bool success, ) = payable(treasury).call{value: msg.value}("");
+        require(success, "Fee transfer failed");
+
         require(rewardAmount > 0, "Reward required");
         require(rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
         require(xpReward > 0, "XP reward required");
@@ -153,6 +150,9 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
 
         uint256 questId = nextQuestId;
         nextQuestId += 1;
+
+        uint256 playerNonce = playerNonces[msg.sender];
+        playerNonces[msg.sender] = playerNonce + 1;
 
         ITreasury(treasury).reserveReward(questId, msg.sender, rewardAmount);
 
@@ -163,42 +163,22 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
             metadataUri: metadataUri,
             proofUri: "",
             proofHash: bytes32(0),
-            stakeAmount: stakeAmount,
+            stakeAmount: 0,
             rewardAmount: rewardAmount,
             xpReward: xpReward,
             createdAt: block.timestamp,
-            startedAt: 0,
+            startedAt: block.timestamp,
             expiresAt: block.timestamp + durationSeconds,
-            status: QuestStatus.Available,
-            player: address(0),
-            playerNonce: 0,
+            status: QuestStatus.Accepted,
+            player: msg.sender,
+            playerNonce: playerNonce,
             proofVerificationHash: bytes32(0)
         });
-
-        emit QuestCreated(questId, msg.sender, title, rewardAmount, xpReward);
-    }
-
-    function startQuest(uint256 questId) external payable nonReentrant whenNotPaused rewardSystemActive {
-        Quest storage quest = quests[questId];
-        require(quest.questId != 0, "Quest not found");
-        require(quest.status == QuestStatus.Available, "Quest unavailable");
-        require(block.timestamp <= quest.expiresAt, "Quest expired");
-        require(msg.value == quest.stakeAmount, "Incorrect stake amount");
-
-        uint256 playerNonce = playerNonces[msg.sender];
-        playerNonces[msg.sender] = playerNonce + 1;
-
-        quest.player = msg.sender;
-        quest.status = QuestStatus.Active;
-        quest.startedAt = block.timestamp;
-        quest.playerNonce = playerNonce;
 
         playerQuestIndices[msg.sender].push(questId);
         reputation.initializePlayer(msg.sender);
 
-        ITreasury(treasury).lockStake{value: msg.value}(questId, msg.sender, quest.stakeAmount);
-
-        emit QuestStarted(questId, quest.creator, msg.sender, quest.stakeAmount);
+        emit QuestCreated(questId, msg.sender, title, rewardAmount, xpReward);
     }
 
     function submitQuest(uint256 questId, string calldata proofUri)
@@ -208,7 +188,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         onlyPlayer(questId)
     {
         Quest storage quest = quests[questId];
-        require(quest.status == QuestStatus.Active, "Quest not active");
+        require(quest.status == QuestStatus.Accepted, "Quest not accepted");
         require(block.timestamp <= quest.expiresAt, "Quest expired");
         require(bytes(proofUri).length > 0, "Proof required");
         require(bytes(proofUri).length <= 2048, "Proof URI too long");
@@ -222,7 +202,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
 
         bytes32 verificationHash = keccak256(abi.encodePacked(msg.sender, proofUri, quest.playerNonce));
 
-        quest.status = QuestStatus.Submitted;
+        quest.status = QuestStatus.Completed;
         quest.proofUri = proofUri;
         quest.proofHash = proofHash;
         quest.proofVerificationHash = verificationHash;
@@ -240,7 +220,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     ) external whenNotPaused nonReentrant rewardSystemActive onlyVerifier {
         Quest storage quest = quests[questId];
         require(quest.questId != 0, "Quest not found");
-        require(quest.status == QuestStatus.Submitted, "Not submitted");
+        require(quest.status == QuestStatus.Completed, "Quest not completed");
         require(quest.player != address(0), "Invalid quest");
         require(quest.proofVerificationHash != bytes32(0), "No proof hash set");
         require(quest.proofVerificationHash == proofVerificationHash, "Verification hash mismatch");
@@ -252,31 +232,40 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         }
     }
 
-    function cancelQuest(uint256 questId) external nonReentrant {
+    function claimReward(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {
         Quest storage quest = quests[questId];
         require(quest.questId != 0, "Quest not found");
-        require(
-            quest.status == QuestStatus.Available ||
-                quest.status == QuestStatus.Active ||
-                quest.status == QuestStatus.Submitted,
-            "Cannot cancel"
-        );
-        require(
-            msg.sender == owner() || msg.sender == quest.creator || msg.sender == quest.player,
-            "Unauthorized"
+        require(quest.status == QuestStatus.Claimable, "Reward not claimable");
+        require(quest.player != address(0), "Invalid quest");
+
+        quest.status = QuestStatus.Rewarded;
+
+        ITreasury(treasury).settleQuestPayout(
+            questId,
+            payable(quest.player),
+            quest.rewardAmount
         );
 
-        quest.status = QuestStatus.Cancelled;
+        rewardNFT.mintQuestReward(quest.player, questId, quest.metadataUri);
+        reputation.rewardXP(quest.player, quest.xpReward, 1);
+
+        emit QuestRewarded(questId, quest.player, quest.rewardAmount, quest.xpReward, quest.proofHash);
+    }
+
+    function cancelQuest(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {
+        Quest storage quest = quests[questId];
+        require(quest.questId != 0, "Quest not found");
+        require(quest.status == QuestStatus.Accepted, "Quest not cancellable");
+        require(quest.player != address(0), "Invalid quest");
 
         ITreasury(treasury).refundQuest(
             questId,
             payable(quest.player),
             quest.rewardAmount,
-            quest.player == address(0) ? 0 : quest.stakeAmount,
-            keccak256("QUEST_CANCELLED")
+            keccak256(abi.encodePacked("QUEST_CANCELLED"))
         );
 
-        emit QuestCancelled(questId);
+        quest.status = QuestStatus.Cancelled;
     }
 
     function setTreasury(address newTreasury) external onlyOwner {
@@ -321,17 +310,6 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
      * @dev Helper to safely extract a substring. Used for URI prefix validation
      *      to prevent arbitrary/malicious content from being used as NFT metadata.
      */
-    function _substring(string memory str, uint startIndex, uint endIndex) private pure returns (string memory) {
-        bytes memory strBytes = bytes(str);
-        require(startIndex <= endIndex && endIndex <= strBytes.length, "Invalid substring indices");
-        bytes memory result = new bytes(endIndex - startIndex);
-        for (uint i = startIndex; i < endIndex; i++) {
-            result[i - startIndex] = strBytes[i];
-        }
-        return string(result);
-    }
-
-
     function transferOwnership(address newOwner) public override onlyOwner {
         address previousOwner = owner();
         super.transferOwnership(newOwner);
@@ -344,40 +322,23 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     }
 
     function _completeQuest(uint256 questId, Quest storage quest) private {
-        quest.status = QuestStatus.Verified;
-
-        ITreasury(treasury).settleQuestPayout(
-            questId,
-            payable(quest.player),
-            quest.rewardAmount,
-            quest.stakeAmount
-        );
-
-        // SAFETY: validate proofUri before using as NFT metadata to prevent abuse
-        // Only allow http/https URIs (not arbitrary data or file paths)
-        bytes memory proofBytes = bytes(quest.proofUri);
-        bool isSafeProofUri = proofBytes.length > 0
-            && proofBytes.length <= 2048
-            && (proofBytes.length < 7
-                || (keccak256(bytes(_substring(quest.proofUri, 0, 7))) == keccak256("http://")
-                    || keccak256(bytes(_substring(quest.proofUri, 0, 8))) == keccak256("https://")));
-        string memory rewardMetadataUri = isSafeProofUri ? quest.proofUri : quest.metadataUri;
-        rewardNFT.mintQuestReward(quest.player, questId, rewardMetadataUri);
-        reputation.rewardXP(quest.player, quest.xpReward, 1);
+        quest.status = QuestStatus.Claimable;
 
         emit QuestVerified(questId, quest.player, true, quest.rewardAmount, quest.xpReward, quest.proofHash);
     }
 
     function _failQuest(uint256 questId, Quest storage quest) private {
-        quest.status = QuestStatus.Failed;
-
         ITreasury(treasury).refundQuest(
             questId,
             payable(quest.player),
             quest.rewardAmount,
-            quest.stakeAmount,
-            keccak256("QUEST_FAILED")
+            keccak256(abi.encodePacked("VERIFICATION_FAILED"))
         );
+
+        quest.status = QuestStatus.Accepted;
+        quest.proofUri = "";
+        quest.proofHash = bytes32(0);
+        quest.proofVerificationHash = bytes32(0);
 
         emit QuestVerified(questId, quest.player, false, quest.rewardAmount, quest.xpReward, quest.proofHash);
     }

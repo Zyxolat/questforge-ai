@@ -1,4 +1,4 @@
-# Web3 Authentication Debugging & Fixes — QuestForge AI
+# Web3 Authentication Debugging & Fixes — ForgeQuest Online
 
 **Date**: May 24, 2026  
 **Status**: Fully debugged and fixed  
@@ -159,8 +159,8 @@ Ensure these are set in Railway → Service → Variables:
 JWT_SECRET=<generate: openssl rand -hex 32>
 
 # Frontend & CORS
-FRONTEND_URL=https://questforge-ai.vercel.app
-CORS_ORIGIN=https://questforge-ai.vercel.app
+FRONTEND_URL=https://forgequest-online.vercel.app
+CORS_ORIGIN=https://forgequest-online.vercel.app
 
 # Auth Cookies (Production)
 AUTH_COOKIE_SECURE=true        # MUST be true (HTTPS only)
@@ -171,8 +171,8 @@ AUTH_COOKIE_SAME_SITE=none     # MUST be "none" for cross-origin
 
 ```
 # SIWE Domain/URI
-AUTH_DOMAIN=questforge-ai.vercel.app
-AUTH_URI=https://questforge-ai.vercel.app
+AUTH_DOMAIN=forgequest-online.vercel.app
+AUTH_URI=https://forgequest-online.vercel.app
 
 # Nonce Lifetime
 AUTH_NONCE_TTL_MINUTES=5
@@ -192,14 +192,14 @@ AUTH_SESSION_TTL_HOURS=168
 2. **Check backend health endpoint**:
 
    ```bash
-   curl https://questforge-ai-production.up.railway.app/health -v
+   curl https://forgequest-online-production.up.railway.app/health -v
    ```
 
    Should return JSON, not HTML.
 
 3. **Check auth nonce endpoint** (no auth required):
    ```bash
-   curl -X POST https://questforge-ai-production.up.railway.app/api/auth/nonce \
+   curl -X POST https://forgequest-online-production.up.railway.app/api/auth/nonce \
      -H "Content-Type: application/json" \
      -d '{"wallet":"0x...","chainId":42220}'
    ```
@@ -421,7 +421,7 @@ After deploying to Railway:
    ```
 
 5. **Test in production**:
-   - Open https://questforge-ai.vercel.app
+   - Open https://forgequest-online.vercel.app
    - Connect wallet
    - Sign in
    - Check browser console for `[AUTH]` logs

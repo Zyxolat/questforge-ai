@@ -6,7 +6,7 @@ export type FactionStatus = 'rising' | 'stable' | 'contested' | 'dominant' | 'we
 export type InteractionPatternType = ObjectiveType;
 export type QuestTxStage =
   | 'createQuest'
-  | 'startQuestStake'
+  | 'completeQuest'
   | 'gameplay'
   | 'submitProof'
   | 'verifierSettlement'
@@ -153,8 +153,8 @@ export interface QuestChainInteractionPattern {
 }
 
 export interface QuestGenerationDiagnostics {
-  source: 'groq' | 'deterministic_fallback';
-  provider: 'groq' | 'fallback';
+  source: 'rule_based';
+  provider: 'rule_based';
   model: string | null;
   promptHash: string;
   promptPreview: string;

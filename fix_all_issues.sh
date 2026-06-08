@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-BASE="/home/zyxolat/Desktop/QuestForge AI"
+BASE="/home/zyxolat/Desktop/ForgeQuest Online"
 BACKEND="$BASE/backend"
 CONTRACTS="$BASE/contracts"
 

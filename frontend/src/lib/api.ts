@@ -561,10 +561,6 @@ export function registerOnchainQuest(questId: string, chainQuestId: string, crea
   return api.post('/quests/register-onchain', { questId, chainQuestId, creationTxHash });
 }
 
-export function registerQuestStart(questId: string, chainQuestId: string, startTxHash: string) {
-  return api.post('/quests/register-start', { questId, chainQuestId, startTxHash });
-}
-
 export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {
   console.debug('[API] Submitting proof for verification', {
     questId,

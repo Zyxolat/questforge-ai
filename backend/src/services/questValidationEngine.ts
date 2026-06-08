@@ -1,6 +1,5 @@
 import crypto from 'crypto';
-import { aiValidator } from './aiSafety';
-import { QUEST_CONFIG, validateRewardBounds } from './antiAbuse';
+import { validateRewardBounds } from './antiAbuse';
 import { logger } from './logger';
 import { buildQuestTemplateForType, type ObjectiveType } from './questTemplates';
 import type {
@@ -11,7 +10,7 @@ import type {
 
 const REQUIRED_TX_STAGES = [
   'createQuest',
-  'startQuestStake',
+  'completeQuest',
   'gameplay',
   'submitProof',
   'verifierSettlement',
@@ -36,26 +35,16 @@ class QuestValidationEngine {
 
     const primaryType = input.narrative.chainInteraction.primary;
     const verificationTemplate = buildQuestTemplateForType(primaryType, input.wallet, input.difficulty);
-
-    const narrativeCheck = aiValidator.comprehensiveValidation(
-      {
-        title: input.narrative.title,
-        description: input.narrative.description,
-        difficulty: input.difficulty,
-        type: verificationTemplate.questType,
-        objective: verificationTemplate.objective,
-        lore: input.narrative.lore,
-        validationRules: verificationTemplate.validationRules
-      },
-      input.wallet
+    const narrativeCheck = this.validateNarrativeCore(
+      input.narrative.title,
+      input.narrative.description,
+      verificationTemplate.objective,
+      input.narrative.lore,
+      verificationTemplate.validationRules
     );
 
     warnings.push(...narrativeCheck.warnings);
     errors.push(...narrativeCheck.errors);
-
-    if (input.recommendedStake < input.stakeBounds.min || input.recommendedStake > input.stakeBounds.max) {
-      warnings.push('Recommended stake fell outside deterministic stake bounds and was normalized');
-    }
 
     const normalizedRewardBounds = this.normalizeRewardBounds(
       input.rewardBounds,
@@ -76,17 +65,11 @@ class QuestValidationEngine {
       );
     }
 
-    const stakeAmount = this.normalizeStakeAmount(input.stakeBounds, input.recommendedStake, rewardAmount);
+    const stakeAmount = 0;
 
     if (rewardAmount !== input.rewardAmount) {
       warnings.push(
         `Reward amount normalized from ${input.rewardAmount.toFixed(4)} CELO to ${rewardAmount.toFixed(4)} CELO`
-      );
-    }
-
-    if (stakeAmount !== input.recommendedStake) {
-      warnings.push(
-        `Stake amount normalized from ${input.recommendedStake.toFixed(4)} CELO to ${stakeAmount.toFixed(4)} CELO`
       );
     }
 
@@ -101,7 +84,7 @@ class QuestValidationEngine {
 
     const transactionCount = input.narrative.txRequirements.reduce((sum, requirement) => sum + requirement.minimumCount, 0);
     if (transactionCount < REQUIRED_TX_STAGES.length) {
-      errors.push('Quest transaction chain does not satisfy the minimum multi-transaction requirement');
+      errors.push('Quest completion flow does not satisfy the minimum deterministic requirement');
     }
 
     const orchestrationId = crypto.randomUUID();
@@ -187,6 +170,54 @@ class QuestValidationEngine {
     }
   }
 
+  private validateNarrativeCore(
+    title: string,
+    description: string,
+    objective: string,
+    lore: string,
+    validationRules: string[]
+  ) {
+    const warnings: string[] = [];
+    const errors: string[] = [];
+    const normalizedTitle = title.trim();
+    const normalizedDescription = description.trim();
+    const normalizedObjective = objective.trim();
+    const normalizedLore = lore.trim();
+
+    if (normalizedTitle.length < 3) {
+      errors.push('Quest title is too short');
+    }
+
+    if (normalizedDescription.length < 10) {
+      errors.push('Quest description is too short');
+    }
+
+    if (normalizedObjective.length < 10) {
+      errors.push('Quest objective is too short');
+    }
+
+    if (normalizedLore.length < 10) {
+      errors.push('Quest lore is too short');
+    }
+
+    const forbiddenTerms = ['openai', 'groq', 'gpt', 'llm', 'prompt', 'external model'];
+    const combined = `${normalizedTitle} ${normalizedDescription} ${normalizedObjective} ${normalizedLore}`.toLowerCase();
+    const forbiddenMatch = forbiddenTerms.find((term) => combined.includes(term));
+    if (forbiddenMatch) {
+      errors.push(`Quest content must not reference ${forbiddenMatch}`);
+    }
+
+    if (!/celo|wallet|transaction|contract|token|proof|reward|nft|leaderboard/i.test(normalizedObjective)) {
+      errors.push('Quest objective must be clearly connected to Celo execution or proof submission');
+    }
+
+    if (validationRules.length < 3) {
+      warnings.push('Quest validation rules were shorter than expected and were accepted as-is');
+    }
+
+    return { warnings, errors };
+  }
+
   private validateChainInteraction(
     input: QuestValidationInput,
     verifierType: ObjectiveType,
@@ -252,22 +283,6 @@ class QuestValidationEngine {
     const min = this.roundCelo(Math.min(Math.max(0.01, rewardBounds.min, minimumAllowedReward), max));
 
     return { min, max };
-  }
-
-  private normalizeStakeAmount(
-    stakeBounds: QuestValidationInput['stakeBounds'],
-    recommendedStake: number,
-    rewardAmount: number
-  ) {
-    const boundedStake = this.roundCelo(Math.max(stakeBounds.min, Math.min(stakeBounds.max, recommendedStake)));
-    const rewardConstrainedStake = this.roundCelo(
-      Math.max(
-        QUEST_CONFIG.MIN_SINGLE_STAKE_CELO,
-        Math.min(boundedStake, rewardAmount * 2)
-      )
-    );
-
-    return rewardConstrainedStake;
   }
 
   private buildMetadata(

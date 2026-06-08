@@ -28,7 +28,6 @@ function eventNameForType(eventType: string) {
     reward_claimed: 'reward:claimed',
     nft_minted: 'nft:minted',
     reward_reserved: 'reward:reserved',
-    stake_locked: 'stake:locked',
     reward_released: 'reward:released',
     reward_paid: 'reward:paid',
     reward_refunded: 'reward:refunded'
@@ -77,7 +76,7 @@ function buildEventSummary(event: ChainEvent, quest: ProjectableQuest | null, fa
     case 'quest_created':
       return `A new quest draft became onchain reality: ${base}.`;
     case 'quest_started':
-      return `The player committed stake and began ${base}.`;
+      return `The player began ${base}.`;
     case 'proof_submitted':
       return `Proof for ${base} was submitted into deterministic review.`;
     case 'reward_claimed':

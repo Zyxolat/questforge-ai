@@ -103,7 +103,7 @@ async function main() {
     });
   }
 
-  console.log('\nQuestForge AI deployment validation');
+  console.log('\nForgeQuest Online deployment validation');
   console.log('Network:', hre.network.name);
   console.log('Chain ID:', chainId);
   console.log('Treasury balance:', ethers.formatEther(treasuryBalance), 'CELO');

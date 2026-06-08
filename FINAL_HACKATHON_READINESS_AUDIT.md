@@ -1,6 +1,6 @@
 # FINAL HACKATHON READINESS AUDIT
 
-## QuestForge AI - MiniPay Hackathon
+## ForgeQuest Online - MiniPay Hackathon
 
 **Audit Date:** June 1, 2026  
 **Auditor:** Automated Verification (No Assumptions)  
@@ -217,7 +217,7 @@ if (nodeEnv === "production" && !optionalEnv("GROQ_API_KEY")) {
     errors,
     "Groq AI",
     "GROQ_API_KEY",
-    "is required in production because QuestForge production readiness depends on live Groq AI quest generation",
+    "is required in production because ForgeQuest production readiness depends on live Groq AI quest generation",
   );
 }
 ```
@@ -394,7 +394,7 @@ apiRouter.get(
 
 ```typescript
 ✅ 5-step modal flow:
-   - 'welcome' - Welcome to QuestForge
+   - 'welcome' - Welcome to ForgeQuest
    - 'minipay' - MiniPay integration explained
    - 'howitworks' - 6-step gameplay walkthrough
    - 'rewards' - Rewards and NFTs
@@ -554,14 +554,14 @@ export function claimDailyLoginBonus() {
 
 ```
 Failed to load resource: net::ERR_FAILED
-Access to XMLHttpRequest at 'https://questforge-ai-production.up.railway.app/api/quests/daily'
+Access to XMLHttpRequest at 'https://forgequest-online-production.up.railway.app/api/quests/daily'
 from origin 'http://localhost:4173' has been blocked by CORS policy
 ```
 
 **Analysis:**
 
 - Frontend at `http://localhost:4173/`
-- Trying to reach production API at `https://questforge-ai-production.up.railway.app/`
+- Trying to reach production API at `https://forgequest-online-production.up.railway.app/`
 - CORS blocked due to origin mismatch
 
 **Cause:**

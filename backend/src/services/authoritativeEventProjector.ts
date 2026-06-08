@@ -7,7 +7,7 @@ import { gameStateProjector } from './gameStateProjector';
 import { logger } from './logger';
 import { worldStateCoordinator } from './worldStateCoordinator';
 
-const STATUS_BY_INDEX = ['AVAILABLE', 'ACTIVE', 'SUBMITTED', 'VERIFIED', 'CANCELLED', 'FAILED'] as const;
+const STATUS_BY_INDEX = ['AVAILABLE', 'ACCEPTED', 'COMPLETED', 'CLAIMABLE', 'REWARDED'] as const;
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
 const METADATA_PREFIX = 'data:application/json;base64,';
 
@@ -319,7 +319,7 @@ async function applyQuestSnapshot(
     },
     difficulty:
       typeof metadata.difficulty === 'number' && Number.isFinite(metadata.difficulty) ? metadata.difficulty : 3,
-    questType: metadata.questType || 'AI Quest',
+    questType: metadata.questType || 'Rule Quest',
     objective: metadata.objective || 'Submit proof onchain.',
     lore: metadata.lore || 'Recovered from onchain quest metadata.',
     stakeAmount: input.snapshot.stakeAmount,
@@ -883,13 +883,14 @@ class AuthoritativeEventProjector {
         await this.handleProofSubmitted(tx, event);
         break;
       case 'reward_claimed':
+      case 'quest_verified':
         await this.handleRewardClaimed(tx, event);
+        break;
+      case 'quest_rewarded':
+        await this.handleQuestRewarded(tx, event);
         break;
       case 'reward_reserved':
         await this.handleRewardReserved(tx, event);
-        break;
-      case 'stake_locked':
-        await this.handleStakeLocked(tx, event);
         break;
       case 'reward_released':
         await this.handleRewardReleased(tx, event);
@@ -917,15 +918,18 @@ class AuthoritativeEventProjector {
     }
 
     const snapshot = await readQuestSnapshot(event.chainQuestId);
-    await upsertUserInTx(tx, normalizeWallet(event.creatorWallet));
+    const creatorWallet = normalizeWallet(event.creatorWallet);
+    const creatorUser = await upsertUserInTx(tx, creatorWallet);
     await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: 'AVAILABLE'
+      startedAt: event.blockTimestamp,
+      forcedStatus: 'ACCEPTED',
+      playerId: creatorUser.id
     });
 
     await ensureTransactionRecord(tx, {
-      wallet: normalizeWallet(event.creatorWallet),
+      wallet: creatorWallet,
       type: 'QUEST_CREATED',
       txHash: event.transactionHash,
       createdAt: event.blockTimestamp,
@@ -949,7 +953,7 @@ class AuthoritativeEventProjector {
       snapshot,
       createdAt: event.blockTimestamp,
       startedAt: event.blockTimestamp,
-      forcedStatus: 'ACTIVE',
+      forcedStatus: 'ACCEPTED',
       playerId: user.id
     });
 
@@ -997,7 +1001,7 @@ class AuthoritativeEventProjector {
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: 'SUBMITTED',
+      forcedStatus: 'COMPLETED',
       playerId: user.id,
       proofTxHash: event.transactionHash
     });
@@ -1061,8 +1065,8 @@ class AuthoritativeEventProjector {
       snapshot,
       createdAt: event.blockTimestamp,
       completedAt: success ? event.blockTimestamp : null,
-      failedAt: success ? null : event.blockTimestamp,
-      forcedStatus: success ? 'VERIFIED' : 'FAILED',
+      failedAt: null,
+      forcedStatus: success ? 'CLAIMABLE' : 'ACCEPTED',
       playerId: user.id,
       verificationTx: event.transactionHash
     });
@@ -1130,7 +1134,7 @@ class AuthoritativeEventProjector {
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: 'AVAILABLE'
+      forcedStatus: 'ACCEPTED'
     });
 
     await upsertUserInTx(tx, creatorWallet);
@@ -1157,51 +1161,6 @@ class AuthoritativeEventProjector {
     });
   }
 
-  private async handleStakeLocked(tx: TransactionClient, event: ChainEvent) {
-    if (!event.chainQuestId || !event.playerWallet) {
-      return;
-    }
-
-    const playerWallet = normalizeWallet(event.playerWallet);
-    const snapshot = await readQuestSnapshot(event.chainQuestId);
-    const profile = await fetchProfileSnapshot(playerWallet);
-    const user = await upsertUserInTx(tx, playerWallet, profile);
-    const quest = await applyQuestSnapshot(tx, {
-      snapshot,
-      createdAt: event.blockTimestamp,
-      startedAt: event.blockTimestamp,
-      forcedStatus: 'ACTIVE',
-      playerId: user.id
-    });
-
-    const payload = getEventPayload(event);
-    const stakeAmount =
-      Number(getBigIntValue(payload.amount ?? payload.stakeAmount) ?? BigInt(Math.round(snapshot.stakeAmount * 1e18))) / 1e18;
-
-    await upsertTreasuryPayout(tx, {
-      questId: quest.id,
-      userId: user.id,
-      chainQuestId: event.chainQuestId,
-      playerWallet,
-      rewardAmount: snapshot.rewardAmount,
-      stakeAmount,
-      totalAmount: snapshot.rewardAmount + stakeAmount,
-      status: 'LOCKED'
-    });
-
-    await ensureTransactionRecord(tx, {
-      userId: user.id,
-      wallet: playerWallet,
-      type: 'TREASURY_STAKE_LOCKED',
-      txHash: event.transactionHash,
-      createdAt: event.blockTimestamp,
-      details: {
-        chainQuestId: event.chainQuestId.toString(),
-        stakeAmount
-      }
-    });
-  }
-
   private async handleRewardReleased(tx: TransactionClient, event: ChainEvent) {
     if (!event.chainQuestId || !event.playerWallet) {
       return;
@@ -1213,15 +1172,15 @@ class AuthoritativeEventProjector {
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: 'VERIFIED',
+      forcedStatus: 'CLAIMABLE',
       completedAt: event.blockTimestamp,
       playerId: user.id
     });
 
     const payload = getEventPayload(event);
     const rewardAmount = Number(getBigIntValue(payload.rewardAmount) ?? BigInt(Math.round(snapshot.rewardAmount * 1e18))) / 1e18;
-    const stakeAmount = Number(getBigIntValue(payload.stakeAmount) ?? BigInt(Math.round(snapshot.stakeAmount * 1e18))) / 1e18;
-    const totalAmount = Number(getBigIntValue(payload.totalPayout) ?? BigInt(Math.round((rewardAmount + stakeAmount) * 1e18))) / 1e18;
+    const stakeAmount = 0;
+    const totalAmount = Number(getBigIntValue(payload.totalPayout) ?? BigInt(Math.round(rewardAmount * 1e18))) / 1e18;
 
     await upsertTreasuryPayout(tx, {
       questId: quest.id,
@@ -1262,15 +1221,14 @@ class AuthoritativeEventProjector {
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: 'VERIFIED',
+      forcedStatus: 'REWARDED',
       completedAt: event.blockTimestamp,
       playerId: user.id
     });
 
     const payload = getEventPayload(event);
     const rewardAmount = Number(getBigIntValue(payload.rewardAmount) ?? BigInt(Math.round(snapshot.rewardAmount * 1e18))) / 1e18;
-    const stakeAmount = Number(getBigIntValue(payload.stakeAmount) ?? BigInt(Math.round(snapshot.stakeAmount * 1e18))) / 1e18;
-    const totalAmount = Number(getBigIntValue(payload.totalPayout) ?? BigInt(Math.round((rewardAmount + stakeAmount) * 1e18))) / 1e18;
+    const totalAmount = Number(getBigIntValue(payload.totalPayout) ?? BigInt(Math.round(rewardAmount * 1e18))) / 1e18;
 
     await upsertTreasuryPayout(tx, {
       questId: quest.id,
@@ -1278,7 +1236,7 @@ class AuthoritativeEventProjector {
       chainQuestId: event.chainQuestId,
       playerWallet,
       rewardAmount,
-      stakeAmount,
+      stakeAmount: 0,
       totalAmount,
       status: 'PAID',
       payoutTx: event.transactionHash,
@@ -1317,8 +1275,34 @@ class AuthoritativeEventProjector {
       details: {
         chainQuestId: event.chainQuestId.toString(),
         rewardAmount,
-        stakeAmount,
         totalAmount
+      }
+    });
+  }
+
+  private async handleQuestRewarded(tx: TransactionClient, event: ChainEvent) {
+    if (!event.chainQuestId || !event.playerWallet) {
+      return;
+    }
+
+    const playerWallet = normalizeWallet(event.playerWallet);
+    const snapshot = await readQuestSnapshot(event.chainQuestId);
+    const user = await upsertUserInTx(tx, playerWallet);
+    await applyQuestSnapshot(tx, {
+      snapshot,
+      createdAt: event.blockTimestamp,
+      forcedStatus: 'REWARDED',
+      playerId: user.id
+    });
+
+    await ensureTransactionRecord(tx, {
+      userId: user.id,
+      wallet: playerWallet,
+      type: 'QUEST_REWARDED',
+      txHash: event.transactionHash,
+      createdAt: event.blockTimestamp,
+      details: {
+        chainQuestId: event.chainQuestId.toString()
       }
     });
   }
@@ -1334,20 +1318,21 @@ class AuthoritativeEventProjector {
       normalizeOptionalWallet(getStringValue(payload.recipient)) ??
       normalizeOptionalWallet(event.creatorWallet);
     const snapshot = await readQuestSnapshot(event.chainQuestId);
-    const forcedStatus: QuestStatus =
-      snapshot.status === 'CANCELLED' ? 'CANCELLED' : snapshot.status === 'FAILED' ? 'FAILED' : 'CANCELLED';
+    const forcedStatus: QuestStatus = ['AVAILABLE', 'ACCEPTED', 'COMPLETED', 'CLAIMABLE', 'REWARDED'].includes(snapshot.status)
+      ? snapshot.status
+      : 'ACCEPTED';
     const user = recipientWallet ? await upsertUserInTx(tx, recipientWallet) : null;
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
       forcedStatus,
-      failedAt: forcedStatus === 'FAILED' ? event.blockTimestamp : null,
+      failedAt: null,
       playerId: user?.id ?? null
     });
 
     const rewardAmount = Number(getBigIntValue(payload.rewardAmount) ?? 0n) / 1e18;
-    const stakeAmount = Number(getBigIntValue(payload.stakeAmount) ?? 0n) / 1e18;
-    const totalAmount = rewardAmount + stakeAmount;
+    const stakeAmount = 0;
+    const totalAmount = rewardAmount;
 
     await upsertTreasuryPayout(tx, {
       questId: quest.id,
@@ -1361,33 +1346,6 @@ class AuthoritativeEventProjector {
       refundTx: event.transactionHash,
       rewardRefundedAt: event.blockTimestamp
     });
-
-    if (user && forcedStatus === 'FAILED') {
-      const history = await ensureQuestHistoryRecord(tx, {
-        userId: user.id,
-        questId: quest.id,
-        action: 'FAILED',
-        proofUri: snapshot.proofUri || null,
-        createdAt: event.blockTimestamp
-      });
-
-      if (history.created) {
-        await applyUserOutcomeStats(tx, {
-          userId: user.id,
-          eventTimestamp: event.blockTimestamp,
-          success: false,
-          xpReward: 0
-        });
-      }
-
-      await materializeClanState(tx, {
-        userId: user.id,
-        questId: quest.id,
-        rewardAmount: 0,
-        status: 'failed',
-        eventTimestamp: event.blockTimestamp
-      });
-    }
 
     await ensureTransactionRecord(tx, {
       userId: user?.id ?? null,
@@ -1415,7 +1373,7 @@ class AuthoritativeEventProjector {
     const quest = await applyQuestSnapshot(tx, {
       snapshot,
       createdAt: event.blockTimestamp,
-      forcedStatus: snapshot.status,
+      forcedStatus: 'REWARDED',
       playerId: user.id,
       nftMintTx: event.transactionHash
     });

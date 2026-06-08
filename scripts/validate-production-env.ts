@@ -1,5 +1,5 @@
 /**
- * QuestForge AI - Production Environment Validation
+ * ForgeQuest Online - Production Environment Validation
  * 
  * Validates all required environment variables, RPC connectivity,
  * and deployment prerequisites before live deployment.
@@ -241,7 +241,7 @@ function validateNotPlaceholder(name: string, value: string | null): boolean {
 
 async function main() {
   console.log('\n═══════════════════════════════════════════════════════════');
-  console.log('   QuestForge AI - Production Environment Validation');
+  console.log('   ForgeQuest Online - Production Environment Validation');
   console.log('═══════════════════════════════════════════════════════════\n');
 
   console.log('📋 CHECKING ENVIRONMENT VARIABLES...\n');
@@ -312,42 +312,15 @@ async function main() {
     recordResult(
       'REWARD_TOKEN_ADDRESS',
       'fail',
-      'Remove stale REWARD_TOKEN_ADDRESS from production; QuestForge rewards settle through native CELO treasury liquidity'
+      'Remove stale REWARD_TOKEN_ADDRESS from production; ForgeQuest rewards settle through native CELO treasury liquidity'
     );
   } else {
     recordResult('REWARD_TOKEN_ADDRESS', 'pass', 'Unset for CELO-only rewards');
   }
 
-  // API Keys
-  console.log('\n🔑 API KEYS...\n');
-  const groqKey = process.env.GROQ_API_KEY?.trim() || null;
-  const groqModel = process.env.GROQ_MODEL?.trim() || null;
-  if (!groqKey) {
-    recordResult('GROQ_API_KEY', 'warning', 'Missing Groq key; deterministic fallback quests remain enabled');
-  } else if (isDeferredReference(groqKey)) {
-    recordResult(
-      'GROQ_API_KEY',
-      'fail',
-      'Still contains a Railway-style placeholder in the loaded environment; set the actual secret in the deployed service'
-    );
-  } else if (!/\s/.test(groqKey)) {
-    recordResult('GROQ_API_KEY', 'pass', 'Groq key configured');
-  } else {
-    recordResult('GROQ_API_KEY', 'fail', 'Invalid Groq key format');
-  }
-  if (!groqModel) {
-    recordResult('GROQ_MODEL', 'warning', 'Missing Groq model; backend will default to llama-3.3-70b-versatile');
-  } else if (isDeferredReference(groqModel)) {
-    recordResult(
-      'GROQ_MODEL',
-      'fail',
-      'Still contains a Railway-style placeholder in the loaded environment; set the concrete Groq model name'
-    );
-  } else if (!/\s/.test(groqModel)) {
-    recordResult('GROQ_MODEL', 'pass', `Groq model configured: ${groqModel}`);
-  } else {
-    recordResult('GROQ_MODEL', 'fail', 'Invalid Groq model format');
-  }
+  // Quest engine
+  console.log('\n⚙️  QUEST ENGINE CONFIGURATION...\n');
+  recordResult('RULE_BASED_QUEST_ENGINE', 'pass', 'ForgeQuest Online uses the deterministic rule-based quest engine');
 
   // JWT Configuration
   console.log('\n🎟️  JWT CONFIGURATION...\n');

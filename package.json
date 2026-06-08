@@ -1,7 +1,7 @@
 {
-  "name": "questforge-ai",
+  "name": "online-forgequest-game",
   "version": "1.0.0",
-  "description": "QuestForge AI - Production-Grade Quest Gaming Platform on Celo",
+  "description": "Online ForgeQuest Game - Rule-Based Quest Gaming Platform on Celo",
   "private": true,
   "engines": {
     "node": ">=18.0.0",
@@ -27,6 +27,7 @@
     "validate:production-env": "ts-node scripts/validate-production-env.ts",
     "validate:treasury": "ts-node scripts/validate-treasury.ts",
     "validate:gameplay": "ts-node scripts/validate-gameplay.ts",
+    "validate:gameplay:twice": "ts-node scripts/validate-gameplay-twice.ts",
     "validate:security": "ts-node scripts/validate-security.ts",
     "validate:minipay": "ts-node scripts/validate-minipay.ts",
     "validate:backend-runtime": "ts-node scripts/validate-backend-runtime.ts",

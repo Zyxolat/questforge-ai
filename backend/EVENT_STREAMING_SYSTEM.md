@@ -1,4 +1,4 @@
-# QuestForge AI - Real-Time Blockchain Event Streaming System
+# ForgeQuest Online - Real-Time Blockchain Event Streaming System
 
 Production-grade real-time event indexing and broadcasting architecture for Celo blockchain integration.
 
@@ -238,10 +238,10 @@ socket.on("quest:created", (event) => {
 ### Use Pre-built Hook
 
 ```typescript
-import { useQuestForgeEvents } from '@services/socketIOClient';
+import { useForgeQuestEvents } from '@services/socketIOClient';
 
 function MyComponent() {
-  const { isConnected, events, client } = useQuestForgeEvents(userWallet);
+  const { isConnected, events, client } = useForgeQuestEvents(userWallet);
 
   return (
     <div>

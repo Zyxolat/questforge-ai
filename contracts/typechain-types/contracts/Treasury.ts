@@ -38,7 +38,6 @@ export interface TreasuryInterface extends Interface {
       | "grantRole"
       | "hasRole"
       | "isSolvent"
-      | "lockStake"
       | "obligations"
       | "owner"
       | "pause"
@@ -53,9 +52,7 @@ export interface TreasuryInterface extends Interface {
       | "rewardReserveCap"
       | "setPayoutCaps"
       | "settleQuestPayout"
-      | "stakeLockCap"
       | "supportsInterface"
-      | "totalLockedStakes"
       | "totalReservedRewards"
       | "transferOwnership"
       | "tripCircuitBreaker"
@@ -77,7 +74,6 @@ export interface TreasuryInterface extends Interface {
       | "RoleAdminChanged"
       | "RoleGranted"
       | "RoleRevoked"
-      | "StakeLocked"
       | "Unpaused"
   ): EventFragment;
 
@@ -127,10 +123,6 @@ export interface TreasuryInterface extends Interface {
   ): string;
   encodeFunctionData(functionFragment: "isSolvent", values?: undefined): string;
   encodeFunctionData(
-    functionFragment: "lockStake",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "obligations",
     values?: undefined
   ): string;
@@ -144,7 +136,7 @@ export interface TreasuryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "refundQuest",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish, BytesLike]
+    values: [BigNumberish, AddressLike, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "renounceOwnership",
@@ -168,23 +160,15 @@ export interface TreasuryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "setPayoutCaps",
-    values: [BigNumberish, BigNumberish, BigNumberish]
+    values: [BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "settleQuestPayout",
-    values: [BigNumberish, AddressLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "stakeLockCap",
-    values?: undefined
+    values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "supportsInterface",
     values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "totalLockedStakes",
-    values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "totalReservedRewards",
@@ -239,7 +223,6 @@ export interface TreasuryInterface extends Interface {
   decodeFunctionResult(functionFragment: "grantRole", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "hasRole", data: BytesLike): Result;
   decodeFunctionResult(functionFragment: "isSolvent", data: BytesLike): Result;
-  decodeFunctionResult(functionFragment: "lockStake", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "obligations",
     data: BytesLike
@@ -279,15 +262,7 @@ export interface TreasuryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "stakeLockCap",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "supportsInterface",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "totalLockedStakes",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -384,17 +359,11 @@ export namespace PausedEvent {
 export namespace PayoutCapsUpdatedEvent {
   export type InputTuple = [
     rewardReserveCap: BigNumberish,
-    stakeLockCap: BigNumberish,
     payoutCap: BigNumberish
   ];
-  export type OutputTuple = [
-    rewardReserveCap: bigint,
-    stakeLockCap: bigint,
-    payoutCap: bigint
-  ];
+  export type OutputTuple = [rewardReserveCap: bigint, payoutCap: bigint];
   export interface OutputObject {
     rewardReserveCap: bigint;
-    stakeLockCap: bigint;
     payoutCap: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -408,21 +377,18 @@ export namespace RewardPaidEvent {
     questId: BigNumberish,
     player: AddressLike,
     rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
     totalPayout: BigNumberish
   ];
   export type OutputTuple = [
     questId: bigint,
     player: string,
     rewardAmount: bigint,
-    stakeAmount: bigint,
     totalPayout: bigint
   ];
   export interface OutputObject {
     questId: bigint;
     player: string;
     rewardAmount: bigint;
-    stakeAmount: bigint;
     totalPayout: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -436,21 +402,18 @@ export namespace RewardRefundedEvent {
     questId: BigNumberish,
     recipient: AddressLike,
     rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
     reason: BytesLike
   ];
   export type OutputTuple = [
     questId: bigint,
     recipient: string,
     rewardAmount: bigint,
-    stakeAmount: bigint,
     reason: string
   ];
   export interface OutputObject {
     questId: bigint;
     recipient: string;
     rewardAmount: bigint;
-    stakeAmount: bigint;
     reason: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -464,21 +427,18 @@ export namespace RewardReleasedEvent {
     questId: BigNumberish,
     player: AddressLike,
     rewardAmount: BigNumberish,
-    stakeAmount: BigNumberish,
     totalPayout: BigNumberish
   ];
   export type OutputTuple = [
     questId: bigint,
     player: string,
     rewardAmount: bigint,
-    stakeAmount: bigint,
     totalPayout: bigint
   ];
   export interface OutputObject {
     questId: bigint;
     player: string;
     rewardAmount: bigint;
-    stakeAmount: bigint;
     totalPayout: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
@@ -563,31 +523,6 @@ export namespace RoleRevokedEvent {
     role: string;
     account: string;
     sender: string;
-  }
-  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
-  export type Filter = TypedDeferredTopicFilter<Event>;
-  export type Log = TypedEventLog<Event>;
-  export type LogDescription = TypedLogDescription<Event>;
-}
-
-export namespace StakeLockedEvent {
-  export type InputTuple = [
-    questId: BigNumberish,
-    player: AddressLike,
-    amount: BigNumberish,
-    totalLockedStakes: BigNumberish
-  ];
-  export type OutputTuple = [
-    questId: bigint,
-    player: string,
-    amount: bigint,
-    totalLockedStakes: bigint
-  ];
-  export interface OutputObject {
-    questId: bigint;
-    player: string;
-    amount: bigint;
-    totalLockedStakes: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -686,16 +621,6 @@ export interface Treasury extends BaseContract {
 
   isSolvent: TypedContractMethod<[], [boolean], "view">;
 
-  lockStake: TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-
   obligations: TypedContractMethod<[], [bigint], "view">;
 
   owner: TypedContractMethod<[], [string], "view">;
@@ -709,9 +634,8 @@ export interface Treasury extends BaseContract {
   questFunds: TypedContractMethod<
     [arg0: BigNumberish],
     [
-      [bigint, bigint, string, bigint] & {
+      [bigint, string, bigint] & {
         reservedReward: bigint;
-        lockedStake: bigint;
         player: string;
         state: bigint;
       }
@@ -724,7 +648,6 @@ export interface Treasury extends BaseContract {
       questId: BigNumberish,
       recipient: AddressLike,
       expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
       reason: BytesLike
     ],
     [bigint],
@@ -754,11 +677,7 @@ export interface Treasury extends BaseContract {
   rewardReserveCap: TypedContractMethod<[], [bigint], "view">;
 
   setPayoutCaps: TypedContractMethod<
-    [
-      newRewardReserveCap: BigNumberish,
-      newStakeLockCap: BigNumberish,
-      newPayoutCap: BigNumberish
-    ],
+    [newRewardReserveCap: BigNumberish, newPayoutCap: BigNumberish],
     [void],
     "nonpayable"
   >;
@@ -767,22 +686,17 @@ export interface Treasury extends BaseContract {
     [
       questId: BigNumberish,
       player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
+      expectedRewardAmount: BigNumberish
     ],
     [bigint],
     "nonpayable"
   >;
-
-  stakeLockCap: TypedContractMethod<[], [bigint], "view">;
 
   supportsInterface: TypedContractMethod<
     [interfaceId: BytesLike],
     [boolean],
     "view"
   >;
-
-  totalLockedStakes: TypedContractMethod<[], [bigint], "view">;
 
   totalReservedRewards: TypedContractMethod<[], [bigint], "view">;
 
@@ -853,17 +767,6 @@ export interface Treasury extends BaseContract {
     nameOrSignature: "isSolvent"
   ): TypedContractMethod<[], [boolean], "view">;
   getFunction(
-    nameOrSignature: "lockStake"
-  ): TypedContractMethod<
-    [
-      questId: BigNumberish,
-      player: AddressLike,
-      expectedStakeAmount: BigNumberish
-    ],
-    [void],
-    "payable"
-  >;
-  getFunction(
     nameOrSignature: "obligations"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
@@ -883,9 +786,8 @@ export interface Treasury extends BaseContract {
   ): TypedContractMethod<
     [arg0: BigNumberish],
     [
-      [bigint, bigint, string, bigint] & {
+      [bigint, string, bigint] & {
         reservedReward: bigint;
-        lockedStake: bigint;
         player: string;
         state: bigint;
       }
@@ -899,7 +801,6 @@ export interface Treasury extends BaseContract {
       questId: BigNumberish,
       recipient: AddressLike,
       expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish,
       reason: BytesLike
     ],
     [bigint],
@@ -935,11 +836,7 @@ export interface Treasury extends BaseContract {
   getFunction(
     nameOrSignature: "setPayoutCaps"
   ): TypedContractMethod<
-    [
-      newRewardReserveCap: BigNumberish,
-      newStakeLockCap: BigNumberish,
-      newPayoutCap: BigNumberish
-    ],
+    [newRewardReserveCap: BigNumberish, newPayoutCap: BigNumberish],
     [void],
     "nonpayable"
   >;
@@ -949,21 +846,14 @@ export interface Treasury extends BaseContract {
     [
       questId: BigNumberish,
       player: AddressLike,
-      expectedRewardAmount: BigNumberish,
-      expectedStakeAmount: BigNumberish
+      expectedRewardAmount: BigNumberish
     ],
     [bigint],
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "stakeLockCap"
-  ): TypedContractMethod<[], [bigint], "view">;
-  getFunction(
     nameOrSignature: "supportsInterface"
   ): TypedContractMethod<[interfaceId: BytesLike], [boolean], "view">;
-  getFunction(
-    nameOrSignature: "totalLockedStakes"
-  ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "totalReservedRewards"
   ): TypedContractMethod<[], [bigint], "view">;
@@ -1069,13 +959,6 @@ export interface Treasury extends BaseContract {
     RoleRevokedEvent.OutputObject
   >;
   getEvent(
-    key: "StakeLocked"
-  ): TypedContractEvent<
-    StakeLockedEvent.InputTuple,
-    StakeLockedEvent.OutputTuple,
-    StakeLockedEvent.OutputObject
-  >;
-  getEvent(
     key: "Unpaused"
   ): TypedContractEvent<
     UnpausedEvent.InputTuple,
@@ -1139,7 +1022,7 @@ export interface Treasury extends BaseContract {
       PausedEvent.OutputObject
     >;
 
-    "PayoutCapsUpdated(uint256,uint256,uint256)": TypedContractEvent<
+    "PayoutCapsUpdated(uint256,uint256)": TypedContractEvent<
       PayoutCapsUpdatedEvent.InputTuple,
       PayoutCapsUpdatedEvent.OutputTuple,
       PayoutCapsUpdatedEvent.OutputObject
@@ -1150,7 +1033,7 @@ export interface Treasury extends BaseContract {
       PayoutCapsUpdatedEvent.OutputObject
     >;
 
-    "RewardPaid(uint256,address,uint256,uint256,uint256)": TypedContractEvent<
+    "RewardPaid(uint256,address,uint256,uint256)": TypedContractEvent<
       RewardPaidEvent.InputTuple,
       RewardPaidEvent.OutputTuple,
       RewardPaidEvent.OutputObject
@@ -1161,7 +1044,7 @@ export interface Treasury extends BaseContract {
       RewardPaidEvent.OutputObject
     >;
 
-    "RewardRefunded(uint256,address,uint256,uint256,bytes32)": TypedContractEvent<
+    "RewardRefunded(uint256,address,uint256,bytes32)": TypedContractEvent<
       RewardRefundedEvent.InputTuple,
       RewardRefundedEvent.OutputTuple,
       RewardRefundedEvent.OutputObject
@@ -1172,7 +1055,7 @@ export interface Treasury extends BaseContract {
       RewardRefundedEvent.OutputObject
     >;
 
-    "RewardReleased(uint256,address,uint256,uint256,uint256)": TypedContractEvent<
+    "RewardReleased(uint256,address,uint256,uint256)": TypedContractEvent<
       RewardReleasedEvent.InputTuple,
       RewardReleasedEvent.OutputTuple,
       RewardReleasedEvent.OutputObject
@@ -1225,17 +1108,6 @@ export interface Treasury extends BaseContract {
       RoleRevokedEvent.InputTuple,
       RoleRevokedEvent.OutputTuple,
       RoleRevokedEvent.OutputObject
-    >;
-
-    "StakeLocked(uint256,address,uint256,uint256)": TypedContractEvent<
-      StakeLockedEvent.InputTuple,
-      StakeLockedEvent.OutputTuple,
-      StakeLockedEvent.OutputObject
-    >;
-    StakeLocked: TypedContractEvent<
-      StakeLockedEvent.InputTuple,
-      StakeLockedEvent.OutputTuple,
-      StakeLockedEvent.OutputObject
     >;
 
     "Unpaused(address)": TypedContractEvent<
