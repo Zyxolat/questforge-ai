@@ -705,27 +705,24 @@ export default function CommandCenter() {
 
         console.debug('[CommandCenter] Using standard wallet path', {
           functionName,
-          signerType: signer.constructor.name
+          signerType: signer.constructor.name,
+          contractAddress: contractAddresses.forgeQuestManagerAddress
         });
 
-        const transactionMethod = (forgeQuestManager as ethers.Contract)[functionName] as (
-          ...methodArgs: unknown[]
-        ) => Promise<ethers.ContractTransactionResponse>;
-
-        if (typeof transactionMethod !== 'function') {
-          console.error('[CommandCenter] Transaction method not found on contract', {
+        // Verify contract has the required method
+        if (typeof (forgeQuestManager as ethers.Contract)[functionName] !== 'function') {
+          const availableMethods = Object.getOwnPropertyNames(forgeQuestManager).filter(
+            m => typeof (forgeQuestManager as Record<string, unknown>)[m] === 'function'
+          );
+          console.error('[CommandCenter] Contract method not callable', {
             functionName,
-            availableMethods: Object.getOwnPropertyNames(forgeQuestManager).filter(m => typeof (forgeQuestManager as Record<string, unknown>)[m] === 'function')
+            availableMethods: availableMethods.slice(0, 20)
           });
-          throw new Error(`Transaction method ${functionName} not found on contract. Contract may not be properly initialized.`);
+          throw new Error(
+            `Method '${functionName}' not found on ForgeQuestManager contract. ` +
+            `Contract may not be properly initialized. Available methods: ${availableMethods.slice(0, 5).join(', ')}`
+          );
         }
-
-        console.debug('[CommandCenter] Calling contract method', {
-          functionName,
-          argsLength: args.length,
-          hasValue: typeof options?.value === 'bigint',
-          valueInEther: typeof options?.value === 'bigint' ? ethers.formatEther(options.value) : undefined
-        });
 
         // Build transaction options for ethers v6
         const txOptions: Record<string, unknown> = {};
@@ -736,15 +733,49 @@ export default function CommandCenter() {
           txOptions.gasLimit = options.gasLimit;
         }
 
-        console.debug('[CommandCenter] Transaction options prepared', {
+        console.debug('[CommandCenter] Calling contract method', {
           functionName,
+          argsLength: args.length,
           hasValue: 'value' in txOptions,
+          valueInEther: typeof options?.value === 'bigint' ? ethers.formatEther(options.value) : undefined,
           hasGasLimit: 'gasLimit' in txOptions
         });
 
-        const tx = await transactionMethod(...args, txOptions);
+        // Use explicit contract method call for ethers v6 compatibility
+        let tx: ethers.ContractTransactionResponse;
+        
+        if (functionName === 'createQuest') {
+          // createQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds, options?)
+          tx = await forgeQuestManager.createQuest(
+            args[0] as string,
+            args[1] as string,
+            args[2] as bigint,
+            args[3] as bigint,
+            args[4] as bigint,
+            txOptions
+          );
+        } else if (functionName === 'submitQuest') {
+          // submitQuest(questId, proofUri, options?)
+          tx = await forgeQuestManager.submitQuest(args[0] as bigint, args[1] as string, txOptions);
+        } else if (functionName === 'startQuest') {
+          // startQuest(questId, options?)
+          tx = await forgeQuestManager.startQuest(args[0] as bigint, txOptions);
+        } else if (functionName === 'claimReward') {
+          // claimReward(questId, options?)
+          tx = await forgeQuestManager.claimReward(args[0] as bigint, txOptions);
+        } else {
+          throw new Error(`Unknown function: ${functionName}`);
+        }
 
-        console.info('[CommandCenter] Transaction submitted successfully', {
+        // Validate transaction was actually submitted
+        if (!tx || typeof tx.hash !== 'string' || !tx.hash.startsWith('0x')) {
+          throw new Error(
+            `Invalid transaction response from wallet. ` +
+            `Expected hash property, got: ${typeof tx?.hash} ${tx?.hash?.slice(0, 20)}`
+          );
+        }
+
+        console.info('[CommandCenter] Transaction submitted to wallet successfully', {
           functionName,
           txHash: tx.hash
         });
@@ -776,17 +807,57 @@ export default function CommandCenter() {
       if (!walletProvider) throw new Error('MiniPay provider is unavailable');
 
       const signerAddress = await signer?.getAddress();
-      const gasLimit =
-        options?.gasLimit ??
-        (await estimateContractWriteGas({
-          provider: walletProvider,
-          contractAddress: contractAddresses.forgeQuestManagerAddress,
-          contractInterface: forgeQuestManager.interface,
-          functionName,
-          args,
-          from: signerAddress || address,
-          ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
-        }));
+      
+      // Try gas estimation with fallback for MiniPay reliability
+      let gasLimit = options?.gasLimit;
+      if (!gasLimit) {
+        try {
+          console.debug('[CommandCenter] Estimating gas for MiniPay', {
+            functionName,
+            contractAddress: contractAddresses.forgeQuestManagerAddress
+          });
+          
+          gasLimit = await estimateContractWriteGas({
+            provider: walletProvider,
+            contractAddress: contractAddresses.forgeQuestManagerAddress,
+            contractInterface: forgeQuestManager.interface,
+            functionName,
+            args,
+            from: signerAddress || address,
+            ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+          });
+          
+          console.debug('[CommandCenter] Gas estimation succeeded', {
+            functionName,
+            gasLimit: gasLimit.toString()
+          });
+        } catch (estimationError) {
+          console.warn('[CommandCenter] Gas estimation failed, using fallback', {
+            functionName,
+            error: estimationError instanceof Error ? estimationError.message : String(estimationError)
+          });
+          
+          // Use conservative estimate based on function
+          // createQuest typically needs ~200-250k, other functions ~100-150k
+          if (functionName === 'createQuest') {
+            gasLimit = BigInt('300000');
+          } else {
+            gasLimit = BigInt('200000');
+          }
+          
+          console.info('[CommandCenter] Using fallback gas limit', {
+            functionName,
+            fallbackGasLimit: gasLimit.toString()
+          });
+        }
+      }
+
+      console.debug('[CommandCenter] Sending MiniPay transaction', {
+        functionName,
+        gasLimit: gasLimit?.toString(),
+        hasValue: typeof options?.value === 'bigint'
+      });
+
       const { txHash } = await sendContractWrite({
         provider: walletProvider,
         contractAddress: contractAddresses.forgeQuestManagerAddress,
@@ -796,6 +867,19 @@ export default function CommandCenter() {
         from: address,
         gasLimit,
         ...(typeof options?.value === 'bigint' ? { value: options.value } : {})
+      });
+
+      // Validate transaction hash from MiniPay
+      if (!txHash || typeof txHash !== 'string' || !txHash.startsWith('0x')) {
+        throw new Error(
+          `Invalid transaction hash from MiniPay. ` +
+          `Expected hash string starting with 0x, got: ${typeof txHash}`
+        );
+      }
+
+      console.info('[CommandCenter] MiniPay transaction submitted successfully', {
+        functionName,
+        txHash
       });
 
       setTxStatus({
@@ -953,20 +1037,49 @@ export default function CommandCenter() {
   }
 
   async function handleAcceptQuest() {
+    console.log('[handleAcceptQuest] Button clicked - starting accept quest flow');
+    
     const questToAccept = interactiveQuest ?? lastGeneratedQuest;
+    console.log('[handleAcceptQuest] Quest check:', {
+      hasInteractiveQuest: !!interactiveQuest,
+      hasLastGeneratedQuest: !!lastGeneratedQuest,
+      selectedQuest: questToAccept?.id,
+      selectedQuestStatus: questToAccept?.status
+    });
+
+    console.log('[handleAcceptQuest] Wallet check:', {
+      address,
+      hasForgeQuestManager: !!forgeQuestManager,
+      hasQuestToAccept: !!questToAccept
+    });
+
     if (!address || !forgeQuestManager || !questToAccept) {
+      const reason = !address ? 'NO_WALLET_ADDRESS' : !forgeQuestManager ? 'NO_CONTRACT' : 'NO_QUEST';
+      console.error('[handleAcceptQuest] Early exit - reason:', reason, {
+        address,
+        forgeQuestManager: !!forgeQuestManager,
+        questToAccept: !!questToAccept
+      });
       setMessage('Connect your wallet and generate a quest before accepting.');
       return;
     }
 
     if (questToAccept.status !== 'AVAILABLE') {
+      console.warn('[handleAcceptQuest] Quest not available:', {
+        status: questToAccept.status,
+        expectedStatus: 'AVAILABLE'
+      });
       setMessage('Only generated quests can be accepted.');
       return;
     }
 
+    console.log('[handleAcceptQuest] Pre-auth validation passed, checking authentication...');
     if (!(await requireReadyAuth('accepting quest'))) {
+      console.warn('[handleAcceptQuest] Authentication check failed or user rejected');
       return;
     }
+    
+    console.log('[handleAcceptQuest] Authentication passed, proceeding with transaction');
 
     console.info('[CommandCenter] handleAcceptQuest: Quest validation passed, preparing transaction', {
       questId: questToAccept.id,
