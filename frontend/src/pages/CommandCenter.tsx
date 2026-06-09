@@ -1036,8 +1036,41 @@ export default function CommandCenter() {
     }
   }
 
+  /**
+   * Validate all prerequisites for quest acceptance
+   * Returns a detailed diagnostics object for debugging
+   */
+  function validateQuestAcceptancePrerequisites() {
+    const diagnostics = {
+      timestamp: new Date().toISOString(),
+      walletConnected: !!address,
+      walletAddress: address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'N/A',
+      contractInitialized: !!forgeQuestManager,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      signerAvailable: !!signer,
+      providerAvailable: !!provider,
+      questExists: !!interactiveQuest || !!lastGeneratedQuest,
+      selectedQuest: (interactiveQuest || lastGeneratedQuest)?.id,
+      questStatus: (interactiveQuest || lastGeneratedQuest)?.status,
+      expectedQuestStatus: 'AVAILABLE',
+      isCorrectNetwork,
+      authStatus,
+      authReady: isAuthReady,
+      isMiniPay
+    };
+
+    console.group('[handleAcceptQuest] Validation Diagnostics');
+    console.table(diagnostics);
+    console.groupEnd();
+
+    return diagnostics;
+  }
+
   async function handleAcceptQuest() {
     console.log('[handleAcceptQuest] Button clicked - starting accept quest flow');
+    
+    // Run comprehensive validation diagnostics
+    validateQuestAcceptancePrerequisites();
     
     const questToAccept = interactiveQuest ?? lastGeneratedQuest;
     console.log('[handleAcceptQuest] Quest check:', {
