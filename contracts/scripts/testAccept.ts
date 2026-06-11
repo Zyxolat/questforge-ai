@@ -1,12 +1,27 @@
 import hre from 'hardhat';
 import { ForgeQuestManager__factory } from '../typechain-types';
 import fs from 'fs';
+import type { Signer } from 'ethers';
 
 async function main() {
   const deployments = JSON.parse(fs.readFileSync('deployments/localhost-addresses.json', 'utf8'));
   const forgeAddress = deployments.FORGE_QUEST_MANAGER_ADDRESS;
 
-  const [creator, accepter] = await hre.ethers.getSigners();
+  let creator: Signer;
+  let accepter: Signer;
+  const signers: Signer[] = (hre.ethers && typeof hre.ethers.getSigners === 'function') ? await hre.ethers.getSigners() : [];
+  if (signers && signers.length >= 2) {
+    creator = signers[0];
+    accepter = signers[1];
+  } else {
+    const accounts = await hre.network.provider.request({ method: 'eth_accounts', params: [] }) as string[];
+    if (accounts && accounts.length >= 2) {
+      creator = hre.ethers.provider.getSigner(accounts[0]);
+      accepter = hre.ethers.provider.getSigner(accounts[1]);
+    } else {
+      throw new Error('No signers or accounts available on this network. Provide accounts in hardhat config or environment.');
+    }
+  }
   console.log('Creator', await creator.getAddress());
   console.log('Accepter', await accepter.getAddress());
 

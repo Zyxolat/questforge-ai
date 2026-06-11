@@ -659,7 +659,10 @@ export default function CommandCenter() {
     if (interactiveQuest.status === 'VERIFIED') return 'VERIFIED';
     if (interactiveQuest.status === 'SUBMITTED') return 'SUBMITTED';
     if (interactiveQuest.status === 'ACTIVE') return 'ACTIVE';
-    if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId) return 'ACCEPTED';
+    // If a quest has been created onchain (chainQuestId) but no player set, it's still AVAILABLE onchain
+    // If a quest has a player assigned, treat it as ACCEPTED/ACTIVE in the UI regardless of backend sync timing
+    if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId && interactiveQuest.playerId) return 'ACCEPTED';
+    if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId && !interactiveQuest.playerId) return 'GENERATED';
     if (interactiveQuest.status === 'AVAILABLE') return 'GENERATED';
     return 'PENDING';
   }
@@ -699,7 +702,10 @@ export default function CommandCenter() {
     });
 
     try {
-      if (!isMiniPay) {
+      // Decide whether to use direct signer (ethers) or provider.request (WalletConnect / other injected providers)
+      const preferProviderRequest = Boolean(walletProvider && !walletProvider.isMetaMask && !walletProvider.isMiniPay);
+
+      if (!isMiniPay && !preferProviderRequest) {
         if (!signer) throw new Error('Wallet signer is unavailable');
 
         console.debug('[CommandCenter] Using standard wallet path', {
@@ -803,7 +809,7 @@ export default function CommandCenter() {
         return { hash: tx.hash, receipt };
       }
 
-      if (!walletProvider) throw new Error('MiniPay provider is unavailable');
+      if (!walletProvider) throw new Error('Wallet provider is unavailable');
 
       const signerAddress = await signer?.getAddress();
       
