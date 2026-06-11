@@ -1082,6 +1082,16 @@ export default function CommandCenter() {
       hasQuestToAccept: !!questToAccept
     });
 
+    // If no wallet address is present, attempt to prompt the user to connect first
+    if (!address) {
+      console.debug('[handleAcceptQuest] No wallet address detected — attempting to prompt wallet connection');
+      try {
+        await connectWallet();
+      } catch (connectError) {
+        console.error('[handleAcceptQuest] connectWallet attempt failed', connectError);
+      }
+    }
+
     if (!address || !forgeQuestManager || !questToAccept) {
       const reason = !address ? 'NO_WALLET_ADDRESS' : !forgeQuestManager ? 'NO_CONTRACT' : 'NO_QUEST';
       console.error('[handleAcceptQuest] Early exit - reason:', reason, {
