@@ -895,14 +895,31 @@ export default function CommandCenter() {
 
       return { hash: txHash, receipt };
     } catch (error) {
+      // Try to extract revert reason if available
+      let revertReason = 'Unknown revert reason';
+      if (error instanceof Error) {
+        if (error.message.includes('execution reverted')) {
+          revertReason = error.message;
+        }
+        const errorData = (error as Record<string, unknown>).data as Record<string, unknown> | undefined;
+        if (errorData && typeof errorData === 'object') {
+          if (typeof errorData.message === 'string') {
+            revertReason = errorData.message;
+          }
+        }
+      }
+
       console.error('[CommandCenter] submitForgeWrite failed', {
         functionName,
         errorName: error instanceof Error ? error.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
+        revertReason,
         isMiniPay,
         hasForgeQuestManager: !!forgeQuestManager,
         hasSigner: !!signer,
-        hasProvider: !!provider
+        hasProvider: !!provider,
+        errorCode: (error as Record<string, unknown>)?.code,
+        errorData: (error as Record<string, unknown>)?.data
       });
       setTxStatus({
         type: 'error',
@@ -1153,6 +1170,21 @@ export default function CommandCenter() {
         xpReward: template.xpReward,
         durationSeconds: template.durationSeconds,
         acceptanceFee: '0.001 CELO'
+      });
+
+      console.debug('[CommandCenter] handleAcceptQuest: Raw contract parameters', {
+        args: {
+          title: template.title,
+          titleType: typeof template.title,
+          titleLength: template.title?.length ?? 0,
+          metadataUri: template.metadataUri,
+          metadataUriType: typeof template.metadataUri,
+          metadataUriLength: template.metadataUri?.length ?? 0,
+          rewardAmountWei: rewardAmount.toString(),
+          xpRewardWei: xpReward.toString(),
+          durationSecondsWei: durationSeconds.toString(),
+          stakeWei: ethers.parseEther('0.001').toString()
+        }
       });
 
       const { hash: creationTxHash, receipt } = await submitForgeWrite(
