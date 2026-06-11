@@ -31,6 +31,7 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "MAX_QUEST_DURATION"
       | "MAX_SINGLE_REWARD"
       | "VERIFIER_ROLE"
+      | "acceptQuest"
       | "cancelQuest"
       | "claimReward"
       | "createQuest"
@@ -70,6 +71,7 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "CircuitBreakerTriggered"
       | "OwnershipTransferred"
       | "Paused"
+      | "QuestAccepted"
       | "QuestCreated"
       | "QuestRewarded"
       | "QuestSubmitted"
@@ -100,6 +102,10 @@ export interface ForgeQuestManagerInterface extends Interface {
   encodeFunctionData(
     functionFragment: "VERIFIER_ROLE",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "acceptQuest",
+    values: [BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "cancelQuest",
@@ -233,6 +239,10 @@ export interface ForgeQuestManagerInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "acceptQuest",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "cancelQuest",
     data: BytesLike
   ): Result;
@@ -359,6 +369,28 @@ export namespace PausedEvent {
   export type OutputTuple = [account: string];
   export interface OutputObject {
     account: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace QuestAcceptedEvent {
+  export type InputTuple = [
+    questId: BigNumberish,
+    player: AddressLike,
+    acceptedAt: BigNumberish
+  ];
+  export type OutputTuple = [
+    questId: bigint,
+    player: string,
+    acceptedAt: bigint
+  ];
+  export interface OutputObject {
+    questId: bigint;
+    player: string;
+    acceptedAt: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -614,6 +646,8 @@ export interface ForgeQuestManager extends BaseContract {
 
   VERIFIER_ROLE: TypedContractMethod<[], [string], "view">;
 
+  acceptQuest: TypedContractMethod<[questId: BigNumberish], [void], "payable">;
+
   cancelQuest: TypedContractMethod<
     [questId: BigNumberish],
     [void],
@@ -803,6 +837,9 @@ export interface ForgeQuestManager extends BaseContract {
   getFunction(
     nameOrSignature: "VERIFIER_ROLE"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "acceptQuest"
+  ): TypedContractMethod<[questId: BigNumberish], [void], "payable">;
   getFunction(
     nameOrSignature: "cancelQuest"
   ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
@@ -1000,6 +1037,13 @@ export interface ForgeQuestManager extends BaseContract {
     PausedEvent.OutputObject
   >;
   getEvent(
+    key: "QuestAccepted"
+  ): TypedContractEvent<
+    QuestAcceptedEvent.InputTuple,
+    QuestAcceptedEvent.OutputTuple,
+    QuestAcceptedEvent.OutputObject
+  >;
+  getEvent(
     key: "QuestCreated"
   ): TypedContractEvent<
     QuestCreatedEvent.InputTuple,
@@ -1095,6 +1139,17 @@ export interface ForgeQuestManager extends BaseContract {
       PausedEvent.InputTuple,
       PausedEvent.OutputTuple,
       PausedEvent.OutputObject
+    >;
+
+    "QuestAccepted(uint256,address,uint256)": TypedContractEvent<
+      QuestAcceptedEvent.InputTuple,
+      QuestAcceptedEvent.OutputTuple,
+      QuestAcceptedEvent.OutputObject
+    >;
+    QuestAccepted: TypedContractEvent<
+      QuestAcceptedEvent.InputTuple,
+      QuestAcceptedEvent.OutputTuple,
+      QuestAcceptedEvent.OutputObject
     >;
 
     "QuestCreated(uint256,address,string,uint256,uint256)": TypedContractEvent<

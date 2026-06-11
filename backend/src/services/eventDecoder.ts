@@ -21,6 +21,7 @@ export interface DecodedEvent {
 const QUEST_MANAGER_ABI = [
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)',
   'event QuestSubmitted(uint256 indexed questId,address indexed player,bytes32 proofHash)',
+  'event QuestAccepted(uint256 indexed questId,address indexed player,uint256 acceptedAt)',
   'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)',
   'event QuestRewarded(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
 ];
@@ -78,6 +79,28 @@ const decoders: Record<string, EventDecoderFunc> = {
           },
           chainQuestId,
           creatorWallet
+        };
+      }
+
+      if (parsed.name === 'QuestAccepted') {
+        chainQuestId = event[0];
+        playerWallet = String(event[1]);
+        return {
+          eventType: 'quest_started',
+          eventName: 'QuestAccepted',
+          blockNumber: BigInt(log.blockNumber),
+          transactionHash: log.transactionHash,
+          logIndex: Number(log.index ?? 0),
+          blockTimestamp,
+          contractAddress: log.address,
+          fromAddress: playerWallet,
+          data: {
+            questId: chainQuestId,
+            player: playerWallet,
+            acceptedAt: event[2]
+          },
+          chainQuestId,
+          playerWallet
         };
       }
 

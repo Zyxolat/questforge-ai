@@ -9,11 +9,13 @@ const treasuryAddress = env.TREASURY_ADDRESS;
 const forgeQuestManagerAbi: ethers.InterfaceAbi = [
   'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
   'function submitQuest(uint256 questId,string calldata proofUri) external',
+  'function acceptQuest(uint256 questId) external payable',
   'function verifyQuest(uint256 questId,bool success,bytes32 proofVerificationHash) external',
   'function claimReward(uint256 questId) external',
   'function cancelQuest(uint256 questId) external',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)',
+  'event QuestAccepted(uint256 indexed questId,address indexed player,uint256 acceptedAt)',
   'event QuestSubmitted(uint256 indexed questId,address indexed player,bytes32 proofHash)',
   'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)',
   'event QuestRewarded(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'

@@ -142,10 +142,8 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     ) external payable whenNotPaused rewardSystemActive nonReentrant {
         require(bytes(title).length > 0, "Title required");
         require(bytes(metadataUri).length > 0, "Metadata required");
-        require(msg.value == ACCEPTANCE_FEE, "Accept fee required");
-
-        (bool success, ) = payable(treasury).call{value: msg.value}("");
-        require(success, "Fee transfer failed");
+        // Creation of a quest does not collect the acceptance fee.
+        // Acceptance is performed by a separate `acceptQuest` payable call.
 
         require(rewardAmount > 0, "Reward required");
         require(rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
@@ -156,9 +154,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 questId = nextQuestId;
         nextQuestId += 1;
 
-        uint256 playerNonce = playerNonces[msg.sender];
-        playerNonces[msg.sender] = playerNonce + 1;
-
+        // Record quest as AVAILABLE; acceptance happens separately.
         ITreasury(treasury).reserveReward(questId, msg.sender, rewardAmount);
 
         quests[questId] = Quest({
@@ -172,11 +168,11 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
             rewardAmount: rewardAmount,
             xpReward: xpReward,
             createdAt: block.timestamp,
-            startedAt: block.timestamp,
+            startedAt: 0,
             expiresAt: block.timestamp + durationSeconds,
-            status: QuestStatus.Accepted,
-            player: msg.sender,
-            playerNonce: playerNonce,
+            status: QuestStatus.Available,
+            player: address(0),
+            playerNonce: 0,
             proofVerificationHash: bytes32(0)
         });
 
