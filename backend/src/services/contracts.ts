@@ -15,6 +15,8 @@ const treasuryAddress = env.TREASURY_ADDRESS;
 
 const ForgeQuestManagerABI = [
   'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
+  'function acceptQuest(uint256 questId) external payable',
+  'function createAndAcceptQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable returns (uint256)',
   'function submitQuest(uint256 questId,string calldata proofUri) external',
   'function verifyQuest(uint256 questId,bool success,bytes32 proofVerificationHash) external',
   'function claimReward(uint256 questId) external',
@@ -22,6 +24,7 @@ const ForgeQuestManagerABI = [
   'function playerNonces(address player) view returns (uint256)',
   'function quests(uint256) view returns (uint256 questId,address creator,string title,string metadataUri,string proofUri,bytes32 proofHash,uint256 stakeAmount,uint256 rewardAmount,uint256 xpReward,uint256 createdAt,uint256 startedAt,uint256 expiresAt,uint8 status,address player,uint256 playerNonce,bytes32 proofVerificationHash)',
   'event QuestCreated(uint256 indexed questId,address indexed creator,string title,uint256 rewardAmount,uint256 xpReward)',
+  'event QuestAccepted(uint256 indexed questId,address indexed player,uint256 acceptedAt)',
   'event QuestSubmitted(uint256 indexed questId,address indexed player,bytes32 proofHash)',
   'event QuestVerified(uint256 indexed questId,address indexed player,bool success,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)',
   'event QuestRewarded(uint256 indexed questId,address indexed player,uint256 rewardAmount,uint256 xpReward,bytes32 proofHash)'
@@ -58,5 +61,7 @@ export const contracts = {
   forgeQuestManagerWrite: verifierSigner ? (forgeQuestManager.connect(verifierSigner) as ethers.Contract) : null,
   rewardNFT: new ethers.Contract(rewardNFTAddress, RewardNFTABI, provider),
   reputation: new ethers.Contract(reputationAddress, ReputationABI, provider),
-  treasury: new ethers.Contract(treasuryAddress, TreasuryABI, provider)
+  treasury: new ethers.Contract(treasuryAddress, TreasuryABI, provider),
+  // For parsing events from logs
+  forgeQuestManagerInterface: forgeQuestManager.interface
 };

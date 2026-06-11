@@ -205,6 +205,101 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
             emit QuestAccepted(questId, msg.sender, block.timestamp);
         }
 
+    /**
+     * Atomic operation: Create and immediately accept a quest in a single transaction
+     * 
+     * This function is called by player wallets (not backend) when accepting a quest.
+     * It creates a new quest and immediately marks it as accepted by the caller.
+     * 
+     * Requirements:
+     * - msg.value == ACCEPTANCE_FEE (0.001 CELO)
+     * - All quest parameters must be valid (same as createQuest)
+     * 
+     * Returns: The questId assigned to the newly created quest
+     * 
+     * Events:
+     * - QuestCreated(questId, msg.sender, title, rewardAmount, xpReward)
+     * - QuestAccepted(questId, msg.sender, block.timestamp)
+     */
+    function createAndAcceptQuest(
+        string calldata title,
+        string calldata metadataUri,
+        uint256 rewardAmount,
+        uint256 xpReward,
+        uint256 durationSeconds
+    ) external payable whenNotPaused rewardSystemActive nonReentrant 
+        returns (uint256 questId) {
+        
+        // ===== CREATE PHASE =====
+        
+        // Validate acceptance fee is paid upfront
+        require(msg.value == ACCEPTANCE_FEE, "Accept fee required");
+        
+        // Validate quest parameters (identical to createQuest())
+        require(bytes(title).length > 0, "Title required");
+        require(bytes(metadataUri).length > 0, "Metadata required");
+        require(rewardAmount > 0, "Reward required");
+        require(rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
+        require(xpReward > 0, "XP reward required");
+        require(durationSeconds > 0, "Duration required");
+        require(durationSeconds <= MAX_QUEST_DURATION, "Duration too long");
+        
+        // Allocate new quest ID
+        questId = nextQuestId;
+        nextQuestId += 1;
+        
+        // Reserve reward in treasury (before creating quest)
+        ITreasury(treasury).reserveReward(questId, msg.sender, rewardAmount);
+        
+        // Create quest structure in Available status
+        quests[questId] = Quest({
+            questId: questId,
+            creator: msg.sender,
+            title: title,
+            metadataUri: metadataUri,
+            proofUri: "",
+            proofHash: bytes32(0),
+            stakeAmount: 0,
+            rewardAmount: rewardAmount,
+            xpReward: xpReward,
+            createdAt: block.timestamp,
+            startedAt: 0,           // Will be set during acceptance
+            expiresAt: block.timestamp + durationSeconds,
+            status: QuestStatus.Available,
+            player: address(0),     // Will be set during acceptance
+            playerNonce: 0,
+            proofVerificationHash: bytes32(0)
+        });
+        
+        // Register player quest index and initialize reputation
+        playerQuestIndices[msg.sender].push(questId);
+        reputation.initializePlayer(msg.sender);
+        
+        // Emit quest creation event
+        emit QuestCreated(questId, msg.sender, title, rewardAmount, xpReward);
+        
+        // ===== ACCEPT PHASE =====
+        
+        // Transfer acceptance fee to treasury
+        (bool success, ) = payable(treasury).call{value: msg.value}("");
+        require(success, "Fee transfer failed");
+        
+        // Get player nonce for verification
+        uint256 playerNonce = playerNonces[msg.sender];
+        playerNonces[msg.sender] = playerNonce + 1;
+        
+        // Update quest status to ACCEPTED
+        quests[questId].player = msg.sender;
+        quests[questId].status = QuestStatus.Accepted;
+        quests[questId].startedAt = block.timestamp;
+        quests[questId].playerNonce = playerNonce;
+        
+        // Emit quest acceptance event
+        emit QuestAccepted(questId, msg.sender, block.timestamp);
+        
+        return questId;
+    }
+
     function submitQuest(uint256 questId, string calldata proofUri)
         external
         whenNotPaused

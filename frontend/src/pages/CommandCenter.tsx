@@ -174,9 +174,9 @@ function formatActionFailure(error: unknown, fallbackLabel: string) {
   return fallbackLabel;
 }
 
-function formatTxLabel(functionName: 'createQuest' | 'acceptQuest' | 'submitQuest' | 'claimReward') {
+function formatTxLabel(functionName: 'createQuest' | 'acceptQuest' | 'createAndAcceptQuest' | 'submitQuest' | 'claimReward') {
   if (functionName === 'createQuest') return 'Forge quest';
-  if (functionName === 'acceptQuest') return 'Accept quest';
+  if (functionName === 'acceptQuest' || functionName === 'createAndAcceptQuest') return 'Accept quest';
   if (functionName === 'claimReward') return 'Claim reward';
   return 'Submit proof';
 }
@@ -682,7 +682,7 @@ export default function CommandCenter() {
   }
 
   async function submitForgeWrite(
-    functionName: 'createQuest' | 'acceptQuest' | 'submitQuest' | 'claimReward',
+    functionName: 'createQuest' | 'acceptQuest' | 'createAndAcceptQuest' | 'submitQuest' | 'claimReward',
     args: unknown[],
     options?: { value?: bigint; gasLimit?: bigint }
   ) {
@@ -1063,7 +1063,7 @@ export default function CommandCenter() {
   }
 
   async function handleAcceptQuest() {
-    console.log('[handleAcceptQuest] Button clicked - starting accept quest flow');
+    console.log('[handleAcceptQuest] Button clicked - starting lazy-registration accept quest flow');
     
     // Run comprehensive validation diagnostics
     validateQuestAcceptancePrerequisites();
@@ -1131,88 +1131,140 @@ export default function CommandCenter() {
     setLoading(true);
     setTxStatus(null);
     setProofError(null);
-    setMessage('Checking treasury liquidity before accepting quest...');
-
-    try {
-      // Pre-flight check: verify treasury has sufficient liquidity
-      if (provider) {
-        const treasuryBalance = await provider.getBalance(contractAddresses.treasuryAddress);
-        const questRewardWei = ethers.parseEther(String((questToAccept as GeneratedQuestTemplate).rewardAmount));
-        console.debug('[handleAcceptQuest] Treasury liquidity check', {
-          treasuryAddress: contractAddresses.treasuryAddress,
-          treasuryBalance: ethers.formatEther(treasuryBalance),
-          requiredReward: questToAccept.rewardAmount
-        });
-
-        if (treasuryBalance < questRewardWei) {
-          const shortfall = ethers.formatEther(questRewardWei - treasuryBalance);
-          console.warn('[handleAcceptQuest] Insufficient treasury liquidity', {
-            treasuryBalance: ethers.formatEther(treasuryBalance),
-            required: questToAccept.rewardAmount,
-            shortfall
-          });
-          setLoading(false);
-          setMessage(
-            `Treasury has insufficient liquidity. ` +
-            `Need ${questToAccept.rewardAmount} CELO, only have ${ethers.formatEther(treasuryBalance)} CELO. ` +
-            `Shortfall: ${shortfall} CELO. Contact support to fund the treasury.`
-          );
-          return;
-        }
-      }
-    } catch (liquidityCheckError) {
-      console.warn('[handleAcceptQuest] Treasury liquidity check failed (proceeding anyway)', liquidityCheckError);
-    }
-
     setMessage('Accepting the quest onchain. Approve a 0.001 CELO transaction to begin.');
 
     try {
       const template = questToAccept as GeneratedQuestTemplate;
-      const tTyped = template as unknown as { chainQuestId?: string | number | bigint; chainId?: string | number | bigint };
-      const chainQuestIdRaw = tTyped.chainQuestId ?? tTyped.chainId ?? null;
+      const tTyped = template as unknown as { chainQuestId?: string | number | bigint | null; chainId?: string | number | bigint | null };
+      const chainQuestIdRaw = tTyped.chainQuestId ?? tTyped.chainId;
+
+      // Lazy-registration: Check if quest needs on-chain registration (chainQuestId is null)
       if (!chainQuestIdRaw) {
-        throw new Error('Quest must be registered onchain before acceptance (missing chainQuestId)');
+        // New flow: createAndAcceptQuest in single atomic transaction
+        console.debug('[CommandCenter] handleAcceptQuest: Lazy-registration path - calling createAndAcceptQuest', {
+          title: template.title,
+          rewardAmount: template.rewardAmount,
+          acceptanceFee: '0.001 CELO'
+        });
+
+        const metadataUri = template.metadataUri || `ipfs://metadata/${template.id}`;
+        const xpReward = template.xpReward || 100;
+        const durationSeconds = template.durationSeconds || 86400;
+
+        const { hash: acceptTxHash, receipt } = await submitForgeWrite(
+          'createAndAcceptQuest',
+          [template.title, metadataUri, ethers.parseEther(String(template.rewardAmount)), xpReward, durationSeconds],
+          { value: ethers.parseEther('0.001') }
+        );
+
+        console.info('[CommandCenter] handleAcceptQuest: createAndAcceptQuest receipt received', {
+          txHash: acceptTxHash,
+          blockNumber: receipt?.blockNumber
+        });
+
+        // Parse QuestCreated event to extract the generated chainQuestId
+        const questCreatedLog = parseReceiptEvent(receipt, {
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface
+        }, 'QuestCreated');
+
+        if (!questCreatedLog || !questCreatedLog.args?.questId) {
+          throw new Error('QuestCreated event not found in receipt - quest may not have been registered');
+        }
+
+        const assignedChainQuestId = String(questCreatedLog.args.questId);
+        console.info('[CommandCenter] handleAcceptQuest: Extracted chainQuestId from QuestCreated event', {
+          chainQuestId: assignedChainQuestId,
+          txHash: acceptTxHash
+        });
+
+        // Notify backend of the acceptance and chainQuestId assignment
+        console.debug('[CommandCenter] handleAcceptQuest: Notifying backend of on-chain acceptance', {
+          questId: template.id,
+          chainQuestId: assignedChainQuestId,
+          txHash: acceptTxHash
+        });
+
+        const acceptanceResponse = await fetch(`/api/quests/${template.id}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chainQuestId: assignedChainQuestId,
+            acceptanceTxHash: acceptTxHash
+          })
+        });
+
+        if (!acceptanceResponse.ok) {
+          const errorData = await acceptanceResponse.json().catch(() => ({}));
+          throw new Error(
+            errorData?.error?.message ||
+            `Backend acceptance failed: ${acceptanceResponse.statusText}`
+          );
+        }
+
+        const acceptanceResult = await acceptanceResponse.json();
+        console.info('[CommandCenter] handleAcceptQuest: Backend confirmed acceptance', {
+          questId: template.id,
+          chainQuestId: assignedChainQuestId,
+          status: acceptanceResult.quest?.status
+        });
+
+        // Update local state to mark accepted
+        const persistedQuest: QuestState = {
+          ...template,
+          creator: template.creator ?? address,
+          chainQuestId: assignedChainQuestId,
+          status: 'ACCEPTED',
+          player: address,
+          startedAt: Date.now() / 1000
+        };
+
+        setLastGeneratedQuest(persistedQuest);
+        patchQuest(questMatcher(questToAccept), persistedQuest);
+        upsertQuest(persistedQuest);
+        setRevealQuestModal(false);
+        setMessage('Quest accepted! Payment confirmed. Complete the objective and submit proof below.');
+        await syncNow();
+      } else {
+        // Migration path: Legacy pre-registered quests with existing chainQuestId
+        console.log('[CommandCenter] handleAcceptQuest: Migration path - quest already has chainQuestId, using acceptQuest', {
+          chainQuestId: chainQuestIdRaw
+        });
+
+        const chainQuestId = BigInt(String(chainQuestIdRaw));
+
+        const { hash: acceptTxHash, receipt } = await submitForgeWrite('acceptQuest', [chainQuestId], {
+          value: ethers.parseEther('0.001')
+        });
+
+        console.info('[CommandCenter] handleAcceptQuest: acceptQuest receipt received', {
+          txHash: acceptTxHash,
+          blockNumber: receipt?.blockNumber
+        });
+
+        const parsedLog = parseReceiptEvent(receipt, {
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface
+        }, 'QuestAccepted');
+
+        // Update local state to mark accepted
+        const acceptedAt = parsedLog?.args?.acceptedAt ? Number(parsedLog.args.acceptedAt) : Date.now() / 1000;
+        const persistedQuest: QuestState = {
+          ...template,
+          creator: template.creator ?? address,
+          chainQuestId: String(chainQuestId),
+          status: 'ACCEPTED',
+          player: address,
+          startedAt: acceptedAt
+        };
+
+        setLastGeneratedQuest(persistedQuest);
+        patchQuest(questMatcher(questToAccept), persistedQuest);
+        upsertQuest(persistedQuest);
+        setRevealQuestModal(false);
+        setMessage('Quest accepted! Payment confirmed. Complete the objective and submit proof below.');
+        await syncNow();
       }
-
-      const chainQuestId = BigInt(String(chainQuestIdRaw));
-
-      console.debug('[CommandCenter] handleAcceptQuest: Calling submitForgeWrite', {
-        functionName: 'acceptQuest',
-        chainQuestId: chainQuestId.toString(),
-        acceptanceFee: '0.001 CELO'
-      });
-
-      const { hash: acceptTxHash, receipt } = await submitForgeWrite('acceptQuest', [chainQuestId], {
-        value: ethers.parseEther('0.001')
-      });
-
-      console.info('[CommandCenter] handleAcceptQuest: Transaction receipt received', {
-        txHash: acceptTxHash,
-        blockNumber: receipt?.blockNumber
-      });
-
-      const parsedLog = parseReceiptEvent(receipt, {
-        contractAddress: contractAddresses.forgeQuestManagerAddress,
-        contractInterface: forgeQuestManager.interface
-      }, 'QuestAccepted');
-
-      // Update local state to mark accepted
-      const acceptedAt = parsedLog?.args?.acceptedAt ? Number(parsedLog.args.acceptedAt) : Date.now() / 1000;
-      const persistedQuest: QuestState = {
-        ...template,
-        creator: template.creator ?? template.creator,
-        chainQuestId: String(chainQuestId),
-        status: 'ACCEPTED',
-        player: address,
-        startedAt: acceptedAt
-      };
-
-      setLastGeneratedQuest(persistedQuest);
-      patchQuest(questMatcher(questToAccept), persistedQuest);
-      upsertQuest(persistedQuest);
-      setRevealQuestModal(false);
-      setMessage('Quest accepted! Complete the objective and submit proof below.');
-      await syncNow();
     } catch (error) {
       console.error('[CommandCenter] handleAcceptQuest failed', {
         errorName: error instanceof Error ? error.name : 'Unknown',

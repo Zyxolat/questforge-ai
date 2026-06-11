@@ -401,6 +401,167 @@ export async function generateQuest(req: Request, res: Response) {
   }
 }
 
+/**
+ * Accept a quest that was created via createAndAcceptQuest()
+ * Frontend calls this AFTER user wallet confirms the transaction
+ * 
+ * Updates the database with the chainQuestId returned from on-chain createAndAcceptQuest()
+ * 
+ * Request body: {
+ *   chainQuestId: string,           // From QuestCreated event
+ *   acceptanceTxHash: string        // From user's wallet tx
+ * }
+ */
+export async function acceptQuestOnchain(req: Request, res: Response) {
+  const questId = req.params.questId;
+  const { chainQuestId, acceptanceTxHash } = req.body;
+  const wallet = req.auth?.wallet;
+
+  if (!questId) {
+    return res.status(400).json({
+      error: {
+        code: 'QUEST_ID_REQUIRED',
+        message: 'Quest ID is required in URL'
+      }
+    });
+  }
+
+  if (!chainQuestId || typeof chainQuestId !== 'string') {
+    return res.status(400).json({
+      error: {
+        code: 'CHAIN_QUEST_ID_REQUIRED',
+        message: 'chainQuestId is required and must be a string'
+      }
+    });
+  }
+
+  if (!acceptanceTxHash || typeof acceptanceTxHash !== 'string') {
+    return res.status(400).json({
+      error: {
+        code: 'TX_HASH_REQUIRED',
+        message: 'acceptanceTxHash is required and must be a string'
+      }
+    });
+  }
+
+  try {
+    // Fetch the quest from database
+    const quest = await prisma.quest.findUnique({
+      where: { id: questId }
+    });
+
+    if (!quest) {
+      return res.status(404).json({
+        error: {
+          code: 'QUEST_NOT_FOUND',
+          message: `Quest ${questId} not found`
+        }
+      });
+    }
+
+    // Verify the creator matches the authenticated user
+    if (quest.creator !== wallet) {
+      logger.warn('[QUEST] Unauthorized acceptance attempt', {
+        questId,
+        expectedCreator: quest.creator,
+        actualWallet: wallet
+      });
+      return res.status(403).json({
+        error: {
+          code: 'UNAUTHORIZED',
+          message: 'You do not have permission to accept this quest'
+        }
+      });
+    }
+
+    // Verify quest is in AVAILABLE status
+    if (quest.status !== 'AVAILABLE') {
+      return res.status(400).json({
+        error: {
+          code: 'QUEST_INVALID_STATUS',
+          message: `Quest status is ${quest.status}, expected AVAILABLE`
+        }
+      });
+    }
+
+    // Verify quest is not already accepted on-chain
+    if (quest.chainQuestId !== null) {
+      return res.status(400).json({
+        error: {
+          code: 'QUEST_ALREADY_REGISTERED',
+          message: 'Quest is already registered on-chain'
+        }
+      });
+    }
+
+    // Get or create user
+    const user = await upsertUser(wallet);
+
+    // Update quest with chainQuestId and acceptance details
+    const updatedQuest = await prisma.quest.update({
+      where: { id: questId },
+      data: {
+        chainQuestId: BigInt(chainQuestId),
+        playerId: user.id,
+        status: 'ACCEPTED',
+        startedAt: new Date(),
+        stakeTxHash: acceptanceTxHash
+      }
+    });
+
+    logger.info('[QUEST] Quest accepted on-chain', {
+      questId,
+      chainQuestId: chainQuestId.toString(),
+      wallet,
+      txHash: acceptanceTxHash,
+      player: user.username
+    });
+
+    // TODO: Publish realtime event for sync (publishQuestAccepted not yet implemented in RealtimeEventPublisher)
+    // try {
+    //   await realtimeEventPublisher.publishQuestAccepted({
+    //     questId,
+    //     chainQuestId: BigInt(chainQuestId),
+    //     player: wallet,
+    //     acceptedAt: updatedQuest.startedAt?.toISOString() ?? new Date().toISOString()
+    //   });
+    // } catch (eventError) {
+    //   logger.warn('[QUEST] Failed to publish realtime event', {
+    //     questId,
+    //     error: eventError instanceof Error ? eventError.message : String(eventError)
+    //   });
+    // }
+
+    res.json({
+      success: true,
+      quest: {
+        id: updatedQuest.id,
+        chainQuestId: updatedQuest.chainQuestId?.toString(),
+        status: updatedQuest.status,
+        playerId: updatedQuest.playerId,
+        startedAt: updatedQuest.startedAt?.toISOString(),
+        title: updatedQuest.title,
+        description: updatedQuest.description,
+        rewardAmount: updatedQuest.rewardAmount
+      }
+    });
+  } catch (error) {
+    logger.error('[QUEST] Accept quest on-chain failed', {
+      questId,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined
+    });
+
+    res.status(500).json({
+      error: {
+        code: 'ACCEPT_QUEST_FAILED',
+        message: 'Failed to accept quest on-chain',
+        details: error instanceof Error ? error.message : String(error)
+      }
+    });
+  }
+}
+
 export async function getDailyMissions(_req: Request, res: Response) {
   const missionDifficulties = [1, 2, 3];
   const missions = missionDifficulties.map((difficulty) => {

@@ -567,6 +567,9 @@ async function bootstrap() {
   });
 
   app.use(globalLimiter);
+  // Import admin router
+  const { adminRouter } = await import('./routes/admin');
+  app.use('/admin', adminRouter);
   app.use('/api', apiRouter);
   app.use('/api', (_req, res) => {
     res.status(404).json({
