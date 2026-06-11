@@ -80,6 +80,11 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 rewardAmount,
         uint256 xpReward
     );
+    event QuestAccepted(
+        uint256 indexed questId,
+        address indexed player,
+        uint256 acceptedAt
+    );
     event QuestSubmitted(uint256 indexed questId, address indexed player, bytes32 proofHash);
     event QuestVerified(
         uint256 indexed questId,
@@ -180,6 +185,29 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
 
         emit QuestCreated(questId, msg.sender, title, rewardAmount, xpReward);
     }
+
+        function acceptQuest(uint256 questId) external payable whenNotPaused rewardSystemActive nonReentrant {
+            require(msg.value == ACCEPTANCE_FEE, "Accept fee required");
+
+            Quest storage quest = quests[questId];
+            require(quest.questId != 0, "Quest not found");
+            require(quest.status == QuestStatus.Available, "Quest unavailable");
+            require(block.timestamp <= quest.expiresAt, "Quest expired");
+            require(quest.player == address(0), "Quest already accepted");
+
+            (bool success, ) = payable(treasury).call{value: msg.value}("");
+            require(success, "Fee transfer failed");
+
+            uint256 playerNonce = playerNonces[msg.sender];
+            playerNonces[msg.sender] = playerNonce + 1;
+
+            quest.player = msg.sender;
+            quest.status = QuestStatus.Accepted;
+            quest.startedAt = block.timestamp;
+            quest.playerNonce = playerNonce;
+
+            emit QuestAccepted(questId, msg.sender, block.timestamp);
+        }
 
     function submitQuest(uint256 questId, string calldata proofUri)
         external
