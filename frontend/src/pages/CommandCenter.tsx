@@ -901,7 +901,7 @@ export default function CommandCenter() {
         if (error.message.includes('execution reverted')) {
           revertReason = error.message;
         }
-        const errorData = (error as Record<string, unknown>).data as Record<string, unknown> | undefined;
+        const errorData = (error as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
         if (errorData && typeof errorData === 'object') {
           if (typeof errorData.message === 'string') {
             revertReason = errorData.message;
@@ -1154,7 +1154,7 @@ export default function CommandCenter() {
       // Pre-flight check: verify treasury has sufficient liquidity
       if (provider) {
         const treasuryBalance = await provider.getBalance(contractAddresses.treasuryAddress);
-        const questRewardWei = ethers.parseEther(questToAccept.rewardAmount.toString());
+        const questRewardWei = ethers.parseEther(String((questToAccept as GeneratedQuestTemplate).rewardAmount));
         console.debug('[handleAcceptQuest] Treasury liquidity check', {
           treasuryAddress: contractAddresses.treasuryAddress,
           treasuryBalance: ethers.formatEther(treasuryBalance),

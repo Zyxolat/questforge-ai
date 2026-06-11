@@ -136,7 +136,7 @@ export function describeTransactionFailure(error: unknown): TransactionFailure {
   ) {
     return {
       kind: 'insufficient_funds',
-      message: 'Wallet balance is too low for the required stake plus network gas.',
+      message: 'Wallet balance is too low for the required transaction value plus network gas.',
       details
     };
   }
