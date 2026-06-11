@@ -175,9 +175,8 @@ function formatActionFailure(error: unknown, fallbackLabel: string) {
   return fallbackLabel;
 }
 
-function formatTxLabel(functionName: 'createQuest' | 'startQuest' | 'submitQuest' | 'claimReward') {
+function formatTxLabel(functionName: 'createQuest' | 'submitQuest' | 'claimReward') {
   if (functionName === 'createQuest') return 'Forge quest';
-  if (functionName === 'startQuest') return 'Complete quest';
   if (functionName === 'claimReward') return 'Claim reward';
   return 'Submit proof';
 }
@@ -680,7 +679,7 @@ export default function CommandCenter() {
   }
 
   async function submitForgeWrite(
-    functionName: 'createQuest' | 'startQuest' | 'submitQuest' | 'claimReward',
+    functionName: 'createQuest' | 'submitQuest' | 'claimReward',
     args: unknown[],
     options?: { value?: bigint; gasLimit?: bigint }
   ) {
@@ -757,9 +756,6 @@ export default function CommandCenter() {
         } else if (functionName === 'submitQuest') {
           // submitQuest(questId, proofUri, options?)
           tx = await forgeQuestManager.submitQuest(args[0] as bigint, args[1] as string, txOptions);
-        } else if (functionName === 'startQuest') {
-          // startQuest(questId, options?)
-          tx = await forgeQuestManager.startQuest(args[0] as bigint, txOptions);
         } else if (functionName === 'claimReward') {
           // claimReward(questId, options?)
           tx = await forgeQuestManager.claimReward(args[0] as bigint, txOptions);
