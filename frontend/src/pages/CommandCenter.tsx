@@ -1148,6 +1148,39 @@ export default function CommandCenter() {
     setLoading(true);
     setTxStatus(null);
     setProofError(null);
+    setMessage('Checking treasury liquidity before accepting quest...');
+
+    try {
+      // Pre-flight check: verify treasury has sufficient liquidity
+      if (provider) {
+        const treasuryBalance = await provider.getBalance(contractAddresses.treasuryAddress);
+        const questRewardWei = ethers.parseEther(questToAccept.rewardAmount.toString());
+        console.debug('[handleAcceptQuest] Treasury liquidity check', {
+          treasuryAddress: contractAddresses.treasuryAddress,
+          treasuryBalance: ethers.formatEther(treasuryBalance),
+          requiredReward: questToAccept.rewardAmount
+        });
+
+        if (treasuryBalance < questRewardWei) {
+          const shortfall = ethers.formatEther(questRewardWei - treasuryBalance);
+          console.warn('[handleAcceptQuest] Insufficient treasury liquidity', {
+            treasuryBalance: ethers.formatEther(treasuryBalance),
+            required: questToAccept.rewardAmount,
+            shortfall
+          });
+          setLoading(false);
+          setMessage(
+            `Treasury has insufficient liquidity. ` +
+            `Need ${questToAccept.rewardAmount} CELO, only have ${ethers.formatEther(treasuryBalance)} CELO. ` +
+            `Shortfall: ${shortfall} CELO. Contact support to fund the treasury.`
+          );
+          return;
+        }
+      }
+    } catch (liquidityCheckError) {
+      console.warn('[handleAcceptQuest] Treasury liquidity check failed (proceeding anyway)', liquidityCheckError);
+    }
+
     setMessage('Accepting the quest onchain. Approve a 0.001 CELO transaction to begin.');
 
     try {
