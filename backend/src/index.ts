@@ -165,7 +165,7 @@ async function bootstrap() {
 
   const runStartupStep = async <T>(
     service: StartupServiceKey,
-    _attempt: number,
+    attempt: number,
     fn: () => Promise<T>,
     options?: {
       optional?: boolean;
@@ -188,7 +188,7 @@ async function bootstrap() {
 
     logger.info(`[STARTUP] Service initializing: ${service}`, {
       service,
-      attempt: _attempt,
+      attempt,
       timeoutMs,
       optional
     });
