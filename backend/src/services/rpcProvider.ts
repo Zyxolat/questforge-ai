@@ -115,8 +115,9 @@ class RobustRpcProvider {
 
     if (blockRange <= 0) return [];
 
-    // Chunk the requests
-    const chunkSize = Math.min(maxChunkSize, env.EVENT_CHUNK_SIZE);
+    // Chunk the requests (removed EVENT_CHUNK_SIZE env var, using hardcoded default)
+    const defaultChunkSize = 5000;
+    const chunkSize = Math.min(maxChunkSize, defaultChunkSize);
     const chunks = Math.ceil(blockRange / chunkSize);
 
     logger.debug(`Fetching logs in ${chunks} chunks`, {
@@ -248,7 +249,7 @@ class RobustRpcProvider {
 // Export singleton instance
 export const rpcProvider = new RobustRpcProvider({
   url: env.CELO_RPC_URL,
-  timeout: env.RPC_TIMEOUT_MS,
-  maxRetries: env.INDEXER_RETRY_LIMIT,
-  backoffMs: env.INDEXER_BACKOFF_MS
+  timeout: 30000, // 30 seconds (was RPC_TIMEOUT_MS)
+  maxRetries: 3, // (was INDEXER_RETRY_LIMIT)
+  backoffMs: 1000 // (was INDEXER_BACKOFF_MS)
 });

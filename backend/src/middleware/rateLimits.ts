@@ -10,8 +10,6 @@
 
 import { Request, Response, NextFunction } from 'express';
 import rateLimit, { type Options } from 'express-rate-limit';
-import { createClient } from 'redis';
-import { env } from '../config/env';
 import { logger } from '../services/logger';
 
 // Rate limit configuration per endpoint
@@ -36,26 +34,10 @@ export const RATE_LIMITS = {
 };
 
 /**
- * Create rate limiter with safe in-memory defaults.
- * We probe Redis for visibility, but we do not attach request handling to it at startup.
- * That keeps Railway health checks and API traffic available even when Redis is degraded.
+ * Create rate limiter with in-memory store.
+ * Redis support removed (database-first model).
  */
-const redisClient = env.REDIS_URL ? createClient({ url: env.REDIS_URL }) : null;
-
-if (redisClient) {
-  redisClient.on('error', (error) => {
-    logger.error('[RATE_LIMIT] Redis probe error', error, {
-      service: 'rateLimitRedisProbe'
-    });
-  });
-  void redisClient.connect().catch((error) => {
-    logger.warn('[RATE_LIMIT] Redis store unavailable, using in-memory rate limits', {
-      error: error instanceof Error ? error.message : 'unknown'
-    });
-  });
-} else {
-  logger.info('[RATE_LIMIT] Redis not configured, using in-memory rate limits');
-}
+logger.info('[RATE_LIMIT] Using in-memory rate limits');
 
 function createRateLimiter(
   options: { windowMs: number; max: number },

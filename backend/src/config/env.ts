@@ -34,7 +34,6 @@ export type AppEnv = {
   TREASURY_ADDRESS: string;
   INDEXER_FROM_BLOCK: number;
   INDEXER_POLL_INTERVAL_MS: number;
-  REDIS_URL?: string;
   VERIFIER_PRIVATE_KEY?: string;
   DAILY_REWARD_TREASURY_PRIVATE_KEY?: string;
   VERIFICATION_WORKER_INTERVAL_MS: number;
@@ -52,14 +51,10 @@ export type AppEnv = {
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
   JWT_EXPIRES_IN_SECONDS: number;
-  ENABLE_EVENT_STREAM: boolean;
-  EVENT_CHUNK_SIZE: number;
-  EVENT_POLL_INTERVAL_MS: number;
   INDEXER_RETRY_LIMIT: number;
   INDEXER_BACKOFF_MS: number;
-  WEBSOCKET_ENABLED: boolean;
   RPC_TIMEOUT_MS: number;
-  EVENT_WORKER_CONCURRENCY: number;
+  EVENT_CHUNK_SIZE: number;
 };
 
 export class EnvValidationError extends Error {
@@ -337,7 +332,6 @@ export function validateEnvironment(): EnvValidationResult {
   const warnings: EnvIssue[] = [];
 
   const nodeEnv = optionalEnv('NODE_ENV') || 'development';
-  const enableEventStream = parseBoolean('ENABLE_EVENT_STREAM', optionalEnv('ENABLE_EVENT_STREAM'), false);
   const frontendUrl = captureRequired('FRONTEND_URL', 'Application URLs', errors, (raw) =>
     parseUrl('FRONTEND_URL', raw)
   );
@@ -398,9 +392,6 @@ export function validateEnvironment(): EnvValidationResult {
     parseEthereumAddress('TREASURY_ADDRESS', raw)
   );
 
-  const redisUrl = captureOptional('REDIS_URL', 'Optional Services', warnings, (raw) =>
-    parseUrl('REDIS_URL', raw).toString()
-  );
   const verifierPrivateKey = captureVerifierPrivateKey(nodeEnv, errors, warnings);
   const dailyRewardTreasuryPrivateKey = captureOptional(
     'DAILY_REWARD_TREASURY_PRIVATE_KEY',
@@ -408,24 +399,6 @@ export function validateEnvironment(): EnvValidationResult {
     warnings,
     (raw) => parseOptionalPrivateKey('DAILY_REWARD_TREASURY_PRIVATE_KEY', raw)
   );
-
-  if (enableEventStream && !redisUrl) {
-    addIssue(
-      errors,
-      'Event Streaming',
-      'REDIS_URL',
-      'is required when ENABLE_EVENT_STREAM=true because the production event queue and worker depend on Redis'
-    );
-  }
-
-  if (nodeEnv === 'production' && !enableEventStream) {
-    addIssue(
-      errors,
-      'Event Streaming',
-      'ENABLE_EVENT_STREAM',
-      'must be true in production so realtime chain projection and websocket updates stay authoritative'
-    );
-  }
 
   const authUriRaw = optionalEnv('AUTH_URI') || frontendUrl?.toString();
   let authUri: URL | undefined;
@@ -505,7 +478,6 @@ export function validateEnvironment(): EnvValidationResult {
           'INDEXER_POLL_INTERVAL_MS',
           optionalEnv('INDEXER_POLL_INTERVAL_MS') || '10000'
         ),
-        REDIS_URL: redisUrl,
         VERIFIER_PRIVATE_KEY: verifierPrivateKey,
         DAILY_REWARD_TREASURY_PRIVATE_KEY: dailyRewardTreasuryPrivateKey,
         VERIFICATION_WORKER_INTERVAL_MS: parsePositiveInt(
@@ -529,20 +501,10 @@ export function validateEnvironment(): EnvValidationResult {
         JWT_SECRET: jwtSecret!,
         JWT_EXPIRES_IN: resolvedJwtExpiresIn,
         JWT_EXPIRES_IN_SECONDS: parseJwtExpirySeconds(resolvedJwtExpiresIn),
-        ENABLE_EVENT_STREAM: enableEventStream,
-        EVENT_CHUNK_SIZE: parsePositiveInt('EVENT_CHUNK_SIZE', optionalEnv('EVENT_CHUNK_SIZE') || '5000'),
-        EVENT_POLL_INTERVAL_MS: parsePositiveInt(
-          'EVENT_POLL_INTERVAL_MS',
-          optionalEnv('EVENT_POLL_INTERVAL_MS') || '5000'
-        ),
         INDEXER_RETRY_LIMIT: parsePositiveInt('INDEXER_RETRY_LIMIT', optionalEnv('INDEXER_RETRY_LIMIT') || '10'),
         INDEXER_BACKOFF_MS: parsePositiveInt('INDEXER_BACKOFF_MS', optionalEnv('INDEXER_BACKOFF_MS') || '2000'),
-        WEBSOCKET_ENABLED: parseBoolean('WEBSOCKET_ENABLED', optionalEnv('WEBSOCKET_ENABLED'), true),
         RPC_TIMEOUT_MS: parsePositiveInt('RPC_TIMEOUT_MS', optionalEnv('RPC_TIMEOUT_MS') || '30000'),
-        EVENT_WORKER_CONCURRENCY: parsePositiveInt(
-          'EVENT_WORKER_CONCURRENCY',
-          optionalEnv('EVENT_WORKER_CONCURRENCY') || '5'
-        )
+        EVENT_CHUNK_SIZE: parsePositiveInt('EVENT_CHUNK_SIZE', optionalEnv('EVENT_CHUNK_SIZE') || '5000')
       },
       errors,
       warnings

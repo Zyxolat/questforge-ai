@@ -25,13 +25,9 @@ import {
 import { logger } from './services/logger';
 
 type StartupServiceKey =
-  | 'websocket'
   | 'database'
   | 'worldState'
-  | 'proofVerificationWorker'
-  | 'eventQueue'
-  | 'eventWorker'
-  | 'eventIngestor';
+  | 'proofVerificationWorker';
 
 type StartupServiceStatus = 'pending' | 'initializing' | 'ready' | 'failed' | 'skipped';
 
@@ -129,15 +125,8 @@ async function bootstrap() {
   const { performHealthCheck } = await import('./config/production');
   const { globalLimiter } = await import('./middleware/rateLimits');
   const { apiRouter } = await import('./routes/api');
-  const { productionEventIngestor } = await import('./services/productionEventIngestor');
-  const { productionEventQueue } = await import('./services/productionEventQueue');
-  const { productionEventWorker } = await import('./services/productionEventWorker');
-  const { productionWebSocketBroadcaster } = await import('./services/productionWebSocketBroadcaster');
-  const { rpcFailoverManager } = await import('./services/rpcFailoverManager');
   const { prisma } = await import('./services/chain');
   const { assertAuthStorageReady } = await import('./services/auth');
-  const { ruleBasedQuestEngine } = await import('./services/ruleBasedQuestEngine');
-  const { authoritativeEventProjector } = await import('./services/authoritativeEventProjector');
   const { startProofVerificationWorker, stopProofVerificationWorker } = await import('./services/verification');
   const { worldStateCoordinator } = await import('./services/worldStateCoordinator');
 
@@ -165,36 +154,18 @@ async function bootstrap() {
     retryDelayMs: null,
     nextRetryAt: null,
     services: {
-      websocket: createServiceState(true),
       database: createServiceState(false),
       worldState: createServiceState(false),
-      proofVerificationWorker: createServiceState(true),
-      eventQueue: createServiceState(false),
-      eventWorker: createServiceState(false),
-      eventIngestor: createServiceState(false)
+      proofVerificationWorker: createServiceState(true)
     }
   };
 
   let isShuttingDown = false;
   let retryTimer: NodeJS.Timeout | null = null;
 
-  const markServiceSkipped = (service: StartupServiceKey, reason: string) => {
-    startupState.services[service] = {
-      ...startupState.services[service],
-      status: 'skipped',
-      lastError: reason,
-      lastReadyAt: nowIso()
-    };
-
-    logger.info(`[STARTUP] Service skipped: ${service}`, {
-      service,
-      reason
-    });
-  };
-
   const runStartupStep = async <T>(
     service: StartupServiceKey,
-    attempt: number,
+    _attempt: number,
     fn: () => Promise<T>,
     options?: {
       optional?: boolean;
@@ -217,7 +188,7 @@ async function bootstrap() {
 
     logger.info(`[STARTUP] Service initializing: ${service}`, {
       service,
-      attempt,
+      attempt: _attempt,
       timeoutMs,
       optional
     });
@@ -302,24 +273,8 @@ async function bootstrap() {
     }, retryDelayMs);
   };
 
-  const initializeOptionalRuntimeServices = async (attempt: number) => {
-    if (!env.WEBSOCKET_ENABLED) {
-      markServiceSkipped('websocket', 'WEBSOCKET_ENABLED=false');
-    } else if (startupState.services.websocket.status !== 'ready') {
-      await runStartupStep(
-        'websocket',
-        attempt,
-        async () => {
-          await productionWebSocketBroadcaster.initialize(httpServer);
-        },
-        {
-          optional: true,
-          swallowFailure: true,
-          timeoutMs: 10000
-        }
-      );
-    }
-
+  const initializeOptionalRuntimeServices = async () => {
+    // Optional services initialization (currently empty)
   };
 
   const initializeBackgroundServices = async () => {
@@ -339,7 +294,7 @@ async function bootstrap() {
     });
 
     try {
-      await initializeOptionalRuntimeServices(attempt);
+      await initializeOptionalRuntimeServices();
 
       await runStartupStep('database', attempt, async () => {
         await prisma.$queryRaw`SELECT 1`;
@@ -353,24 +308,6 @@ async function bootstrap() {
       await runStartupStep('proofVerificationWorker', attempt, async () => {
         startProofVerificationWorker();
       }, { timeoutMs: 5000, optional: true });
-
-      if (!env.ENABLE_EVENT_STREAM) {
-        markServiceSkipped('eventQueue', 'ENABLE_EVENT_STREAM=false');
-        markServiceSkipped('eventWorker', 'ENABLE_EVENT_STREAM=false');
-        markServiceSkipped('eventIngestor', 'ENABLE_EVENT_STREAM=false');
-      } else {
-        await runStartupStep('eventQueue', attempt, async () => {
-          await productionEventQueue.initialize();
-        }, { timeoutMs: 15000 });
-
-        await runStartupStep('eventWorker', attempt, async () => {
-          await productionEventWorker.startWorker();
-        }, { timeoutMs: 15000 });
-
-        await runStartupStep('eventIngestor', attempt, async () => {
-          await productionEventIngestor.start();
-        }, { timeoutMs: Math.max(env.RPC_TIMEOUT_MS * 2, 20000) });
-      }
 
       startupState.servicesReady = true;
       startupState.lastReadyAt = nowIso();
@@ -436,12 +373,7 @@ async function bootstrap() {
     });
 
     const shutdownTasks = [
-      { name: 'Ingestor', fn: () => productionEventIngestor.stop() },
-      { name: 'Worker', fn: () => productionEventWorker.stopWorker() },
       { name: 'Proof Verification Worker', fn: () => stopProofVerificationWorker() },
-      { name: 'Queue', fn: () => productionEventQueue.cleanup() },
-      { name: 'WebSocket', fn: () => productionWebSocketBroadcaster.cleanup() },
-      { name: 'RPC Failover', fn: () => rpcFailoverManager.cleanup() },
       { name: 'Prisma', fn: () => prisma.$disconnect() }
     ];
 
@@ -521,51 +453,6 @@ async function bootstrap() {
     });
   });
 
-  app.get('/health/events', async (_req, res) => {
-    try {
-      const ingestorStatus = productionEventIngestor.getStatus();
-      const workerStatus = productionEventWorker.getStatus();
-      const queueStats = await productionEventQueue.getQueueStats();
-      const wsStats = productionWebSocketBroadcaster.getStats();
-      const rpcHealth = await rpcFailoverManager.getHealthStatus();
-      const worldDiagnostics = worldStateCoordinator.getDiagnostics();
-      const questDiagnostics = ruleBasedQuestEngine.getDiagnostics();
-
-      res.status(200).json({
-        timestamp: new Date().toISOString(),
-        startup: startupState,
-        ingestor: ingestorStatus,
-        worker: workerStatus,
-        queue: queueStats,
-        websocket: wsStats,
-        rpc: {
-          endpoints: rpcHealth,
-          lastSuccessful: rpcFailoverManager.getLastSuccessfulEndpoint(),
-          healthCount: rpcHealth.filter((endpoint) => endpoint.healthy).length,
-          totalCount: rpcHealth.length
-        },
-        orchestration: {
-          questGeneration: questDiagnostics,
-          worldState: worldDiagnostics,
-          authoritativeProjector: authoritativeEventProjector.getDiagnostics()
-        },
-        healthy:
-          startupState.servicesReady &&
-          ingestorStatus.running &&
-          workerStatus.running &&
-          (queueStats?.healthy ?? false) &&
-          rpcHealth.filter((endpoint) => endpoint.healthy).length > 0 &&
-          worldDiagnostics.activeVersion !== null
-      });
-    } catch (error) {
-      logger.error('[HEALTH] Failed to generate event streaming report', error);
-      res.status(500).json({
-        error: 'Health check failed',
-        startup: startupState
-      });
-    }
-  });
-
   app.use(globalLimiter);
   // Import admin router
   const { adminRouter } = await import('./routes/admin');
@@ -618,9 +505,7 @@ async function bootstrap() {
     logger.info('[STARTUP] Server listening', {
       port: env.PORT,
       host: '0.0.0.0',
-      environment: env.NODE_ENV,
-      eventStreamingEnabled: env.ENABLE_EVENT_STREAM,
-      websocketEnabled: env.WEBSOCKET_ENABLED
+      environment: env.NODE_ENV
     });
 
     void initializeBackgroundServices();

@@ -13,7 +13,6 @@ import { logger } from '../services/logger';
 import { ruleBasedQuestEngine } from '../services/ruleBasedQuestEngine';
 import { npcRelationshipEngine } from '../services/npcRelationshipEngine';
 import { QuestValidationError } from '../services/questValidationEngine';
-import { realtimeEventPublisher } from '../services/realtimeEventPublisher';
 import { queueProofVerification } from '../services/verification';
 import { worldStateCoordinator } from '../services/worldStateCoordinator';
 
@@ -412,9 +411,20 @@ export async function generateQuest(req: Request, res: Response) {
  *   acceptanceTxHash: string        // From user's wallet tx
  * }
  */
-export async function acceptQuestOnchain(req: Request, res: Response) {
+/**
+ * DATABASE-FIRST MODEL: Accept quest without blockchain
+ *
+ * - No chain registration needed
+ * - Instant database update
+ * - User must be authenticated
+ * - Quest must be in AVAILABLE status
+ *
+ * Request body: {} (empty, no parameters)
+ *
+ * Response: { success: true, quest: {...} }
+ */
+export async function acceptQuest(req: Request, res: Response) {
   const questId = req.params.questId;
-  const { chainQuestId, acceptanceTxHash } = req.body;
   const wallet = req.auth?.wallet;
 
   if (!questId) {
@@ -426,20 +436,11 @@ export async function acceptQuestOnchain(req: Request, res: Response) {
     });
   }
 
-  if (!chainQuestId || typeof chainQuestId !== 'string') {
-    return res.status(400).json({
+  if (!wallet) {
+    return res.status(401).json({
       error: {
-        code: 'CHAIN_QUEST_ID_REQUIRED',
-        message: 'chainQuestId is required and must be a string'
-      }
-    });
-  }
-
-  if (!acceptanceTxHash || typeof acceptanceTxHash !== 'string') {
-    return res.status(400).json({
-      error: {
-        code: 'TX_HASH_REQUIRED',
-        message: 'acceptanceTxHash is required and must be a string'
+        code: 'UNAUTHORIZED',
+        message: 'Authentication required to accept quest'
       }
     });
   }
@@ -447,7 +448,8 @@ export async function acceptQuestOnchain(req: Request, res: Response) {
   try {
     // Fetch the quest from database
     const quest = await prisma.quest.findUnique({
-      where: { id: questId }
+      where: { id: questId },
+      include: { player: true }
     });
 
     if (!quest) {
@@ -459,37 +461,24 @@ export async function acceptQuestOnchain(req: Request, res: Response) {
       });
     }
 
-    // Verify the creator matches the authenticated user
-    if (quest.creator !== wallet) {
-      logger.warn('[QUEST] Unauthorized acceptance attempt', {
-        questId,
-        expectedCreator: quest.creator,
-        actualWallet: wallet
-      });
-      return res.status(403).json({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'You do not have permission to accept this quest'
-        }
-      });
-    }
-
     // Verify quest is in AVAILABLE status
     if (quest.status !== 'AVAILABLE') {
       return res.status(400).json({
         error: {
           code: 'QUEST_INVALID_STATUS',
-          message: `Quest status is ${quest.status}, expected AVAILABLE`
+          message: `Quest status is ${quest.status}, expected AVAILABLE`,
+          action: 'refresh'
         }
       });
     }
 
-    // Verify quest is not already accepted on-chain
-    if (quest.chainQuestId !== null) {
+    // Verify quest hasn't already been accepted by another player
+    if (quest.playerId !== null) {
       return res.status(400).json({
         error: {
-          code: 'QUEST_ALREADY_REGISTERED',
-          message: 'Quest is already registered on-chain'
+          code: 'QUEST_ALREADY_ACCEPTED',
+          message: 'Quest has already been accepted by another player',
+          action: 'refresh'
         }
       });
     }
@@ -497,66 +486,53 @@ export async function acceptQuestOnchain(req: Request, res: Response) {
     // Get or create user
     const user = await upsertUser(wallet);
 
-    // Update quest with chainQuestId and acceptance details
+    // Update quest status to ACCEPTED (database only, no blockchain)
     const updatedQuest = await prisma.quest.update({
       where: { id: questId },
       data: {
-        chainQuestId: BigInt(chainQuestId),
         playerId: user.id,
         status: 'ACCEPTED',
-        startedAt: new Date(),
-        stakeTxHash: acceptanceTxHash
-      }
+        startedAt: new Date()
+        // NOTE: NO chainQuestId update needed
+        // NOTE: NO blockchain transaction hash stored
+      },
+      include: { player: true }
     });
 
-    logger.info('[QUEST] Quest accepted on-chain', {
+    logger.info('[QUEST] Quest accepted (database-first)', {
       questId,
-      chainQuestId: chainQuestId.toString(),
       wallet,
-      txHash: acceptanceTxHash,
-      player: user.username
+      player: user.username,
+      status: updatedQuest.status
     });
 
-    // TODO: Publish realtime event for sync (publishQuestAccepted not yet implemented in RealtimeEventPublisher)
-    // try {
-    //   await realtimeEventPublisher.publishQuestAccepted({
-    //     questId,
-    //     chainQuestId: BigInt(chainQuestId),
-    //     player: wallet,
-    //     acceptedAt: updatedQuest.startedAt?.toISOString() ?? new Date().toISOString()
-    //   });
-    // } catch (eventError) {
-    //   logger.warn('[QUEST] Failed to publish realtime event', {
-    //     questId,
-    //     error: eventError instanceof Error ? eventError.message : String(eventError)
-    //   });
-    // }
+    // No blockchain event publishing needed
+    // (accept no longer involves blockchain)
 
     res.json({
       success: true,
       quest: {
         id: updatedQuest.id,
-        chainQuestId: updatedQuest.chainQuestId?.toString(),
         status: updatedQuest.status,
         playerId: updatedQuest.playerId,
         startedAt: updatedQuest.startedAt?.toISOString(),
         title: updatedQuest.title,
         description: updatedQuest.description,
-        rewardAmount: updatedQuest.rewardAmount
+        rewardAmount: updatedQuest.rewardAmount,
+        player: updatedQuest.player?.username
       }
     });
   } catch (error) {
-    logger.error('[QUEST] Accept quest on-chain failed', {
+    logger.error('[QUEST] Accept quest failed', {
       questId,
-      error: error instanceof Error ? error.message : String(error),
-      stack: error instanceof Error ? error.stack : undefined
+      wallet,
+      error: error instanceof Error ? error.message : String(error)
     });
 
-    res.status(500).json({
+    return res.status(500).json({
       error: {
-        code: 'ACCEPT_QUEST_FAILED',
-        message: 'Failed to accept quest on-chain',
-        details: error instanceof Error ? error.message : String(error)
+        code: 'QUEST_ACCEPTANCE_ERROR',
+        message: 'Failed to accept quest. Please try again.'
       }
     });
   }
@@ -890,13 +866,8 @@ export async function getNPCDialogue(req: Request, res: Response) {
       const relationshipSummary = memory ? [memory.memory] : [`successes=${user.totalQuestsCompleted}`, `streak=${user.streak}`];
       dialogue = `${npc.name} says: ${npcType} watches over ${worldState.season.label}, ${playerName}. ${relationshipSummary[0] ?? 'Your path is still being written.'} ${personalitySummary}.`;
 
-      const conversation = await prisma.nPCConversation.create({
-        data: {
-          userId: user.id,
-          npcId: npc.id,
-          messages: [{ role: 'npc', content: dialogue }, { role: 'player', content: `Hello ${playerName}` }]
-        }
-      });
+      // Conversation logging removed - not used in database-first model
+      // Previously would have been stored/used for NPC interaction history
 
       await prisma.nPC.update({
         where: { id: npc.id },
@@ -916,23 +887,8 @@ export async function getNPCDialogue(req: Request, res: Response) {
         }
       });
 
-      await realtimeEventPublisher.publish({
-        replayKey: `npc-dialogue:${conversation.id}`,
-        eventName: 'npc:interaction-updated',
-        sourceType: 'npc_dialogue',
-        sourceId: conversation.id,
-        payload: {
-          wallet: normalizeWallet(wallet),
-          npcId: npc.id,
-          npcName: npc.name,
-          dialogue,
-          timestamp: new Date().toISOString()
-        },
-        scopes: [
-          { type: 'user', key: normalizeWallet(wallet) },
-          { type: 'global', key: 'global' }
-        ]
-      });
+      // Real-time event publishing removed (database-first model)
+      // Event was: await realtimeEventPublisher.publish({ ... })
     }
 
     res.json({ npcType, dialogue });

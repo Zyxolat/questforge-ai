@@ -10,7 +10,6 @@ import type {
   WorldStateEventSummary,
   WorldStateSnapshotData
 } from './questOrchestrationTypes';
-import { realtimeEventPublisher } from './realtimeEventPublisher';
 
 const DEFAULT_FACTIONS = [
   {
@@ -482,22 +481,11 @@ class WorldStateCoordinator {
   private async emitSnapshotChanges(
     previous: WorldStateSnapshotData | null,
     next: WorldStateSnapshotData,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     changedKeys: string[]
   ) {
-    await realtimeEventPublisher.publish({
-      replayKey: `world-state:${next.version}`,
-      eventName: 'world:event-changed',
-      sourceType: 'world_state',
-      sourceId: String(next.version),
-      payload: {
-        version: next.version,
-        changedKeys,
-        activeEvents: next.activeEvents,
-        season: next.season,
-        timestamp: next.generatedAt
-      },
-      scopes: [{ type: 'global', key: 'global' }]
-    });
+    // Real-time event publishing removed (database-first model)
+    // Previously published world state changes via realtimeEventPublisher (now deleted)
     this.diagnostics.emittedWorldChanges += 1;
 
     const previousStatusByFaction = new Map(
@@ -508,21 +496,7 @@ class WorldStateCoordinator {
     );
 
     if (changedFactions.length > 0) {
-      await realtimeEventPublisher.publish({
-        replayKey: `faction-status:${next.version}`,
-        eventName: 'faction:status-changed',
-        sourceType: 'world_state',
-        sourceId: String(next.version),
-        payload: {
-          version: next.version,
-          factions: changedFactions,
-          timestamp: next.generatedAt
-        },
-        scopes: [
-          { type: 'global', key: 'global' },
-          ...changedFactions.map((faction) => ({ type: 'faction' as const, key: faction.id }))
-        ]
-      });
+      // Previously published faction status changes via realtimeEventPublisher (now deleted)
       this.diagnostics.emittedFactionChanges += 1;
     }
   }

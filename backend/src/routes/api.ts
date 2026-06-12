@@ -7,7 +7,7 @@ import {
   getQuestOrchestrationDiagnostics,
   registerOnchainQuest,
   submitProof,
-  acceptQuestOnchain
+  acceptQuest
 } from '../controllers/questController';
 import { getPlayerStats, getProgression, claimDailyLoginBonus } from '../controllers/userController';
 import { getNFTMetadata } from '../controllers/metadataController';
@@ -18,7 +18,6 @@ import {
   refreshAuthenticatedSession,
   verifyAuthSignature
 } from '../controllers/authController';
-import { getRealtimeBootstrap, getRealtimeSync } from '../controllers/realtimeController';
 import { requireAuth } from '../middleware/auth';
 import {
   authNonceLimiter,
@@ -53,14 +52,12 @@ apiRouter.get('/auth/me', requireAuth, getAuthenticatedSession);
 apiRouter.post('/auth/logout', logoutSession);
 
 apiRouter.post('/quests/generate', requireAuth, questGenerationLimiter, generateQuest);
-apiRouter.post('/quests/:questId/accept', requireAuth, acceptQuestOnchain);
+apiRouter.post('/quests/:questId/accept', requireAuth, acceptQuest);
 apiRouter.post('/quests/register-onchain', requireAuth, registerOnchainQuest);
 apiRouter.post('/quests/submit-proof', requireAuth, proofSubmissionLimiter, submitProof);
 apiRouter.get('/quests/daily', getDailyMissions);
 apiRouter.get('/quests/active', requireAuth, getActiveQuestsLimiter, getActiveQuests);
 apiRouter.get('/quests/orchestration/diagnostics', getQuestOrchestrationDiagnostics);
-apiRouter.get('/realtime/bootstrap', requireAuth, getRealtimeBootstrap);
-apiRouter.get('/realtime/sync', requireAuth, getRealtimeSync);
 apiRouter.get('/npc/dialogue', getNPCDialogue);
 apiRouter.post('/player/daily-bonus', requireAuth, claimDailyLoginBonus);
 apiRouter.get('/player/stats', getPlayerStats);

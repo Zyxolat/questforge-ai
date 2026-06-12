@@ -4,7 +4,6 @@ import { aiMemoryGraph } from './aiMemoryGraph';
 import { factionInfluenceEngine } from './factionInfluenceEngine';
 import { npcRelationshipEngine } from './npcRelationshipEngine';
 import { playerNarrativeState } from './playerNarrativeState';
-import { realtimeEventPublisher } from './realtimeEventPublisher';
 
 type ProjectableQuest = {
   id: string;
@@ -18,22 +17,6 @@ type ProjectableQuest = {
 
 function asObject(value: Prisma.JsonValue | null | undefined) {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
-}
-
-function eventNameForType(eventType: string) {
-  const mapping: Record<string, string> = {
-    quest_created: 'quest:created',
-    quest_started: 'quest:started',
-    proof_submitted: 'proof:submitted',
-    reward_claimed: 'reward:claimed',
-    nft_minted: 'nft:minted',
-    reward_reserved: 'reward:reserved',
-    reward_released: 'reward:released',
-    reward_paid: 'reward:paid',
-    reward_refunded: 'reward:refunded'
-  };
-
-  return mapping[eventType] ?? `event:${eventType}`;
 }
 
 function memoryEffectForEvent(eventType: string) {
@@ -202,19 +185,20 @@ class GameStateProjector {
         await playerNarrativeState.projectForUser(playerUser.id);
       }
 
-      const payload = {
-        chainEventId: chainEvent.id,
-        chainQuestId: chainEvent.chainQuestId?.toString() ?? null,
-        eventType: chainEvent.eventType,
-        eventName: chainEvent.eventName,
-        transactionHash: chainEvent.transactionHash,
-        blockNumber: chainEvent.blockNumber.toString(),
-        playerWallet: chainEvent.playerWallet,
-        creatorWallet: chainEvent.creatorWallet,
-        summary,
-        data: chainEvent.decodedData ?? chainEvent.data,
-        questId: quest?.id ?? null
-      };
+      // Payload would have been used for real-time event publishing (now removed)
+      // const payload = {
+      //   chainEventId: chainEvent.id,
+      //   chainQuestId: chainEvent.chainQuestId?.toString() ?? null,
+      //   eventType: chainEvent.eventType,
+      //   eventName: chainEvent.eventName,
+      //   transactionHash: chainEvent.transactionHash,
+      //   blockNumber: chainEvent.blockNumber.toString(),
+      //   playerWallet: chainEvent.playerWallet,
+      //   creatorWallet: chainEvent.creatorWallet,
+      //   summary,
+      //   data: chainEvent.decodedData ?? chainEvent.data,
+      //   questId: quest?.id ?? null
+      // };
 
       const scopes: Array<{ type: 'global' | 'user' | 'clan' | 'faction'; key: string }> = [{ type: 'global', key: 'global' }];
       if (chainEvent.playerWallet) scopes.push({ type: 'user', key: chainEvent.playerWallet });
@@ -222,31 +206,11 @@ class GameStateProjector {
       if (playerUser?.clanId) scopes.push({ type: 'clan', key: playerUser.clanId });
       if (factionId) scopes.push({ type: 'faction', key: factionId });
 
-      await realtimeEventPublisher.publish({
-        replayKey: `chain:${chainEvent.eventKey}`,
-        eventName: eventNameForType(chainEvent.eventType),
-        sourceType: 'chain_event',
-        sourceId: chainEvent.id,
-        payload,
-        scopes
-      });
+      // Real-time event publishing removed (database-first model)
+      // Previously published via realtimeEventPublisher (now deleted)
 
-      if (playerUser?.clanId && ['quest_started', 'reward_claimed', 'nft_minted'].includes(chainEvent.eventType)) {
-        await realtimeEventPublisher.publish({
-          replayKey: `clan:${chainEvent.eventKey}`,
-          eventName: 'guild:event',
-          sourceType: 'chain_event',
-          sourceId: chainEvent.id,
-          payload: {
-            summary,
-            wallet: playerUser.wallet,
-            questId: quest?.id ?? null,
-            chainQuestId: chainEvent.chainQuestId?.toString() ?? null,
-            eventType: chainEvent.eventType
-          },
-          scopes: [{ type: 'clan', key: playerUser.clanId }]
-        });
-      }
+      // Previously published clan event for specific event types would have been here
+      // if (playerUser?.clanId && ['quest_started', 'reward_claimed', 'nft_minted'].includes(chainEvent.eventType))
 
       await aiMemoryGraph.upsertProjectionCursor({
         projectorKey: this.projectorKey,

@@ -6,7 +6,6 @@ import { contracts } from './contracts';
 import { applyStreakDecay, clearQuestCooldown, hashProofUri, incrementDailyActivity, recoverStreakDecay, setQuestCooldown } from './antiAbuse';
 import { isApprovalEvent, type ObjectiveType } from './questTemplates';
 import { logger } from './logger';
-import { realtimeEventPublisher } from './realtimeEventPublisher';
 
 // SAFETY: Maximum time to wait for a transaction receipt.
 // Prevents the verification worker from blocking indefinitely
@@ -179,31 +178,17 @@ async function syncUserProfileSnapshot(userId: string | null, wallet: string | n
   }
 }
 
-async function publishVerificationRealtimeEvent(input: {
-  replayKey: string;
-  eventName: string;
-  quest: QuestVerificationRow;
-  payload: Record<string, unknown>;
-}) {
-  if (!input.quest.playerWallet) {
-    return;
+async function publishVerificationRealtimeEvent(
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  input: {
+    replayKey: string;
+    eventName: string;
+    quest: QuestVerificationRow;
+    payload: Record<string, unknown>;
   }
-
-  await realtimeEventPublisher.publish({
-    replayKey: input.replayKey,
-    eventName: input.eventName,
-    sourceType: 'verification_worker',
-    sourceId: input.quest.id,
-    payload: {
-      questId: input.quest.id,
-      chainQuestId: input.quest.chainQuestId?.toString() ?? null,
-      ...input.payload
-    },
-    scopes: [
-      { type: 'user', key: input.quest.playerWallet },
-      { type: 'global', key: 'global' }
-    ]
-  });
+) {
+  // Real-time event publishing removed (database-first model)
+  // Previously published verification events via realtimeEventPublisher (now deleted)
 }
 
 function readVerificationMetadata(metadata: unknown): VerificationMetadata {
