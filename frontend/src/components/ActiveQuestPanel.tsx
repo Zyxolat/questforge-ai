@@ -305,7 +305,7 @@ export default function ActiveQuestPanel({
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Quest Chapters</p>
                 <div className="mt-3 space-y-2">
                   {missionChapters.slice(0, 3).map((chapter, index) => (
-                    <div key={chapter.id ?? `chapter-${index}`} className="rounded-xl border border-white/10 bg-navy/40 px-3 py-3">
+                    <div key={String(chapter.id ?? `chapter-${index}`)} className="rounded-xl border border-white/10 bg-navy/40 px-3 py-3">
                       <p className="text-sm font-semibold text-white">{chapter.title || `Chapter ${index + 1}`}</p>
                       <p className="mt-1 text-xs text-slate-300">{chapter.summary || 'The mission advances.'}</p>
                     </div>
