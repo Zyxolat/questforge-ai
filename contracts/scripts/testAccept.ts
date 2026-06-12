@@ -1,7 +1,12 @@
 import hre from 'hardhat';
-import { ForgeQuestManager__factory } from '../typechain-types';
+import { ForgeQuestManager__factory, ForgeQuestManager } from '../typechain-types';
 import fs from 'fs';
 import type { Signer } from 'ethers';
+
+interface LogLike {
+  topics: readonly string[];
+  data: string;
+}
 
 async function main() {
   const deployments = JSON.parse(fs.readFileSync('deployments/localhost-addresses.json', 'utf8'));
@@ -16,8 +21,8 @@ async function main() {
   } else {
     const accounts = await hre.network.provider.request({ method: 'eth_accounts', params: [] }) as string[];
     if (accounts && accounts.length >= 2) {
-      creator = hre.ethers.provider.getSigner(accounts[0]);
-      accepter = hre.ethers.provider.getSigner(accounts[1]);
+      creator = await hre.ethers.provider.getSigner(accounts[0]);
+      accepter = await hre.ethers.provider.getSigner(accounts[1]);
     } else {
       throw new Error('No signers or accounts available on this network. Provide accounts in hardhat config or environment.');
     }
@@ -25,7 +30,7 @@ async function main() {
   console.log('Creator', await creator.getAddress());
   console.log('Accepter', await accepter.getAddress());
 
-  const fqm = new ForgeQuestManager__factory(creator).attach(forgeAddress);
+  const fqm = new ForgeQuestManager__factory(creator).attach(forgeAddress) as ForgeQuestManager;
 
   console.log('Creating quest (creator)...');
   const tx = await fqm.createQuest(
@@ -39,7 +44,7 @@ async function main() {
   const receipt = await tx.wait();
   console.log('Create tx mined:', tx.hash);
 
-  const createdLog = receipt.logs.map((l) => {
+  const createdLog = receipt!.logs.map((l: LogLike) => {
     try { return fqm.interface.parseLog(l); } catch { return null; }
   }).find(Boolean);
 
@@ -52,13 +57,13 @@ async function main() {
   console.log('Quest created onchain id:', questId.toString());
 
   // Now accept from a different signer
-  const fqmAccepter = new ForgeQuestManager__factory(accepter).attach(forgeAddress);
+  const fqmAccepter = new ForgeQuestManager__factory(accepter).attach(forgeAddress) as ForgeQuestManager;
   console.log('Accepting quest from accepter with fee...');
   const acceptTx = await fqmAccepter.acceptQuest(questId, { value: hre.ethers.parseEther('0.001') });
   const acceptReceipt = await acceptTx.wait();
   console.log('Accept tx mined:', acceptTx.hash);
 
-  const acceptLog = acceptReceipt.logs.map((l) => {
+  const acceptLog = acceptReceipt!.logs.map((l: LogLike) => {
     try { return fqmAccepter.interface.parseLog(l); } catch { return null; }
   }).find(Boolean);
 
@@ -77,19 +82,21 @@ async function main() {
     process.env.TREASURY_ADDRESS = deployments.TREASURY_ADDRESS;
 
     try {
+      // @ts-expect-error - backend dist files may not have declaration files
       const backendEnv = await import('../../backend/dist/config/env');
       if (typeof backendEnv.initializeEnvironment === 'function') {
         backendEnv.initializeEnvironment();
       }
+      // @ts-expect-error - backend dist files may not have declaration files
       const eventDecoderModule = await import('../../backend/dist/services/eventDecoder');
       const { eventDecoder } = eventDecoderModule;
-      const decoded = eventDecoder.decodeLogs(acceptReceipt.logs, new Date());
+      const decoded = eventDecoder.decodeLogs(acceptReceipt!.logs, new Date());
       console.log('Decoded events via backend.eventDecoder:', decoded);
     } catch {
       console.warn('Backend event decoder not available for this test');
     }
   } catch (err) {
-    console.warn('Failed to run backend eventDecoder:', err?.message || err);
+    console.warn('Failed to run backend eventDecoder:', (err as Error)?.message || String(err));
   }
 }
 
