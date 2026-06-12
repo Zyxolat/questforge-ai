@@ -1,6 +1,26 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect } from 'react';
-import { QuestState } from '../context/RealtimeContext';
+
+interface QuestState {
+  id: string;
+  chainQuestId?: string;
+  orchestrationId?: string;
+  title?: string;
+  difficulty?: number | string;
+  description?: string;
+  reward?: string | number;
+  xpReward?: string | number;
+  stakeAmount?: string | number;
+  durationSeconds?: string | number;
+  acceptanceDeadline?: string | number | Date;
+  submissionDeadline?: string | number | Date;
+  objective?: string;
+  lore?: string;
+  requiredTxTypes?: string[];
+  generation?: Record<string, unknown>;
+  npc?: Record<string, unknown>;
+  [key: string]: unknown;
+}
 
 interface QuestRevealModalProps {
   isOpen: boolean;
@@ -278,11 +298,11 @@ export default function QuestRevealModal({
                       >
                         <div className="rounded-xl border border-glowyellow/30 bg-glowyellow/10 p-3 text-center">
                           <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Reward</p>
-                          <p className="mt-2 text-2xl font-bold text-glowyellow">{quest.rewardAmount} CELO</p>
+                          <p className="mt-2 text-2xl font-bold text-glowyellow">{String((quest.rewardAmount as string | number | undefined) || '?')} CELO</p>
                         </div>
                         <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center">
                           <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">XP Gain</p>
-                          <p className="mt-2 text-2xl font-bold text-emerald-300">{quest.xpReward}</p>
+                          <p className="mt-2 text-2xl font-bold text-emerald-300">{String((quest.xpReward as string | number | undefined) || '?')}</p>
                         </div>
                         <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-3 text-center">
                           <p className="text-xs uppercase tracking-[0.2em] text-softyellow">NFT Rarity</p>

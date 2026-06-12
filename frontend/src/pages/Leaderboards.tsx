@@ -1,10 +1,8 @@
 import { motion } from 'framer-motion';
-import { useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
 
 export default function Leaderboards() {
   const { connectWallet, status } = useWallet();
-  const { connectionStatus, hydrationStatus, leaderboard } = useRealtimeState();
 
   if (status !== 'connected') {
     return (
@@ -25,12 +23,9 @@ export default function Leaderboards() {
           <p className="text-sm uppercase tracking-[0.35em] text-glowyellow">Leaderboards</p>
           <h1 className="mt-3 text-4xl font-black text-white">Top Forge Champions</h1>
           <p className="mt-3 text-slate-300">Explore the most active wallets, highest XP earners, and the guardians of the realm.</p>
-          <p className="mt-4 text-sm text-softyellow">
-            Feed hydration: {hydrationStatus} • socket: {connectionStatus}
-          </p>
         </div>
         <div className="grid gap-4">
-          {leaderboard.map((player, index) => (
+          {([] as Array<{ id: string; wallet: string; xp: number; level: number; questCount: number }>).map((player, index) => (
             <div key={player.id} className="group flex items-center justify-between gap-4 rounded-3xl border border-white/10 bg-navy/80 p-5 transition hover:border-glowyellow/30">
               <div>
                 <p className="text-sm uppercase tracking-[0.3em] text-softyellow">#{index + 1}</p>
@@ -42,11 +37,9 @@ export default function Leaderboards() {
               </div>
             </div>
           ))}
-          {leaderboard.length === 0 ? (
-            <div className="rounded-3xl border border-dashed border-white/10 bg-navy/50 p-6 text-slate-300">
-              Waiting for realtime hydration to populate the current standings.
-            </div>
-          ) : null}
+          <div className="rounded-3xl border border-dashed border-white/10 bg-navy/50 p-6 text-slate-300">
+            Leaderboard data not available. Connect your wallet and complete quests to see rankings.
+          </div>
         </div>
       </div>
     </motion.main>

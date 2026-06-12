@@ -1083,3 +1083,77 @@ export async function submitProof(req: Request, res: Response) {
     res.status(400).json({ error: message });
   }
 }
+
+export async function getRealtimeBootstrap(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+
+  try {
+    // Get recently created quests (last hour) for the realtime feed
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    
+    const quests = await prisma.quest.findMany({
+      where: {
+        createdAt: {
+          gte: oneHourAgo
+        },
+        status: {
+          in: ['AVAILABLE', 'ACCEPTED', 'COMPLETED', 'CLAIMABLE', 'REWARDED']
+        }
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 100
+    });
+
+    const questIds = quests.map((quest) => quest.id);
+    const latestProofByQuestId = await loadLatestProofStateByQuestIds(questIds);
+    const payouts = questIds.length
+      ? await prisma.$queryRaw<TreasuryPayoutRow[]>(
+          Prisma.sql`
+            SELECT
+              "questId",
+              "chainQuestId",
+              "playerWallet",
+              "rewardAmount",
+              "stakeAmount",
+              "totalAmount",
+              status::text AS status,
+              "reservationTx",
+              "releaseTx",
+              "payoutTx",
+              "refundTx",
+              "rewardReservedAt",
+              "rewardReleasedAt",
+              "rewardPaidAt",
+              "rewardRefundedAt",
+              "createdAt",
+              "updatedAt"
+            FROM "TreasuryPayout"
+            WHERE "questId" IN (${Prisma.join(questIds)})
+          `
+        )
+      : [];
+
+    const payoutsByQuestId = new Map(payouts.map((payout) => [payout.questId, payout]));
+
+    res.json({
+      quests: quests.map((quest) =>
+        serializeQuest({
+          ...quest,
+          treasuryPayout: payoutsByQuestId.get(quest.id) || null,
+          ...(latestProofByQuestId.get(quest.id)
+            ? {
+                verificationResult: latestProofByQuestId.get(quest.id)?.verificationResult ?? null,
+                verificationReason: latestProofByQuestId.get(quest.id)?.verificationReason ?? null,
+                lastProofSubmittedAt: latestProofByQuestId.get(quest.id)?.submittedAt ?? null,
+                lastProofVerifiedAt: latestProofByQuestId.get(quest.id)?.verifiedAt ?? null
+              }
+            : {})
+        })
+      ),
+      total: quests.length
+    });
+  } catch (error) {
+    logger.error('Realtime bootstrap lookup failed', error, { wallet });
+    res.status(500).json({ error: 'Unable to load realtime bootstrap' });
+  }
+}

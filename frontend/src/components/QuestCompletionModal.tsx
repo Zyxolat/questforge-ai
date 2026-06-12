@@ -1,5 +1,23 @@
 import { motion, AnimatePresence } from 'framer-motion';
-import { QuestState } from '../context/RealtimeContext';
+
+interface QuestState {
+  id: string;
+  chainQuestId?: string;
+  orchestrationId?: string;
+  title?: string;
+  difficulty?: number | string;
+  description?: string;
+  reward?: string | number;
+  xpReward?: string | number;
+  stakeAmount?: string | number;
+  durationSeconds?: string | number;
+  acceptanceDeadline?: string | number | Date;
+  submissionDeadline?: string | number | Date;
+  xpEarned?: string | number;
+  rewardClaimed?: boolean;
+  rewardAmount?: string | number;
+  [key: string]: unknown;
+}
 
 interface QuestCompletionModalProps {
   isOpen: boolean;

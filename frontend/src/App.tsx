@@ -3,7 +3,6 @@ import { Suspense, lazy, useState } from 'react';
 import { Route, Routes, Link, useLocation } from 'react-router-dom';
 import WalletModal from './components/WalletModal';
 import LoadingScreen from './components/LoadingScreen';
-import { useRealtimeState } from './context/RealtimeContext';
 import { useWallet } from './context/WalletContext';
 
 const HomePage = lazy(() => import('./pages/HomePage'));
@@ -23,8 +22,7 @@ const links = [
 function App() {
   const location = useLocation();
   const [walletModalOpen, setWalletModalOpen] = useState(false);
-  const { address, status } = useWallet();
-  const { connectionStatus, hydrationStatus, notifications } = useRealtimeState();
+  const { address } = useWallet();
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-deepnavy via-navy to-[#030610] text-white">
@@ -33,13 +31,6 @@ function App() {
           <div>
             <div className="text-sm uppercase tracking-[0.35em] text-softyellow">Online ForgeQuest Game</div>
             <div className="text-2xl font-extrabold tracking-tight text-white">Browse. Complete. Claim. Repeat.</div>
-            {status === 'connected' ? (
-              <div className="mt-2 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-slate-300">
-                <span>Feed {hydrationStatus}</span>
-                <span>Socket {connectionStatus}</span>
-                <span>{notifications.length} notices</span>
-              </div>
-            ) : null}
           </div>
           <nav className="hidden items-center gap-4 md:flex">
             {links.map((item) => (

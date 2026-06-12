@@ -4,6 +4,7 @@ import {
   getDailyMissions,
   getNPCDialogue,
   getActiveQuests,
+  getRealtimeBootstrap,
   getQuestOrchestrationDiagnostics,
   registerOnchainQuest,
   submitProof,
@@ -57,6 +58,7 @@ apiRouter.post('/quests/register-onchain', requireAuth, registerOnchainQuest);
 apiRouter.post('/quests/submit-proof', requireAuth, proofSubmissionLimiter, submitProof);
 apiRouter.get('/quests/daily', getDailyMissions);
 apiRouter.get('/quests/active', requireAuth, getActiveQuestsLimiter, getActiveQuests);
+apiRouter.get('/realtime/bootstrap', requireAuth, getRealtimeBootstrap);
 apiRouter.get('/quests/orchestration/diagnostics', getQuestOrchestrationDiagnostics);
 apiRouter.get('/npc/dialogue', getNPCDialogue);
 apiRouter.post('/player/daily-bonus', requireAuth, claimDailyLoginBonus);

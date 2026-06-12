@@ -1,6 +1,37 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
-import { QuestState } from '../context/RealtimeContext';
+
+interface QuestState {
+  id: string;
+  chainQuestId?: string;
+  orchestrationId?: string;
+  title?: string;
+  difficulty?: number | string;
+  description?: string;
+  reward?: string | number;
+  xpReward?: string | number;
+  stakeAmount?: string | number;
+  durationSeconds?: string | number;
+  acceptanceDeadline?: string | number | Date;
+  submissionDeadline?: string | number | Date;
+  status?: string;
+  lore?: string;
+  objective?: string;
+  rewardAmount?: string | number;
+  npc?: Record<string, unknown>;
+  generation?: Record<string, unknown>;
+  missionChapters?: Array<Record<string, unknown>>;
+  storyline?: Array<Record<string, unknown>>;
+  expiresAt?: string | Date;
+  startedAt?: string | Date;
+  verificationReason?: string;
+  proofTx?: string;
+  proofTxHash?: string;
+  verificationTx?: string;
+  treasuryPayout?: { status?: string; [key: string]: unknown };
+  rewardedEvent?: { rewardAmount?: string; xpReward?: string; proofHash?: string; [key: string]: unknown };
+  [key: string]: unknown;
+}
 
 interface ActiveQuestPanelProps {
   quest: QuestState | null;

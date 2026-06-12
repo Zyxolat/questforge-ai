@@ -1,5 +1,13 @@
 import { motion } from 'framer-motion';
-import { InventoryItem, useRealtimeState } from '../context/RealtimeContext';
+
+interface InventoryItem {
+  id?: string;
+  tokenId?: string | number;
+  questHistory?: string;
+  rarity?: string;
+  xpEarned?: number;
+  mintedAt?: string | Date | null;
+}
 
 function formatMintedAt(value: string | Date | null | undefined) {
   if (!value) {
@@ -23,8 +31,8 @@ function inventoryTitle(item: InventoryItem) {
 }
 
 export default function InventoryPage() {
-  const { connectionStatus, hydrationStatus, inventory, notifications, player } = useRealtimeState();
-  const mintedCount = notifications.filter((event) => event.eventName === 'nft:minted').length;
+  const inventory: InventoryItem[] = [];
+  const player: { wallet?: string } | null = null;
 
   return (
     <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-7xl px-6 py-12">
@@ -35,24 +43,19 @@ export default function InventoryPage() {
             <h1 className="mt-3 text-4xl font-black text-white">Achievement Vault</h1>
             <p className="mt-3 text-slate-300">Collect glowing NFTs that carry your quest history, XP, and prestige across the world.</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-3xl border border-white/10 bg-navy/80 p-4 text-white">
               <p className="text-xs uppercase tracking-[0.22em] text-softyellow">Relics</p>
               <p className="mt-2 text-2xl font-semibold">{inventory.length}</p>
             </div>
             <div className="rounded-3xl border border-white/10 bg-navy/80 p-4 text-white">
-              <p className="text-xs uppercase tracking-[0.22em] text-softyellow">Mint Events</p>
-              <p className="mt-2 text-2xl font-semibold">{mintedCount}</p>
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-navy/80 p-4 text-white">
               <p className="text-xs uppercase tracking-[0.22em] text-softyellow">Sync</p>
-              <p className="mt-2 text-sm font-semibold uppercase text-white">{hydrationStatus}</p>
-              <p className="mt-1 text-xs uppercase tracking-[0.18em] text-slate-400">{connectionStatus}</p>
+              <p className="mt-2 text-sm font-semibold uppercase text-white">Loading...</p>
             </div>
           </div>
         </div>
 
-        {player ? (
+        {player && player.wallet ? (
           <div className="mb-8 rounded-3xl border border-white/10 bg-navy/70 p-5 text-slate-200">
             Vault owner: <span className="font-semibold text-white">{player.wallet}</span>
           </div>

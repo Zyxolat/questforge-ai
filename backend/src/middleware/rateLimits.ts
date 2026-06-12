@@ -15,22 +15,22 @@ import { logger } from '../services/logger';
 // Rate limit configuration per endpoint
 export const RATE_LIMITS = {
   // Auth endpoints
-  authNonce: { windowMs: 15 * 60 * 1000, max: 10 }, // 10 per 15 min
-  authVerify: { windowMs: 15 * 60 * 1000, max: 5 }, // 5 per 15 min
-  authRefresh: { windowMs: 15 * 60 * 1000, max: 20 }, // 20 per 15 min
+  authNonce: { windowMs: 15 * 60 * 1000, max: 100 }, // 100 per 15 min (increased for testing)
+  authVerify: { windowMs: 15 * 60 * 1000, max: 100 }, // 100 per 15 min (increased for testing)
+  authRefresh: { windowMs: 15 * 60 * 1000, max: 100 }, // 100 per 15 min (increased for testing)
 
   // Quest endpoints
-  generateQuest: { windowMs: 60 * 60 * 1000, max: 50 }, // 50 per hour
-  submitProof: { windowMs: 60 * 60 * 1000, max: 100 }, // 100 per hour
-  getActiveQuests: { windowMs: 5 * 60 * 1000, max: 30 }, // 30 per 5 min
-  getDailyMissions: { windowMs: 5 * 60 * 1000, max: 50 }, // 50 per 5 min
+  generateQuest: { windowMs: 60 * 60 * 1000, max: 200 }, // 200 per hour (increased for testing)
+  submitProof: { windowMs: 60 * 60 * 1000, max: 200 }, // 200 per hour (increased for testing)
+  getActiveQuests: { windowMs: 5 * 60 * 1000, max: 100 }, // 100 per 5 min (increased for testing)
+  getDailyMissions: { windowMs: 5 * 60 * 1000, max: 100 }, // 100 per 5 min (increased for testing)
 
   // Player endpoints
-  getPlayerStats: { windowMs: 5 * 60 * 1000, max: 30 },
-  getProgression: { windowMs: 5 * 60 * 1000, max: 30 },
+  getPlayerStats: { windowMs: 5 * 60 * 1000, max: 100 },
+  getProgression: { windowMs: 5 * 60 * 1000, max: 100 },
 
   // Global fallback
-  global: { windowMs: 15 * 60 * 1000, max: 150 } // 150 per 15 min
+  global: { windowMs: 15 * 60 * 1000, max: 500 } // 500 per 15 min (increased for testing)
 };
 
 /**
