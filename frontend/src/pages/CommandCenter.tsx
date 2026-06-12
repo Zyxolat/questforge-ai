@@ -391,9 +391,9 @@ export default function CommandCenter() {
   const resumedQuest: QuestState | null = resumedQuestId
     ? (getQuest({ id: resumedQuestId }) ?? (activeQuest && activeQuest.id === resumedQuestId ? activeQuest : null))
     : null;
-  const interactiveQuest: QuestState | null = sessionQuest ?? resumedQuest;
-  const restoredQuest =
-    interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest) ? null : activeQuest;
+  const interactiveQuest: QuestState | null = (sessionQuest ?? resumedQuest) ?? null;
+  const restoredQuest: QuestState | null =
+    interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest ?? null) ? null : activeQuest ?? null;
   const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
   const narrativeProfile = resolveNarrativeRecord(currentQuestForDisplay);
@@ -1448,15 +1448,15 @@ export default function CommandCenter() {
               <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Player Stats</p>
               <div className="mt-2 flex gap-4 text-sm">
                 <div>
-                  <p className="font-bold text-glowyellow">{player?.xp || '0'}</p>
+                  <p className="font-bold text-glowyellow">{(player?.xp ?? 0) || '0'}</p>
                   <p className="text-xs text-slate-400">XP</p>
                 </div>
                 <div>
-                  <p className="font-bold text-emerald-300">Level {player?.level || '1'}</p>
+                  <p className="font-bold text-emerald-300">Level {(player?.level ?? 1) || '1'}</p>
                   <p className="text-xs text-slate-400">Rank</p>
                 </div>
                 <div>
-                  <p className="font-bold text-purple-300">{player?.questCount || '0'}</p>
+                  <p className="font-bold text-purple-300">{(player?.questCount ?? 0) || '0'}</p>
                   <p className="text-xs text-slate-400">Quests</p>
                 </div>
               </div>
@@ -1558,7 +1558,7 @@ export default function CommandCenter() {
               >
                 <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Restored Quest</p>
                 <p className="mt-3 text-xl font-bold text-white">
-                  {restoredQuest.title || 'Previous quest found'}
+                  {(restoredQuest?.title ?? null) || 'Previous quest found'}
                 </p>
                 <p className="mt-2 text-sm text-slate-200">
                   We found an older quest on this wallet, but connecting your wallet did not generate
@@ -1572,17 +1572,17 @@ export default function CommandCenter() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={resumeRestoredQuest}
-                    disabled={!restoredQuest.id}
+                    disabled={!(restoredQuest?.id ?? null)}
                     className="rounded-xl border border-amber-300 bg-amber-300/20 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/30 disabled:opacity-50"
                   >
-                    {restoredQuest.status === 'ACTIVE'
+                    {(restoredQuest?.status ?? null) === 'ACTIVE'
                       ? 'Resume and Submit Proof'
-                      : restoredQuest.status === 'AVAILABLE'
+                      : (restoredQuest?.status ?? null) === 'AVAILABLE'
                         ? 'Resume and Complete Quest'
                         : 'Resume Previous Quest'}
                   </motion.button>
                   <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                    Status: {restoredQuest.status || 'Unknown'}
+                    Status: {(restoredQuest?.status ?? 'Unknown') || 'Unknown'}
                   </div>
                 </div>
               </motion.div>

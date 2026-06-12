@@ -55,9 +55,9 @@ export default function InventoryPage() {
           </div>
         </div>
 
-        {player && player.wallet ? (
+        {(player && typeof player === 'object' && 'wallet' in player && player.wallet) ? (
           <div className="mb-8 rounded-3xl border border-white/10 bg-navy/70 p-5 text-slate-200">
-            Vault owner: <span className="font-semibold text-white">{player.wallet}</span>
+            Vault owner: <span className="font-semibold text-white">{String(player.wallet)}</span>
           </div>
         ) : null}
 
