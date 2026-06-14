@@ -64,7 +64,7 @@ describe('ForgeQuestManager Security', () => {
   });
 
   async function createQuest(title: string) {
-    await questManager.connect(player1).createQuest(title, 'ipfs://metadata', reward, 150, 3600, {
+    await questManager.connect(player1).createAndAcceptQuest(title, 'ipfs://metadata', reward, 150, 3600, {
       value: ethers.parseEther('0.001')
     });
   }
@@ -91,7 +91,7 @@ describe('ForgeQuestManager Security', () => {
 
   describe('Reward Bounds Enforcement', () => {
     it('creates active quests with zero stake', async () => {
-      await questManager.connect(player1).createQuest('Quest', 'uri', reward, 150, 3600, {
+      await questManager.connect(player1).createAndAcceptQuest('Quest', 'uri', reward, 150, 3600, {
         value: ethers.parseEther('0.001')
       });
       const quest = await questManager.quests(1);
@@ -101,7 +101,7 @@ describe('ForgeQuestManager Security', () => {
 
     it('rejects reward above maximum', async () => {
       await expect(
-        questManager.connect(player1).createQuest('Quest', 'uri', ethers.parseEther('1'), 150, 3600, {
+        questManager.connect(player1).createAndAcceptQuest('Quest', 'uri', ethers.parseEther('1'), 150, 3600, {
           value: ethers.parseEther('0.001')
         })
       ).to.be.revertedWith('Reward exceeds maximum');
@@ -115,7 +115,7 @@ describe('ForgeQuestManager Security', () => {
       await treasury.unpause();
 
       await expect(
-        questManager.createQuest('Quest', 'uri', reward, 150, 3600, {
+        questManager.createAndAcceptQuest('Quest', 'uri', reward, 150, 3600, {
           value: ethers.parseEther('0.001')
         })
       ).to.be.revertedWith('Insufficient treasury liquidity');

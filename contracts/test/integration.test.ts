@@ -62,7 +62,7 @@ describe('Smart Contracts Integration', function () {
   });
 
   async function createQuest() {
-    await forgeQuestManager.connect(player).createQuest(
+    await forgeQuestManager.connect(player).createAndAcceptQuest(
       'Test Quest',
       'ipfs://metadata',
       reward,
