@@ -1095,7 +1095,7 @@ export default function CommandCenter() {
     try {
       const template = questToAccept as GeneratedQuestTemplate;
 
-      // Prepare args for createAndAcceptQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds)
+      // Step 1: Create the quest (this generates a questId on-chain)
       const createQuestArgs = [
         template.title,
         template.metadataUri || 'data:application/json;base64,e30=',
@@ -1104,42 +1104,38 @@ export default function CommandCenter() {
         BigInt(template.durationSeconds || 3600)
       ];
 
-      console.log('[handleAcceptQuest] Calling submitForgeWrite with createAndAcceptQuest', {
+      console.log('[handleAcceptQuest] Step 1: Creating quest on-chain', {
         title: template.title,
         rewardAmount: template.rewardAmount
       });
 
-      // Call createAndAcceptQuest with 0.001 CELO acceptance fee
-      const { hash: txHash, receipt } = await submitForgeWrite(
-        'createAndAcceptQuest',
+      setMessage('Step 1/2: Creating quest on Celo...');
+      const { hash: createTxHash, receipt: createReceipt } = await submitForgeWrite(
+        'createQuest',
         createQuestArgs,
-        { value: ethers.parseEther('0.001') }
+        { value: ethers.parseEther('0.001') } // Include acceptance fee in creation
       );
 
-      console.log('[handleAcceptQuest] createAndAcceptQuest confirmed', {
-        txHash,
-        blockNumber: receipt?.blockNumber
+      console.log('[handleAcceptQuest] createQuest confirmed', {
+        txHash: createTxHash,
+        blockNumber: createReceipt?.blockNumber
       });
 
-      // Parse QuestCreated event from receipt to get chainQuestId
-      if (!receipt) {
-        throw new Error('No receipt from createAndAcceptQuest transaction');
+      // Parse QuestCreated event to get questId
+      if (!createReceipt) {
+        throw new Error('No receipt from createQuest transaction');
       }
 
       let chainQuestId: string | null = null;
-      for (const log of receipt.logs) {
+      for (const log of createReceipt.logs) {
         try {
           const parsed = forgeQuestManager?.interface?.parseLog(log as ethers.Log);
           if (parsed && parsed.name === 'QuestCreated') {
-            chainQuestId = parsed.args[2]?.toString() ?? null;
-            console.log('[handleAcceptQuest] Extracted QuestCreated event', {
-              chainQuestId,
-              eventName: parsed.name
-            });
+            chainQuestId = parsed.args[0]?.toString() ?? null;
+            console.log('[handleAcceptQuest] Extracted chainQuestId from QuestCreated event:', chainQuestId);
             break;
           }
         } catch (_error) {
-          // Continue if log parsing fails - intentionally silent
           void _error;
         }
       }
@@ -1148,6 +1144,23 @@ export default function CommandCenter() {
         console.warn('[handleAcceptQuest] Could not find QuestCreated event, using quest ID');
         chainQuestId = questToAccept.id;
       }
+
+      // Step 2: Accept the quest (now that it exists)
+      console.log('[handleAcceptQuest] Step 2: Accepting quest on-chain', {
+        questId: chainQuestId
+      });
+
+      setMessage('Step 2/2: Accepting quest on Celo...');
+      const { hash: acceptTxHash, receipt: acceptReceipt } = await submitForgeWrite(
+        'acceptQuest',
+        [BigInt(chainQuestId)],
+        { value: ethers.parseEther('0') } // No additional fee needed
+      );
+
+      console.log('[handleAcceptQuest] acceptQuest confirmed', {
+        txHash: acceptTxHash,
+        blockNumber: acceptReceipt?.blockNumber
+      });
 
       // Update local state to ACCEPTED
       const acceptedQuest: QuestState = {
@@ -1169,7 +1182,7 @@ export default function CommandCenter() {
       setMessage('Quest accepted on Celo! Now complete the objective and submit your proof.');
       setTxStatus({
         type: 'confirmed',
-        hash: txHash,
+        hash: acceptTxHash,
         label: 'Accept quest confirmed',
         message: 'Quest is now active. Submit your proof when done.'
       });
