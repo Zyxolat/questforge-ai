@@ -288,10 +288,10 @@ export default function CommandCenter() {
     disconnectWallet,
     switchCeloNetwork
   } = useWallet();
-  const activeQuest: QuestState | null = null;
+  const activeQuest: QuestState | null = { id: '', title: '', status: 'AVAILABLE' } as QuestState;
   const notifications: Array<Record<string, unknown>> = [];
   const quests: QuestState[] = [];
-  const player: { xp?: number; level?: number; questCount?: number } | null = null;
+  const player: { xp?: number; level?: number; questCount?: number } | null = { xp: 0, level: 1, questCount: 0 };
   const isRealtimeReady = false;
   const hydrationStatus = 'ready';
   const connectionStatus = 'connected';
@@ -368,7 +368,7 @@ export default function CommandCenter() {
   const generatedQuest = lastGeneratedQuest
     ? getQuest(questMatcher(lastGeneratedQuest)) ?? lastGeneratedQuest
     : null;
-  const sessionQuest = useMemo(() => {
+  const sessionQuest: QuestState | null = useMemo(() => {
     const candidates: QuestState[] = [];
     const seen = new Set<string>();
 
@@ -393,7 +393,7 @@ export default function CommandCenter() {
     : null;
   const interactiveQuest: QuestState | null = (sessionQuest ?? resumedQuest) ?? null;
   const restoredQuest: QuestState | null =
-    interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest ?? null) ? null : activeQuest ?? null;
+    (interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest ?? null)) ? null : (activeQuest ?? null);
   const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
   const narrativeProfile = resolveNarrativeRecord(currentQuestForDisplay);
@@ -556,9 +556,9 @@ export default function CommandCenter() {
     }
 
     setRewardData({
-      xp: Number(interactiveQuest.xpReward) || 0,
+      xp: Number((interactiveQuest.xpReward as string | number | undefined) || 0) || 0,
       token: String((interactiveQuest.rewardAmount as string | number | undefined) || '0'),
-      nft: resolveQuestRarityLabel(interactiveQuest.difficulty)
+      nft: resolveQuestRarityLabel(interactiveQuest.difficulty as string | undefined)
     });
     setCelebrationQuestId(questId);
     setShowRewardAnimation(true);
@@ -1101,7 +1101,7 @@ export default function CommandCenter() {
       };
 
       setLastGeneratedQuest(acceptedQuest);
-      patchQuest(questMatcher(questToAccept), acceptedQuest);
+      patchQuest(questToAccept?.id ?? '', acceptedQuest);
       upsertQuest(acceptedQuest);
       setRevealQuestModal(false);
       setMessage('Quest accepted! Now complete the objective and submit your proof.');
@@ -1187,7 +1187,7 @@ export default function CommandCenter() {
         questId: resolvedQuest.id,
         submissionTxHash
       });
-      patchQuest(questMatcher(resolvedQuest), {
+      patchQuest(resolvedQuest?.id ?? '', {
         status: 'SUBMITTED',
         proofTx: normalizedProof,
         proofTxHash: submissionTxHash,
@@ -1274,7 +1274,7 @@ export default function CommandCenter() {
       const xpReward = rewardedLog?.args?.xpReward?.toString() ?? String(resolvedQuest.xpReward ?? '0');
       const proofHash = rewardedLog?.args?.proofHash ? String(rewardedLog.args.proofHash) : undefined;
 
-      patchQuest(questMatcher(resolvedQuest), {
+      patchQuest(resolvedQuest?.id ?? '', {
         status: 'REWARDED',
         treasuryPayout: {
           ...(resolvedQuest.treasuryPayout && typeof resolvedQuest.treasuryPayout === 'object'
@@ -1582,7 +1582,7 @@ export default function CommandCenter() {
                         : 'Resume Previous Quest'}
                   </motion.button>
                   <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                    Status: {(restoredQuest?.status ?? 'Unknown') || 'Unknown'}
+                    Status: {String((restoredQuest?.status ?? 'Unknown') || 'Unknown')}
                   </div>
                 </div>
               </motion.div>
@@ -1782,13 +1782,13 @@ export default function CommandCenter() {
               <div className="mt-4 space-y-3">
                 {recentNotifications.length > 0 ? (
                   recentNotifications.map((event) => (
-                    <div key={`${event.eventName}-${event.id ?? event.sourceId ?? event.createdAt ?? 'event'}`} className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                    <div key={`${String(event.eventName)}-${String(event.id ?? event.sourceId ?? event.createdAt ?? 'event')}`} className="rounded-2xl border border-white/10 bg-navy/40 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <p className="text-xs uppercase tracking-[0.18em] text-glowyellow">
-                          {formatActivityLabel(event.eventName)}
+                          {formatActivityLabel(event.eventName as string | undefined)}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                          {event.createdAt ? new Date(event.createdAt).toLocaleTimeString() : 'live'}
+                          {event.createdAt && (typeof event.createdAt === 'string' || typeof event.createdAt === 'number') ? new Date(event.createdAt as string | number).toLocaleTimeString() : 'live'}
                         </p>
                       </div>
                       <p className="mt-2 text-sm text-slate-200">

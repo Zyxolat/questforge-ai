@@ -32,7 +32,7 @@ function inventoryTitle(item: InventoryItem) {
 
 export default function InventoryPage() {
   const inventory: InventoryItem[] = [];
-  const player: { wallet?: string } | null = null;
+  const player: { wallet?: string } | null = { wallet: '' };
 
   return (
     <motion.main initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="mx-auto max-w-7xl px-6 py-12">
