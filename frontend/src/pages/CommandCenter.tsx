@@ -1071,107 +1071,40 @@ export default function CommandCenter() {
       return;
     }
 
-    console.log('[handleAcceptQuest] Quest check:', {
-      questId: questToAccept.id,
-      status: questToAccept.status
-    });
-
-    console.log('[handleAcceptQuest] Wallet check:', {
-      address,
-      hasForgeQuestManager: !!forgeQuestManager
-    });
-
-    // Authentication check
-    if (!(await requireReadyAuth('accepting quest'))) {
-      console.warn('[handleAcceptQuest] Authentication check failed');
-      return;
-    }
-
     setLoading(true);
-    setTxStatus(null);
     setProofError(null);
-    setMessage('Accepting quest on Celo... Approve the wallet prompt and wait for confirmation.');
+    setMessage('Accepting quest...');
 
     try {
-      const template = questToAccept as GeneratedQuestTemplate;
-
-      // Step 1: Create the quest (this generates a questId on-chain)
-      const createQuestArgs = [
-        template.title,
-        template.metadataUri || 'data:application/json;base64,e30=',
-        ethers.parseEther(String(template.rewardAmount)),
-        BigInt(template.xpReward),
-        BigInt(template.durationSeconds || 3600)
-      ];
-
-      console.log('[handleAcceptQuest] Step 1: Creating quest on-chain', {
-        title: template.title,
-        rewardAmount: template.rewardAmount
+      console.log('[handleAcceptQuest] Calling backend API to accept quest', {
+        questId: questToAccept.id,
+        address
       });
 
-      setMessage('Step 1/2: Creating quest on Celo...');
-      const { hash: createTxHash, receipt: createReceipt } = await submitForgeWrite(
-        'createQuest',
-        createQuestArgs,
-        { value: ethers.parseEther('0.001') } // Include acceptance fee in creation
-      );
-
-      console.log('[handleAcceptQuest] createQuest confirmed', {
-        txHash: createTxHash,
-        blockNumber: createReceipt?.blockNumber
+      // POST to backend API to accept quest
+      const response = await fetch(`/api/quests/${questToAccept.id}/accept`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ walletAddress: address })
       });
 
-      // Parse QuestCreated event to get questId
-      if (!createReceipt) {
-        throw new Error('No receipt from createQuest transaction');
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Failed to accept quest: ${response.statusText}`);
       }
 
-      let chainQuestId: string | null = null;
-      for (const log of createReceipt.logs) {
-        try {
-          const parsed = forgeQuestManager?.interface?.parseLog(log as ethers.Log);
-          if (parsed && parsed.name === 'QuestCreated') {
-            chainQuestId = parsed.args[0]?.toString() ?? null;
-            console.log('[handleAcceptQuest] Extracted chainQuestId from QuestCreated event:', chainQuestId);
-            break;
-          }
-        } catch (_error) {
-          void _error;
-        }
-      }
-
-      if (!chainQuestId) {
-        console.warn('[handleAcceptQuest] Could not find QuestCreated event, using quest ID');
-        chainQuestId = questToAccept.id;
-      }
-
-      // Step 2: Accept the quest (now that it exists)
-      console.log('[handleAcceptQuest] Step 2: Accepting quest on-chain', {
-        questId: chainQuestId
-      });
-
-      setMessage('Step 2/2: Accepting quest on Celo...');
-      const { hash: acceptTxHash, receipt: acceptReceipt } = await submitForgeWrite(
-        'acceptQuest',
-        [BigInt(chainQuestId)],
-        { value: ethers.parseEther('0') } // No additional fee needed
-      );
-
-      console.log('[handleAcceptQuest] acceptQuest confirmed', {
-        txHash: acceptTxHash,
-        blockNumber: acceptReceipt?.blockNumber
-      });
+      const acceptedQuestData = await response.json();
+      console.log('[handleAcceptQuest] API response:', acceptedQuestData);
 
       // Update local state to ACCEPTED
       const acceptedQuest: QuestState = {
-        ...template,
-        id: questToAccept.id,
-        chainQuestId,
+        ...questToAccept,
         status: 'ACCEPTED',
         player: address,
         playerId: address,
         startedAt: Date.now() / 1000,
-        creator: address
+        creator: address,
+        ...acceptedQuestData
       };
 
       setLastGeneratedQuest(acceptedQuest);
@@ -1179,35 +1112,18 @@ export default function CommandCenter() {
       upsertQuest(acceptedQuest);
 
       setRevealQuestModal(false);
-      setMessage('Quest accepted on Celo! Now complete the objective and submit your proof.');
+      setMessage('Quest accepted! Now complete the objective and submit your proof.');
       setTxStatus({
         type: 'confirmed',
-        hash: acceptTxHash,
-        label: 'Accept quest confirmed',
+        hash: '',
+        label: 'Quest accepted',
         message: 'Quest is now active. Submit your proof when done.'
       });
 
       await syncNow();
     } catch (error) {
       console.error('[handleAcceptQuest] Error:', error);
-      
-      // Extract detailed error information
-      let errorMessage = 'Unknown error';
-      
-      if (error instanceof Error) {
-        if (error.message.includes('missing revert data')) {
-          errorMessage = 'Transaction would fail - check you have enough CELO (need >0.002 for fee + gas). Treasury may also need funding.';
-        } else if (error.message.includes('Accept fee required')) {
-          errorMessage = 'Accept fee (0.001 CELO) is required. Check wallet balance.';
-        } else if (error.message.includes('insufficient funds')) {
-          errorMessage = 'Insufficient CELO balance. Need at least 0.002 CELO (0.001 fee + gas).';
-        } else if (error.message.includes('execution reverted')) {
-          errorMessage = `Transaction reverted: ${error.message.split('execution reverted:')[1]?.trim() || error.message}`;
-        } else {
-          errorMessage = error.message;
-        }
-      }
-      
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       setMessage(`Error accepting quest: ${errorMessage}`);
     } finally {
       setLoading(false);
