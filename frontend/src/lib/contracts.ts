@@ -8,6 +8,7 @@ const treasuryAddress = env.TREASURY_ADDRESS;
 
 const forgeQuestManagerAbi: ethers.InterfaceAbi = [
   'function createQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable',
+  'function createAndAcceptQuest(string title,string metadataUri,uint256 rewardAmount,uint256 xpReward,uint256 durationSeconds) external payable returns (uint256)',
   'function submitQuest(uint256 questId,string calldata proofUri) external',
   'function acceptQuest(uint256 questId) external payable',
   'function verifyQuest(uint256 questId,bool success,bytes32 proofVerificationHash) external',
