@@ -1168,9 +1168,25 @@ export default function CommandCenter() {
       await syncNow();
     } catch (error) {
       console.error('[handleAcceptQuest] Error:', error);
-      setMessage(
-        `Error accepting quest: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      
+      // Extract detailed error information
+      let errorMessage = 'Unknown error';
+      
+      if (error instanceof Error) {
+        if (error.message.includes('missing revert data')) {
+          errorMessage = 'Transaction would fail - check you have enough CELO (need >0.002 for fee + gas). Treasury may also need funding.';
+        } else if (error.message.includes('Accept fee required')) {
+          errorMessage = 'Accept fee (0.001 CELO) is required. Check wallet balance.';
+        } else if (error.message.includes('insufficient funds')) {
+          errorMessage = 'Insufficient CELO balance. Need at least 0.002 CELO (0.001 fee + gas).';
+        } else if (error.message.includes('execution reverted')) {
+          errorMessage = `Transaction reverted: ${error.message.split('execution reverted:')[1]?.trim() || error.message}`;
+        } else {
+          errorMessage = error.message;
+        }
+      }
+      
+      setMessage(`Error accepting quest: ${errorMessage}`);
     } finally {
       setLoading(false);
     }
