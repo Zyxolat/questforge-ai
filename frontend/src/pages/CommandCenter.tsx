@@ -773,6 +773,11 @@ export default function CommandCenter() {
           tx = await forgeQuestManager.acceptQuest(args[0] as bigint, txOptions);
         } else if (functionName === 'createAndAcceptQuest') {
           // createAndAcceptQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds)
+          // Use fallback gas estimation if not provided, as this is a more complex operation
+          if (!('gasLimit' in txOptions)) {
+            console.debug('[CommandCenter] Gas limit not provided for createAndAcceptQuest, using fallback');
+            txOptions.gasLimit = BigInt('500000');  // Fallback for createAndAcceptQuest
+          }
           tx = await forgeQuestManager.createAndAcceptQuest(
             args[0] as string,
             args[1] as string,
