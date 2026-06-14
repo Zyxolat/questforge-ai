@@ -771,6 +771,16 @@ export default function CommandCenter() {
         } else if (functionName === 'acceptQuest') {
           // acceptQuest(questId)
           tx = await forgeQuestManager.acceptQuest(args[0] as bigint, txOptions);
+        } else if (functionName === 'createAndAcceptQuest') {
+          // createAndAcceptQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds)
+          tx = await forgeQuestManager.createAndAcceptQuest(
+            args[0] as string,
+            args[1] as string,
+            args[2] as bigint,
+            args[3] as bigint,
+            args[4] as bigint,
+            txOptions
+          );
         } else if (functionName === 'submitQuest') {
           // submitQuest(questId, proofUri, options?)
           tx = await forgeQuestManager.submitQuest(args[0] as bigint, args[1] as string, txOptions);
@@ -1028,19 +1038,8 @@ export default function CommandCenter() {
     }
   }
 
-  /**
-   * Validate all prerequisites for quest acceptance
-   * Returns a detailed diagnostics object for debugging
-   */
-  /**
-   * DATABASE-FIRST MODEL: Accept quest without blockchain
-   * - No wallet interaction
-   * - No MetaMask popup
-   * - Instant database update
-   * - Status: AVAILABLE → ACCEPTED
-   */
   async function handleAcceptQuest() {
-    console.log('[handleAcceptQuest] Accepting quest (database-first, no blockchain)');
+    console.log('[handleAcceptQuest] Button clicked - starting accept quest flow');
 
     const questToAccept = interactiveQuest ?? lastGeneratedQuest;
 
@@ -1058,7 +1057,17 @@ export default function CommandCenter() {
       return;
     }
 
-    // Authentication check (user must be logged in)
+    console.log('[handleAcceptQuest] Quest check:', {
+      questId: questToAccept.id,
+      status: questToAccept.status
+    });
+
+    console.log('[handleAcceptQuest] Wallet check:', {
+      address,
+      hasForgeQuestManager: !!forgeQuestManager
+    });
+
+    // Authentication check
     if (!(await requireReadyAuth('accepting quest'))) {
       console.warn('[handleAcceptQuest] Authentication check failed');
       return;
@@ -1067,44 +1076,89 @@ export default function CommandCenter() {
     setLoading(true);
     setTxStatus(null);
     setProofError(null);
-    setMessage('Accepting quest...');
+    setMessage('Accepting quest on Celo... Approve the wallet prompt and wait for confirmation.');
 
     try {
-      // Simple database-only API call (no blockchain)
-      const response = await fetch(`/api/quests/${questToAccept.id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+      const template = questToAccept as GeneratedQuestTemplate;
+
+      // Prepare args for createAndAcceptQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds)
+      const createQuestArgs = [
+        template.title,
+        template.metadataUri || 'data:application/json;base64,e30=',
+        ethers.parseEther(String(template.rewardAmount)),
+        BigInt(template.xpReward),
+        BigInt(template.durationSeconds || 3600)
+      ];
+
+      console.log('[handleAcceptQuest] Calling submitForgeWrite with createAndAcceptQuest', {
+        title: template.title,
+        rewardAmount: template.rewardAmount
       });
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData?.error?.message ||
-          `Backend acceptance failed: ${response.statusText}`
-        );
+      // Call createAndAcceptQuest with 0.001 CELO acceptance fee
+      const { hash: txHash, receipt } = await submitForgeWrite(
+        'createAndAcceptQuest',
+        createQuestArgs,
+        { value: ethers.parseEther('0.001') }
+      );
+
+      console.log('[handleAcceptQuest] createAndAcceptQuest confirmed', {
+        txHash,
+        blockNumber: receipt?.blockNumber
+      });
+
+      // Parse QuestCreated event from receipt to get chainQuestId
+      if (!receipt) {
+        throw new Error('No receipt from createAndAcceptQuest transaction');
       }
 
-      const result = await response.json();
+      let chainQuestId: string | null = null;
+      for (const log of receipt.logs) {
+        try {
+          const parsed = forgeQuestManager?.interface?.parseLog(log as ethers.Log);
+          if (parsed && parsed.name === 'QuestCreated') {
+            chainQuestId = parsed.args[2]?.toString() ?? null;
+            console.log('[handleAcceptQuest] Extracted QuestCreated event', {
+              chainQuestId,
+              eventName: parsed.name
+            });
+            break;
+          }
+        } catch (_error) {
+          // Continue if log parsing fails - intentionally silent
+          void _error;
+        }
+      }
 
-      console.info('[handleAcceptQuest] Quest accepted successfully', {
-        questId: questToAccept.id,
-        status: result.quest?.status
-      });
+      if (!chainQuestId) {
+        console.warn('[handleAcceptQuest] Could not find QuestCreated event, using quest ID');
+        chainQuestId = questToAccept.id;
+      }
 
       // Update local state to ACCEPTED
       const acceptedQuest: QuestState = {
-        ...questToAccept,
+        ...template,
+        id: questToAccept.id,
+        chainQuestId,
         status: 'ACCEPTED',
         player: address,
-        startedAt: Date.now() / 1000
+        playerId: address,
+        startedAt: Date.now() / 1000,
+        creator: address
       };
 
       setLastGeneratedQuest(acceptedQuest);
-      patchQuest(questToAccept?.id ?? '', acceptedQuest);
+      patchQuest(questToAccept.id, acceptedQuest);
       upsertQuest(acceptedQuest);
+
       setRevealQuestModal(false);
-      setMessage('Quest accepted! Now complete the objective and submit your proof.');
+      setMessage('Quest accepted on Celo! Now complete the objective and submit your proof.');
+      setTxStatus({
+        type: 'confirmed',
+        hash: txHash,
+        label: 'Accept quest confirmed',
+        message: 'Quest is now active. Submit your proof when done.'
+      });
 
       await syncNow();
     } catch (error) {
