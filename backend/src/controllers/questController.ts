@@ -523,16 +523,22 @@ export async function acceptQuest(req: Request, res: Response) {
       }
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    
     logger.error('[QUEST] Accept quest failed', {
       questId,
       wallet,
-      error: error instanceof Error ? error.message : String(error)
+      error: errorMessage,
+      stack: errorStack
     });
 
+    // Return detailed error in development, generic in production
+    const isDevelopment = process.env.NODE_ENV !== 'production';
     return res.status(500).json({
       error: {
         code: 'QUEST_ACCEPTANCE_ERROR',
-        message: 'Failed to accept quest. Please try again.'
+        message: isDevelopment ? `Failed to accept quest: ${errorMessage}` : 'Failed to accept quest. Please try again.'
       }
     });
   }

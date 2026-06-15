@@ -1090,7 +1090,8 @@ export default function CommandCenter() {
 
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.message || `Failed to accept quest: ${response.statusText}`);
+        const errorMessage = errorData.error?.message || errorData.message || `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
+        throw new Error(errorMessage);
       }
 
       const acceptedQuestData = await response.json();
