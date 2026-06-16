@@ -608,7 +608,7 @@ export default function CommandCenter() {
 
   function focusProofSubmission() {
     setMessage(
-      'Complete the objective, then paste the proof transaction below to trigger backend verification.'
+      'Complete the objective, then submit your proof description below for off-chain verification.'
     );
     proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }

@@ -134,7 +134,7 @@ export default function ActiveQuestPanel({
   const nextAction = isAvailable
     ? 'Review the objective and accept the quest onchain for 0.001 CELO.'
     : isAccepted
-      ? 'Complete the objective below, then submit a proof transaction or Celoscan link.'
+      ? 'Complete the objective below, then submit your proof description.'
       : isCompleted
         ? 'Your proof is queued for deterministic verification. Stay on this screen for live updates.'
         : isClaimable

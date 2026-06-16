@@ -29,7 +29,7 @@ const SAMPLE_QUESTS = [
     category: 'Explorer',
     difficulty: 'Rare',
     reward: '200 XP + 0.020 CELO',
-    description: 'Explore a live Celo dApp, then submit the proof transaction that marks the visit.',
+    description: 'Explore a live Celo dApp, then submit a proof description of your visit.',
     icon: '🧭',
     timeEstimate: '8 min'
   }
@@ -51,7 +51,7 @@ const FLOW_STEPS = [
   {
     step: '3',
     title: 'Complete Proof',
-    description: 'Finish the objective, submit the proof transaction, and let the backend verify it.',
+    description: 'Finish the objective, submit your proof description, and let the backend verify it.',
     icon: '⛏️'
   },
   {

@@ -43,7 +43,7 @@ export default function ProofSubmissionPanel({
         <div>
           <h3 className="text-xl font-bold text-white sm:text-2xl">Submit Your Proof</h3>
           <p className="text-sm text-slate-300">
-            This is the final onchain step before rewards are verified and minted.
+            Describe how you completed the objective for off-chain verification.
           </p>
         </div>
       </div>
@@ -58,9 +58,9 @@ export default function ProofSubmissionPanel({
         }}
       >
         <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">What to paste</p>
+          <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">How to submit</p>
           <p className="mt-2 text-sm text-white">
-            Paste the proof transaction hash or the full Celoscan URL for the action that completed your objective.
+            Enter a description of how you completed the objective. The backend will verify your proof.
           </p>
           {helperText ? <p className="mt-2 text-xs text-emerald-100/90">{helperText}</p> : null}
         </div>
@@ -72,7 +72,7 @@ export default function ProofSubmissionPanel({
           <textarea
             value={proofUri}
             onChange={(e) => onProofChange(e.target.value)}
-            placeholder="Enter transaction hash or Celo Explorer link..."
+            placeholder="Describe how you completed the objective..."
             className="min-h-[112px] w-full rounded-2xl border-2 border-white/10 bg-white/5 p-4 text-sm text-white placeholder-slate-500 outline-none transition focus:border-emerald-500/50 sm:min-h-[128px] sm:text-base"
             rows={4}
             disabled={loading || disabled}
@@ -85,7 +85,7 @@ export default function ProofSubmissionPanel({
             animate={{ opacity: 1 }}
             className="text-sm text-amber-300"
           >
-            Paste a full transaction hash or a Celoscan URL that contains the hash.
+            Your proof description has been recorded.
           </motion.p>
         ) : null}
 
@@ -115,7 +115,7 @@ export default function ProofSubmissionPanel({
         {disabledReason ? <p className="text-xs text-amber-200">{disabledReason}</p> : null}
 
         <p className="text-xs text-slate-400">
-          Use your transaction hash such as <span className="font-mono text-slate-300">0x...</span> or paste a Celoscan link.
+          Your proof will be verified off-chain by the backend. No blockchain transaction is required.
         </p>
 
         <motion.button
