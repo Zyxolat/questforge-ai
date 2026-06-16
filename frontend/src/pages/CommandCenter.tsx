@@ -1063,6 +1063,11 @@ export default function CommandCenter() {
       return;
     }
 
+    if (!address) {
+      setMessage('Connect wallet to accept quests.');
+      return;
+    }
+
     if (questToAccept.status !== 'AVAILABLE') {
       console.warn('[handleAcceptQuest] Quest not available:', {
         status: questToAccept.status,
