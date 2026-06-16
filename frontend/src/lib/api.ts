@@ -593,22 +593,21 @@ export function acceptQuest(questId: string, walletAddress: string) {
     });
 }
 
-export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {
+export function submitProofForVerification(questId: string, proofUri: string) {
   console.debug('[API] Submitting proof for verification', {
     questId,
     proofUriPreview: proofUri.slice(0, 16),
-    submissionTxHash,
     endpoint: '/quests/submit-proof'
   });
 
   return api
-    .post('/quests/submit-proof', { questId, proofUri, submissionTxHash })
+    .post('/quests/submit-proof', { questId, proofUri })
     .then((response) => {
       console.debug('[API] Proof verification submission accepted', {
         status: response.status,
         questId: response.data?.questId ?? questId,
-        proofSubmissionId: response.data?.proofSubmissionId,
-        verificationStatus: response.data?.verificationStatus
+        questStatus: response.data?.status,
+        message: response.data?.message
       });
       return response;
     })
@@ -618,8 +617,7 @@ export function submitProofForVerification(questId: string, proofUri: string, su
         errorMessage: error instanceof Error ? error.message : String(error),
         status: axios.isAxiosError(error) ? error.response?.status : undefined,
         responseData: axios.isAxiosError(error) ? JSON.stringify(error.response?.data).slice(0, 500) : undefined,
-        questId,
-        submissionTxHash
+        questId
       });
       throw error;
     });

@@ -1143,84 +1143,47 @@ export default function CommandCenter() {
 
     setLoading(true);
     setProofError(null);
-    setMessage(
-      canRetryProofQueue
-        ? 'Retrying backend proof queue synchronization...'
-        : 'Submitting proof to the Forge Master for deterministic verification...'
-    );
+    setMessage('Submitting your proof to the backend for verification...');
     setTxStatus(null);
-    let queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(
         interactiveQuest,
-        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
+        'Quest is still missing its id after sync. Please wait a moment and try again.'
       );
       if (!resolvedQuest.id) {
         throw new Error('Quest is missing a persistent id');
       }
 
-      let submissionTxHash = pendingProofRetry?.submissionTxHash;
-
-      if (!canRetryProofQueue) {
-        setMessage('Quest sync complete. Submitting proof onchain...');
-
-        const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
-        const submission = await submitForgeWrite('submitQuest', [chainQuestId, normalizedProof]);
-        submissionTxHash = submission.hash;
-        queuedProofRetry = {
-          questId: resolvedQuest.id,
-          proofTxHash: normalizedProof,
-          submissionTxHash
-        };
-        setPendingProofRetry(queuedProofRetry);
-      }
-
-      if (!submissionTxHash) {
-        throw new Error('Proof submission transaction hash is missing for backend verification');
-      }
-
-      console.debug('[CommandCenter] Submitting proof to backend verification service', {
+      console.debug('[CommandCenter] Submitting proof to backend', {
         questId: resolvedQuest.id,
-        chainQuestId: resolvedQuest.chainQuestId,
-        proofTxHash: normalizedProof,
-        submissionTxHash
+        proofText: normalizedProof
       });
 
-      await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
-      console.debug('[CommandCenter] Backend proof verification submission accepted', {
-        questId: resolvedQuest.id,
-        submissionTxHash
+      await submitProofForVerification(resolvedQuest.id, normalizedProof);
+      console.debug('[CommandCenter] Backend proof submission accepted', {
+        questId: resolvedQuest.id
       });
+
       patchQuest(resolvedQuest?.id ?? '', {
-        status: 'SUBMITTED',
-        proofTx: normalizedProof,
-        proofTxHash: submissionTxHash,
-        verificationResult: 'pending',
-        verificationReason: 'Queued for deterministic verification'
+        status: 'CLAIMABLE',
+        proofText: normalizedProof,
+        verificationResult: 'accepted',
+        verificationReason: 'Proof submitted successfully'
       });
-      setPendingProofRetry(null);
+
       setTxStatus({
-        type: 'pending',
-        hash: submissionTxHash,
-        label: 'Proof verification pending',
-        message: 'Deterministic verification is running. Results should stream back shortly.'
+        type: 'success',
+        label: 'Proof submitted',
+        message: 'Your proof has been accepted. You can now claim your reward!'
       });
-      setMessage(
-        'Proof submitted. The backend is now verifying the result and streaming the outcome back to this screen.'
-      );
+      setMessage('Proof accepted! Your quest is now ready to claim the reward.');
       await syncNow();
       await refreshQuestFeed();
       setProofUri('');
     } catch (error) {
-      console.error('[CommandCenter] submitQuest failed', error);
-      if (queuedProofRetry?.questId === interactiveQuest.id) {
-        setMessage(
-          'Your proof was accepted onchain, but the backend verification queue did not confirm yet. Try "Retry backend sync" after a moment.'
-        );
-      } else {
-        setMessage(formatActionFailure(error, 'Proof submission failed.'));
-      }
+      console.error('[CommandCenter] submitProof failed', error);
+      setMessage(formatActionFailure(error, 'Proof submission failed.'));
     } finally {
       setLoading(false);
     }
@@ -1228,12 +1191,12 @@ export default function CommandCenter() {
 
   async function handleClaimReward() {
     if (!address || !forgeQuestManager || !interactiveQuest) {
-      setMessage('Connect your wallet and select a verified quest to claim rewards.');
+      setMessage('Connect your wallet and select a quest to claim rewards.');
       return;
     }
 
-    if (interactiveQuest.status !== 'VERIFIED') {
-      setMessage('Reward claim is only available after proof verification succeeds.');
+    if (interactiveQuest.status !== 'CLAIMABLE') {
+      setMessage('Reward claim is only available after proof submission succeeds.');
       return;
     }
 

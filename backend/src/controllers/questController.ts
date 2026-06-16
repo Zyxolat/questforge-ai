@@ -13,7 +13,6 @@ import { logger } from '../services/logger';
 import { ruleBasedQuestEngine } from '../services/ruleBasedQuestEngine';
 import { npcRelationshipEngine } from '../services/npcRelationshipEngine';
 import { QuestValidationError } from '../services/questValidationEngine';
-import { queueProofVerification } from '../services/verification';
 import { worldStateCoordinator } from '../services/worldStateCoordinator';
 
 const QUEST_FEED_STATUSES: QuestStatus[] = [
@@ -996,23 +995,22 @@ export async function getActiveQuests(req: Request, res: Response) {
 
 export async function submitProof(req: Request, res: Response) {
   const wallet = req.auth?.wallet;
-  const { questId, proofUri, submissionTxHash } = req.body;
+  const { questId, proofUri } = req.body;
 
   logger.info('[QUEST] Proof submission route entered', {
     wallet: wallet ?? null,
     userId: req.auth?.userId ?? null,
     questId: typeof questId === 'string' ? questId : null,
     hasProofUri: typeof proofUri === 'string' && proofUri.length > 0,
-    proofUriPreview: typeof proofUri === 'string' ? proofUri.slice(0, 16) : null,
-    submissionTxHash: typeof submissionTxHash === 'string' ? submissionTxHash : null
+    proofUriPreview: typeof proofUri === 'string' ? proofUri.slice(0, 16) : null
   });
 
-  if (!wallet || !questId || !proofUri || !submissionTxHash) {
-    return res.status(400).json({ error: 'Wallet, questId, proofUri, and submissionTxHash are required' });
+  if (!wallet || !questId || !proofUri) {
+    return res.status(400).json({ error: 'Wallet, questId, and proofUri are required' });
   }
 
   if (typeof proofUri !== 'string' || proofUri.length === 0 || proofUri.length > 2048) {
-    return res.status(400).json({ error: 'Proof URI must be a non-empty transaction hash or explorer URL' });
+    return res.status(400).json({ error: 'Proof must be a non-empty text description' });
   }
 
   try {
@@ -1035,10 +1033,6 @@ export async function submitProof(req: Request, res: Response) {
       return res.status(403).json({ error: 'Not your quest' });
     }
 
-    if (!quest.chainQuestId) {
-      return res.status(409).json({ error: 'Quest has not been indexed with its onchain id yet' });
-    }
-
     if (quest.status !== 'ACCEPTED') {
       return res.status(400).json({ error: `Quest status is ${quest.status}` });
     }
@@ -1047,42 +1041,38 @@ export async function submitProof(req: Request, res: Response) {
       return res.status(400).json({ error: 'Quest has expired' });
     }
 
-    logger.info('[QUEST] Proof submission queuing requested', {
+    logger.info('[QUEST] Proof submission accepted (off-chain)', {
       wallet,
       userId: user.id,
       questId,
-      chainQuestId: quest.chainQuestId?.toString() ?? null,
-      proofUriPreview: proofUri.slice(0, 16),
-      submissionTxHash
+      proofUriPreview: proofUri.slice(0, 16)
     });
 
-    const queued = await queueProofVerification({
-      userId: user.id,
-      questId,
-      proofUri,
-      submissionTxHash
+    // Update quest status to CLAIMABLE after accepting off-chain proof
+    const updatedQuest = await prisma.quest.update({
+      where: { id: questId },
+      data: {
+        status: 'CLAIMABLE',
+        proofTx: proofUri
+      }
     });
 
-    logger.info('[QUEST] Proof submission accepted', {
+    logger.info('[QUEST] Proof accepted and quest marked as claimable', {
       wallet,
       userId: user.id,
       questId,
-      proofSubmissionId: queued.proofSubmissionId,
-      proofHash: queued.proofHash,
-      verificationStatus: 'pending'
+      newStatus: updatedQuest.status
     });
 
-    res.status(202).json({
+    res.json({
       success: true,
       questId,
-      proofHash: queued.proofHash,
-      proofSubmissionId: queued.proofSubmissionId,
-      verificationStatus: 'pending',
-      message: 'Proof queued for deterministic verification'
+      status: updatedQuest.status,
+      message: 'Proof accepted. Quest is now ready to claim reward.'
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to queue proof verification';
-    logger.error('Proof submission queueing failed', error, {
+    const message = error instanceof Error ? error.message : 'Failed to submit proof';
+    logger.error('Proof submission failed', error, {
       wallet,
       questId
     });
