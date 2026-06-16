@@ -14,10 +14,10 @@ import OnboardingFlow from '../components/OnboardingFlow';
 import DailyLoginBonus from '../components/DailyLoginBonus';
 import { useWallet } from '../context/WalletContext';
 import {
+  acceptQuest,
   extractAuthFailure,
   fetchDailyMissions,
   generateQuest,
-  registerOnchainQuest,
   submitProofForVerification
 } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
@@ -992,35 +992,6 @@ export default function CommandCenter() {
     return latestQuest;
   }
 
-  async function registerOnchainQuestWithRetry(
-    questId: string,
-    chainQuestId: string,
-    creationTxHash: string,
-    maxRetries = 3
-  ): Promise<QuestState | null> {
-    let lastError: unknown;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
-      try {
-        const registrationResponse = await registerOnchainQuest(
-          questId,
-          chainQuestId,
-          creationTxHash
-        );
-        const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
-        return registeredQuest ?? null;
-      } catch (error) {
-        lastError = error;
-        if (attempt < maxRetries) {
-          const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
-        }
-      }
-    }
-
-    throw lastError;
-  }
-
   async function handleGenerateQuest() {
     console.debug('[CommandCenter] handleGenerateQuest start', {
       address,
@@ -1161,84 +1132,40 @@ export default function CommandCenter() {
       return;
     }
     
-    console.log('[handleAcceptQuest] Authentication passed, proceeding with transaction');
+    console.log('[handleAcceptQuest] Authentication passed, calling backend API');
 
-    console.info('[CommandCenter] handleAcceptQuest: Quest validation passed, preparing transaction', {
+    console.info('[CommandCenter] handleAcceptQuest: Quest validation passed, calling backend API', {
       questId: questToAccept.id,
       questTitle: questToAccept.title,
-      rewardAmount: questToAccept.rewardAmount,
-      contractAddress: contractAddresses.forgeQuestManagerAddress,
       walletAddress: address
     });
 
     setLoading(true);
     setTxStatus(null);
     setProofError(null);
-    setMessage('Accepting the quest onchain. Approve a 0.001 CELO transaction to begin.');
+    setMessage('Accepting quest...');
 
     try {
-      const template = questToAccept as GeneratedQuestTemplate;
-      const rewardAmount = ethers.parseEther(template.rewardAmount.toString());
-      const xpReward = BigInt(template.xpReward);
-      const durationSeconds = BigInt(template.durationSeconds);
-      const createQuestArgs = [
-        template.title,
-        template.metadataUri,
-        rewardAmount,
-        xpReward,
-        durationSeconds
-      ] as const;
-
-      console.debug('[CommandCenter] handleAcceptQuest: Calling submitForgeWrite', {
-        functionName: 'createQuest',
-        title: template.title,
-        rewardAmount: template.rewardAmount,
-        xpReward: template.xpReward,
-        durationSeconds: template.durationSeconds,
-        acceptanceFee: '0.001 CELO'
+      console.debug('[CommandCenter] handleAcceptQuest: Calling backend API acceptQuest', {
+        questId: questToAccept.id,
+        walletAddress: address
       });
 
-      const { hash: creationTxHash, receipt } = await submitForgeWrite(
-        'createQuest',
-        [...createQuestArgs],
-        { value: ethers.parseEther('0.001') }
-      );
+      const response = await acceptQuest(questToAccept.id, address);
+      const acceptedQuest = response.data;
 
-      console.info('[CommandCenter] handleAcceptQuest: Transaction receipt received', {
-        txHash: creationTxHash,
-        blockNumber: receipt?.blockNumber
+      console.info('[CommandCenter] handleAcceptQuest: Backend acceptance successful', {
+        questId: acceptedQuest.id,
+        status: acceptedQuest.status,
+        chainQuestId: acceptedQuest.chainQuestId
       });
 
-      const parsedLog = parseReceiptEvent(
-        receipt,
-        {
-          contractAddress: contractAddresses.forgeQuestManagerAddress,
-          contractInterface: forgeQuestManager.interface
-        },
-        'QuestCreated'
-      );
-
-      const chainQuestId = parsedLog?.args?.questId?.toString();
-      if (!chainQuestId) {
-        throw new Error('Quest creation receipt did not include a quest id');
-      }
-
-      setMessage('Quest accepted onchain. Syncing acceptance state with backend...');
-
-      const registeredQuest = await registerOnchainQuestWithRetry(
-        String(template.id),
-        chainQuestId,
-        creationTxHash
-      );
-
-      const persistedQuest: QuestState = registeredQuest
-        ? registeredQuest
-        : {
-            ...template,
-            creator: address,
-            chainQuestId,
-            status: 'ACCEPTED'
-          };
+      // Update local state with accepted quest
+      const persistedQuest: QuestState = {
+        ...questToAccept,
+        ...acceptedQuest,
+        status: 'ACCEPTED'
+      };
 
       setLastGeneratedQuest(persistedQuest);
       patchQuest(questMatcher(questToAccept), persistedQuest);
