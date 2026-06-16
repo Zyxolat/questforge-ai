@@ -89,27 +89,14 @@ function ensureVerifierContract() {
 
 export function canonicalizeProofReference(value: string) {
   const trimmed = value.trim();
-  if (TX_HASH_PATTERN.test(trimmed)) {
-    return trimmed.toLowerCase();
+  
+  // Validate proof is not empty
+  if (!trimmed || trimmed.length === 0) {
+    throw new Error('Proof reference cannot be empty. Please describe how you completed the objective.');
   }
 
-  try {
-    const url = new URL(trimmed);
-    const pathnameMatch = url.pathname.match(/0x[a-fA-F0-9]{64}/);
-    if (pathnameMatch) {
-      return pathnameMatch[0].toLowerCase();
-    }
-
-    for (const [key, paramValue] of url.searchParams.entries()) {
-      if ((key === 'tx' || key === 'hash' || key === 'transactionHash') && TX_HASH_PATTERN.test(paramValue)) {
-        return paramValue.toLowerCase();
-      }
-    }
-  } catch {
-    // Fall through to validation error.
-  }
-
-  throw new Error('Proof must be a Celo transaction hash or explorer URL containing one');
+  // Accept the text proof as-is (could be plain text, hash, or URL)
+  return trimmed;
 }
 
 function assertTransactionHash(value: string, label: string) {
