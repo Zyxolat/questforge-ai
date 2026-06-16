@@ -1128,7 +1128,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status !== 'ACTIVE' && !canRetryProofQueue) {
+    if (interactiveQuest.status !== 'ACCEPTED' && !canRetryProofQueue) {
       setMessage('Quest is not ready for submission yet. Please wait for it to synchronize.');
       return;
     }
