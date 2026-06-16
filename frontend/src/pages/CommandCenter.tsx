@@ -291,8 +291,15 @@ export default function CommandCenter() {
   const refreshQuestFeed = (): Promise<void> => Promise.resolve();
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const upsertQuest = (_quest: Record<string, unknown>): void => {};
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const patchQuest = (_id: string, _patch: Record<string, unknown>): void => {};
+  const patchQuest = (questId: string, patch: Record<string, unknown>): void => {
+    // Update lastGeneratedQuest if the ID matches
+    if (lastGeneratedQuest && lastGeneratedQuest.id === questId) {
+      setLastGeneratedQuest({
+        ...lastGeneratedQuest,
+        ...patch
+      });
+    }
+  };
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const addNotification = (_notification: Record<string, unknown>): void => {};
   const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
@@ -1150,16 +1157,20 @@ export default function CommandCenter() {
         proofText: normalizedProof
       });
 
-      await submitProofForVerification(resolvedQuest.id, normalizedProof);
+      const proofResponse = await submitProofForVerification(resolvedQuest.id, normalizedProof);
       console.debug('[CommandCenter] Backend proof submission accepted', {
-        questId: resolvedQuest.id
+        questId: resolvedQuest.id,
+        responseStatus: proofResponse?.data?.status,
+        responseMessage: proofResponse?.data?.message
       });
 
+      // Update quest status based on API response or set to CLAIMABLE
+      const responseStatus = proofResponse?.data?.status || 'CLAIMABLE';
       patchQuest(resolvedQuest?.id ?? '', {
-        status: 'CLAIMABLE',
+        status: responseStatus,
         proofText: normalizedProof,
         verificationResult: 'accepted',
-        verificationReason: 'Proof submitted successfully'
+        verificationReason: proofResponse?.data?.message ?? 'Proof submitted successfully'
       });
 
       setTxStatus({
