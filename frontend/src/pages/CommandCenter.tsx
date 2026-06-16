@@ -679,7 +679,7 @@ export default function CommandCenter() {
     setResumedQuestId(restoredQuest.id);
 
     if (restoredQuest.status === 'ACTIVE') {
-      setMessage('Previous active quest resumed. Paste your proof reference below when you are ready.');
+      setMessage('Previous active quest resumed. Describe how you completed the objective below when you are ready.');
       window.setTimeout(() => {
         proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
       }, 120);
@@ -1199,8 +1199,8 @@ export default function CommandCenter() {
     }
 
     if (!normalizedProof) {
-      setProofError('Paste a valid transaction hash or a Celoscan link that contains one.');
-      setMessage('Proof reference is invalid. Paste a full transaction hash or a Celoscan link.');
+      setProofError('Please describe how you completed the objective.');
+      setMessage('Proof description is required. Please provide details of how you completed the quest objective.');
       return;
     }
 

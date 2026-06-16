@@ -363,7 +363,7 @@ export default function ActiveQuestPanel({
           >
             <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
               <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Proof Target</p>
-              <p className="mt-2 text-sm text-white">Submit a transaction hash or Celoscan URL that proves this objective was completed.</p>
+              <p className="mt-2 text-sm text-white">Describe how you completed the objective.</p>
             </div>
           </motion.div>
         )}
