@@ -93,9 +93,10 @@ export default function ActiveQuestPanel({
   };
 
   const isAvailable = quest.status === 'AVAILABLE';
-  const isActive = quest.status === 'ACTIVE';
-  const isSubmitted = quest.status === 'SUBMITTED';
-  const isVerified = quest.status === 'VERIFIED';
+  const isAccepted = quest.status === 'ACCEPTED';
+  const isCompleted = quest.status === 'COMPLETED';
+  const isClaimable = quest.status === 'CLAIMABLE';
+  const isRewarded = quest.status === 'REWARDED';
   const isFailed = quest.status === 'FAILED' || quest.status === 'CANCELLED';
 
   const questGeneration = quest.generation && typeof quest.generation === 'object' ? quest.generation as Record<string, unknown> : null;
@@ -132,15 +133,17 @@ export default function ActiveQuestPanel({
 
   const nextAction = isAvailable
     ? 'Review the objective and accept the quest onchain for 0.001 CELO.'
-    : isActive
+    : isAccepted
       ? 'Complete the objective below, then submit a proof transaction or Celoscan link.'
-      : isSubmitted
+      : isCompleted
         ? 'Your proof is queued for deterministic verification. Stay on this screen for live updates.'
-        : isVerified
+        : isClaimable
           ? 'Your proof has been verified. Claim the reward onchain to complete this quest.'
-          : isFailed
-            ? 'This run did not settle successfully. Review the treasury outcome and start another quest.'
-            : 'Quest state synced. Review the latest objective details below.';
+          : isRewarded
+            ? 'Quest has been completed and reward claimed!'
+            : isFailed
+              ? 'This run did not settle successfully. Review the treasury outcome and start another quest.'
+              : 'Quest state synced. Review the latest objective details below.';
 
   const transactionPath = Array.isArray(quest.requiredTxTypes)
     ? quest.requiredTxTypes.filter((value): value is string => typeof value === 'string' && value.length > 0)
@@ -178,21 +181,23 @@ export default function ActiveQuestPanel({
 
           {/* Status badge */}
           <motion.div
-            animate={{ scale: isSubmitted ? [1, 1.1, 1] : isFailed ? [1, 1.02, 1] : 1 }}
-            transition={{ duration: 1, repeat: isSubmitted || isFailed ? Infinity : 0 }}
+            animate={{ scale: isCompleted ? [1, 1.1, 1] : isFailed ? [1, 1.02, 1] : 1 }}
+            transition={{ duration: 1, repeat: isCompleted || isFailed ? Infinity : 0 }}
             className={`rounded-2xl px-4 py-2 text-sm font-bold uppercase tracking-[0.2em] ${
-              isVerified
+              isClaimable
                 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500'
+                : isRewarded
+                  ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500'
                 : isFailed
                   ? 'bg-rose-500/20 text-rose-300 border border-rose-500'
-                : isSubmitted
+                : isCompleted
                   ? 'bg-amber-500/20 text-amber-300 border border-amber-500'
-                  : isActive
+                  : isAccepted
                     ? 'bg-blue-500/20 text-blue-300 border border-blue-500'
                     : 'bg-glowyellow/20 text-glowyellow border border-glowyellow'
             }`}
           >
-            {isVerified ? '✓ Verified' : isFailed ? '✕ Failed' : isSubmitted ? '⟳ Verifying' : isActive ? '⚡ Active' : '◉ Available'}
+            {isClaimable ? '✓ Verified' : isRewarded ? '✓ Claimed' : isFailed ? '✕ Failed' : isCompleted ? '⟳ Verifying' : isAccepted ? '⚡ Active' : '◉ Available'}
           </motion.div>
         </div>
 
@@ -349,8 +354,8 @@ export default function ActiveQuestPanel({
           </div>
         </motion.div>
 
-        {/* Stake display if active */}
-        {isActive && (
+        {/* Stake display if accepted */}
+        {isAccepted && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -446,7 +451,7 @@ export default function ActiveQuestPanel({
             </motion.button>
           )}
 
-          {isActive && onSubmitProof && (
+          {isAccepted && onSubmitProof && (
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
@@ -458,7 +463,7 @@ export default function ActiveQuestPanel({
             </motion.button>
           )}
 
-          {isSubmitted && (
+          {isCompleted && (
             <motion.div
               animate={{ opacity: [0.6, 1, 0.6] }}
               transition={{ duration: 2, repeat: Infinity }}
@@ -468,7 +473,7 @@ export default function ActiveQuestPanel({
             </motion.div>
           )}
 
-          {isVerified && onClaimReward ? (
+          {isClaimable && onClaimReward ? (
             <motion.button
               whileHover={{ scale: 1.03 }}
               whileTap={{ scale: 0.97 }}
@@ -478,11 +483,19 @@ export default function ActiveQuestPanel({
             >
               {loading ? 'Claiming...' : 'Claim Reward'}
             </motion.button>
-          ) : isVerified ? (
+          ) : isClaimable ? (
             <motion.div
               animate={{ scale: [1, 1.05, 1] }}
               transition={{ duration: 1, repeat: Infinity }}
               className="flex-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white text-center shadow-lg min-h-[44px] sm:min-h-[48px] flex items-center justify-center"
+            >
+              ✓ Ready to Claim!
+            </motion.div>
+          ) : isRewarded ? (
+            <motion.div
+              animate={{ scale: [1, 1.05, 1] }}
+              transition={{ duration: 1, repeat: Infinity }}
+              className="flex-1 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 px-6 py-3 sm:py-4 font-bold uppercase tracking-[0.2em] text-white text-center shadow-lg min-h-[44px] sm:min-h-[48px] flex items-center justify-center"
             >
               ✓ Completed!
             </motion.div>

@@ -3,12 +3,11 @@ import { motion } from 'framer-motion';
 type QuestFlowStep =
   | 'PENDING'
   | 'GENERATED'
+  | 'AVAILABLE'
   | 'ACCEPTED'
-  | 'ACTIVE'
-  | 'SUBMITTED'
-  | 'VERIFIED'
-  | 'REWARDED'
-  | 'COMPLETED';
+  | 'COMPLETED'
+  | 'CLAIMABLE'
+  | 'REWARDED';
 
 interface QuestFlowTrackerProps {
   currentStep: QuestFlowStep;
@@ -19,12 +18,11 @@ export default function QuestFlowTracker({ currentStep, statusLabel }: QuestFlow
   const steps: { step: QuestFlowStep; label: string; description: string }[] = [
     { step: 'PENDING', label: 'Connected', description: 'Wallet ready' },
     { step: 'GENERATED', label: 'Quest Generated', description: 'Rules engine selected the mission' },
-    { step: 'ACCEPTED', label: 'Quest Ready', description: 'Quest is queued for completion' },
-    { step: 'ACTIVE', label: 'In Progress', description: 'Complete the objective' },
-    { step: 'SUBMITTED', label: 'Completion Submitted', description: 'Awaiting verification' },
-    { step: 'VERIFIED', label: 'Verified', description: 'Backend confirmed success' },
-    { step: 'REWARDED', label: 'Rewarded', description: 'Reward settlement complete' },
-    { step: 'COMPLETED', label: 'Completed', description: 'Ready for the next quest' }
+    { step: 'AVAILABLE', label: 'Quest Available', description: 'Ready to accept' },
+    { step: 'ACCEPTED', label: 'In Progress', description: 'Complete the objective' },
+    { step: 'COMPLETED', label: 'Completion Submitted', description: 'Awaiting verification' },
+    { step: 'CLAIMABLE', label: 'Verified', description: 'Backend confirmed success' },
+    { step: 'REWARDED', label: 'Rewarded', description: 'Reward settlement complete' }
   ];
 
   const currentIndex = steps.findIndex((s) => s.step === currentStep);
