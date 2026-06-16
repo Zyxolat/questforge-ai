@@ -142,22 +142,12 @@ function resolveQuestRarityLabel(difficulty: number | string | undefined) {
 
 function normalizeProofReference(value: string) {
   const trimmed = value.trim();
-  if (!trimmed) {
+  // Accept any non-empty text proof
+  if (!trimmed || trimmed.length === 0) {
     return null;
   }
-
-  const txHashMatch = trimmed.match(/0x[a-fA-F0-9]{64}/);
-  if (txHashMatch) {
-    return txHashMatch[0].toLowerCase();
-  }
-
-  try {
-    const url = new URL(trimmed);
-    const pathHash = url.pathname.match(/0x[a-fA-F0-9]{64}/);
-    return pathHash ? pathHash[0].toLowerCase() : null;
-  } catch {
-    return null;
-  }
+  // No blockchain validation needed - accept plain text
+  return trimmed;
 }
 
 function formatActionFailure(error: unknown, fallbackLabel: string) {
