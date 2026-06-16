@@ -15,6 +15,7 @@ import DailyLoginBonus from '../components/DailyLoginBonus';
 // QuestState type defined below
 import { useWallet } from '../context/WalletContext';
 import {
+  acceptQuest,
   extractAuthFailure,
   fetchDailyMissions,
   generateQuest,
@@ -1081,20 +1082,9 @@ export default function CommandCenter() {
         address
       });
 
-      // POST to backend API to accept quest
-      const response = await fetch(`/api/quests/${questToAccept.id}/accept`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ walletAddress: address })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        const errorMessage = errorData.error?.message || errorData.message || `HTTP ${response.status}: ${response.statusText || 'Unknown error'}`;
-        throw new Error(errorMessage);
-      }
-
-      const acceptedQuestData = await response.json();
+      // Call backend API to accept quest using proper axios client
+      const response = await acceptQuest(questToAccept.id, address);
+      const acceptedQuestData = response.data;
       console.log('[handleAcceptQuest] API response:', acceptedQuestData);
 
       // Update local state to ACCEPTED

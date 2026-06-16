@@ -563,6 +563,36 @@ export function registerOnchainQuest(questId: string, chainQuestId: string, crea
   return api.post('/quests/register-onchain', { questId, chainQuestId, creationTxHash });
 }
 
+export function acceptQuest(questId: string, walletAddress: string) {
+  console.debug('[API] Accepting quest', {
+    questId,
+    walletAddress,
+    endpoint: `/quests/${questId}/accept`
+  });
+
+  return api
+    .post(`/quests/${questId}/accept`, { walletAddress })
+    .then((response) => {
+      console.debug('[API] Quest acceptance successful', {
+        status: response.status,
+        questId: response.data?.id ?? questId,
+        questStatus: response.data?.status
+      });
+      return response;
+    })
+    .catch((error) => {
+      console.error('[API] Quest acceptance failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        status: axios.isAxiosError(error) ? error.response?.status : undefined,
+        responseData: axios.isAxiosError(error) ? JSON.stringify(error.response?.data).slice(0, 500) : undefined,
+        questId,
+        walletAddress
+      });
+      throw error;
+    });
+}
+
 export function submitProofForVerification(questId: string, proofUri: string, submissionTxHash: string) {
   console.debug('[API] Submitting proof for verification', {
     questId,
