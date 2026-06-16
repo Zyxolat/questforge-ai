@@ -512,13 +512,23 @@ export async function acceptQuest(req: Request, res: Response) {
       success: true,
       quest: {
         id: updatedQuest.id,
+        orchestrationId: updatedQuest.orchestrationId,
         status: updatedQuest.status,
         playerId: updatedQuest.playerId,
         startedAt: updatedQuest.startedAt?.toISOString(),
         title: updatedQuest.title,
         description: updatedQuest.description,
         rewardAmount: updatedQuest.rewardAmount,
-        player: updatedQuest.player?.username
+        xpReward: updatedQuest.xpReward,
+        difficulty: updatedQuest.difficulty,
+        questType: updatedQuest.questType,
+        objective: updatedQuest.objective,
+        lore: updatedQuest.lore,
+        chainQuestId: updatedQuest.chainQuestId?.toString() ?? null,
+        durationSeconds: updatedQuest.durationSeconds,
+        expiresAt: updatedQuest.expiresAt?.toISOString(),
+        player: updatedQuest.player?.username,
+        metadata: updatedQuest.metadata
       }
     });
   } catch (error) {
@@ -1066,8 +1076,22 @@ export async function submitProof(req: Request, res: Response) {
 
     res.json({
       success: true,
-      questId,
-      status: updatedQuest.status,
+      quest: {
+        id: updatedQuest.id,
+        status: updatedQuest.status,
+        chainQuestId: updatedQuest.chainQuestId?.toString() ?? null,
+        rewardAmount: updatedQuest.rewardAmount,
+        xpReward: updatedQuest.xpReward,
+        proofTx: updatedQuest.proofTx,
+        title: updatedQuest.title,
+        description: updatedQuest.description,
+        difficulty: updatedQuest.difficulty,
+        questType: updatedQuest.questType,
+        objective: updatedQuest.objective,
+        durationSeconds: updatedQuest.durationSeconds,
+        expiresAt: updatedQuest.expiresAt?.toISOString(),
+        metadata: updatedQuest.metadata
+      },
       message: 'Proof accepted. Quest is now ready to claim reward.'
     });
   } catch (error) {

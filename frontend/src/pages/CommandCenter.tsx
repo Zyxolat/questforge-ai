@@ -12,13 +12,13 @@ import RewardAnimation from '../components/RewardAnimation';
 import LoadingScreen from '../components/LoadingScreen';
 import OnboardingFlow from '../components/OnboardingFlow';
 import DailyLoginBonus from '../components/DailyLoginBonus';
-// QuestState type defined below
+import { QuestState, useRealtimeState } from '../context/RealtimeContext';
 import { useWallet } from '../context/WalletContext';
 import {
-  acceptQuest,
   extractAuthFailure,
   fetchDailyMissions,
   generateQuest,
+  registerOnchainQuest,
   submitProofForVerification
 } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
@@ -31,14 +31,6 @@ import {
   waitForTransactionReceipt
 } from '../lib/walletProvider';
 
-type QuestState = {
-  id: string;
-  chainQuestId?: string;
-  orchestrationId?: string;
-  title?: string;
-  generation?: Record<string, unknown>;
-  [key: string]: unknown;
-};
 type DailyMission = { id: string; title: string; description: string; reward: string };
 type GeneratedQuestTemplate = QuestState & {
   title: string;
@@ -65,11 +57,12 @@ type TxStatusType = 'pending' | 'success' | 'error' | 'confirmed';
 type QuestFlowStage =
   | 'PENDING'
   | 'GENERATED'
-  | 'AVAILABLE'
   | 'ACCEPTED'
-  | 'COMPLETED'
-  | 'CLAIMABLE'
-  | 'REWARDED';
+  | 'ACTIVE'
+  | 'SUBMITTED'
+  | 'VERIFIED'
+  | 'REWARDED'
+  | 'COMPLETED';
 
 type PendingProofRetry = {
   questId: string;
@@ -142,12 +135,22 @@ function resolveQuestRarityLabel(difficulty: number | string | undefined) {
 
 function normalizeProofReference(value: string) {
   const trimmed = value.trim();
-  // Accept any non-empty text proof
-  if (!trimmed || trimmed.length === 0) {
+  if (!trimmed) {
     return null;
   }
-  // No blockchain validation needed - accept plain text
-  return trimmed;
+
+  const txHashMatch = trimmed.match(/0x[a-fA-F0-9]{64}/);
+  if (txHashMatch) {
+    return txHashMatch[0].toLowerCase();
+  }
+
+  try {
+    const url = new URL(trimmed);
+    const pathHash = url.pathname.match(/0x[a-fA-F0-9]{64}/);
+    return pathHash ? pathHash[0].toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 function formatActionFailure(error: unknown, fallbackLabel: string) {
@@ -172,9 +175,8 @@ function formatActionFailure(error: unknown, fallbackLabel: string) {
   return fallbackLabel;
 }
 
-function formatTxLabel(functionName: 'createQuest' | 'acceptQuest' | 'createAndAcceptQuest' | 'submitQuest' | 'claimReward') {
+function formatTxLabel(functionName: 'createQuest' | 'submitQuest' | 'claimReward') {
   if (functionName === 'createQuest') return 'Forge quest';
-  if (functionName === 'acceptQuest' || functionName === 'createAndAcceptQuest') return 'Accept quest';
   if (functionName === 'claimReward') return 'Claim reward';
   return 'Submit proof';
 }
@@ -278,30 +280,21 @@ export default function CommandCenter() {
     disconnectWallet,
     switchCeloNetwork
   } = useWallet();
-  const activeQuest: QuestState | null = { id: '', title: '', status: 'AVAILABLE' } as QuestState;
-  const notifications: Array<Record<string, unknown>> = [];
-  const quests: QuestState[] = [];
-  const player: { xp?: number; level?: number; questCount?: number } | null = { xp: 0, level: 1, questCount: 0 };
-  const isRealtimeReady = false;
-  const hydrationStatus = 'ready';
-  const connectionStatus = 'connected';
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const getQuest = (_matcher: Record<string, unknown>): QuestState | null => null;
-  const syncNow = (): Promise<void> => Promise.resolve();
-  const refreshQuestFeed = (): Promise<void> => Promise.resolve();
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const upsertQuest = (_quest: Record<string, unknown>): void => {};
-  const patchQuest = (questId: string, patch: Record<string, unknown>): void => {
-    // Update lastGeneratedQuest if the ID matches
-    if (lastGeneratedQuest && lastGeneratedQuest.id === questId) {
-      setLastGeneratedQuest({
-        ...lastGeneratedQuest,
-        ...patch
-      });
-    }
-  };
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const addNotification = (_notification: Record<string, unknown>): void => {};
+  const {
+    activeQuest,
+    connectionStatus,
+    hydrationStatus,
+    isRealtimeReady,
+    notifications,
+    player,
+    quests,
+    syncNow,
+    refreshQuestFeed,
+    upsertQuest,
+    patchQuest,
+    getQuest,
+    addNotification
+  } = useRealtimeState();
   const [dailyMissions, setDailyMissions] = useState<DailyMission[]>([]);
   const [proofUri, setProofUri] = useState('');
   const [proofError, setProofError] = useState<string | null>(null);
@@ -365,7 +358,7 @@ export default function CommandCenter() {
   const generatedQuest = lastGeneratedQuest
     ? getQuest(questMatcher(lastGeneratedQuest)) ?? lastGeneratedQuest
     : null;
-  const sessionQuest: QuestState | null = useMemo(() => {
+  const sessionQuest = useMemo(() => {
     const candidates: QuestState[] = [];
     const seen = new Set<string>();
 
@@ -385,12 +378,12 @@ export default function CommandCenter() {
 
     return pickDisplayQuest(candidates);
   }, [generatedQuest, quests, sessionStartedAt, lastGeneratedQuest?.id]);
-  const resumedQuest: QuestState | null = resumedQuestId
-    ? (getQuest({ id: resumedQuestId }) ?? (activeQuest && activeQuest.id === resumedQuestId ? activeQuest : null))
+  const resumedQuest = resumedQuestId
+    ? getQuest({ id: resumedQuestId }) ?? (activeQuest?.id === resumedQuestId ? activeQuest : null)
     : null;
-  const interactiveQuest: QuestState | null = (sessionQuest ?? resumedQuest) ?? null;
-  const restoredQuest: QuestState | null =
-    (interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest ?? null)) ? null : (activeQuest ?? null);
+  const interactiveQuest = sessionQuest ?? resumedQuest;
+  const restoredQuest =
+    interactiveQuest || !activeQuest || isQuestFromCurrentSession(activeQuest) ? null : activeQuest;
   const currentQuestForDisplay = interactiveQuest ?? generatedQuest ?? restoredQuest;
   const generationProfile = resolveGenerationProfile(currentQuestForDisplay);
   const narrativeProfile = resolveNarrativeRecord(currentQuestForDisplay);
@@ -461,7 +454,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status === 'CLAIMABLE' || interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED') {
+    if (interactiveQuest.status === 'VERIFIED' || interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED') {
       if (pendingProofRetry?.questId === interactiveQuest.id) {
         setPendingProofRetry(null);
       }
@@ -478,7 +471,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status === 'COMPLETED') {
+    if (interactiveQuest.status === 'SUBMITTED') {
       setTxStatus((current) =>
         current && !isProofVerificationStatus(current)
           ? current
@@ -497,7 +490,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status === 'CLAIMABLE') {
+    if (interactiveQuest.status === 'VERIFIED') {
       setTxStatus((current) =>
         current && !isProofVerificationStatus(current)
           ? current
@@ -553,9 +546,9 @@ export default function CommandCenter() {
     }
 
     setRewardData({
-      xp: Number((interactiveQuest.xpReward as string | number | undefined) || 0) || 0,
-      token: String((interactiveQuest.rewardAmount as string | number | undefined) || '0'),
-      nft: resolveQuestRarityLabel(interactiveQuest.difficulty as string | undefined)
+      xp: Number(interactiveQuest.xpReward) || 0,
+      token: String(interactiveQuest.rewardAmount || '0'),
+      nft: resolveQuestRarityLabel(interactiveQuest.difficulty)
     });
     setCelebrationQuestId(questId);
     setShowRewardAnimation(true);
@@ -605,7 +598,7 @@ export default function CommandCenter() {
 
   function focusProofSubmission() {
     setMessage(
-      'Complete the objective, then submit your proof description below for off-chain verification.'
+      'Complete the objective, then paste the proof transaction below to trigger backend verification.'
     );
     proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
@@ -618,7 +611,7 @@ export default function CommandCenter() {
     const failureReason =
       typeof interactiveQuest.verificationReason === 'string' && interactiveQuest.verificationReason.trim().length > 0
         ? interactiveQuest.verificationReason
-        : (interactiveQuest.treasuryPayout as Record<string, unknown>)?.status === 'REFUNDED'
+        : interactiveQuest.treasuryPayout?.status === 'REFUNDED'
           ? 'The quest was refunded after deterministic verification rejected the proof.'
           : 'The quest failed during proof verification or settlement. Review the proof hash and objective requirements, then generate a new quest when ready.';
 
@@ -632,7 +625,7 @@ export default function CommandCenter() {
 
     setResumedQuestId(restoredQuest.id);
 
-    if (restoredQuest.status === 'ACCEPTED') {
+    if (restoredQuest.status === 'ACTIVE') {
       setMessage('Previous active quest resumed. Paste your proof reference below when you are ready.');
       window.setTimeout(() => {
         proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -654,20 +647,20 @@ export default function CommandCenter() {
     }
 
     if (
-      interactiveQuest.status === 'CLAIMABLE' &&
+      interactiveQuest.status === 'VERIFIED' &&
       interactiveQuest.id &&
       completedQuestIds.includes(interactiveQuest.id)
     ) {
       return 'COMPLETED';
     }
-    if (interactiveQuest.status === 'CLAIMABLE' && (completionModal || showRewardAnimation)) {
+    if (interactiveQuest.status === 'VERIFIED' && (completionModal || showRewardAnimation)) {
       return 'REWARDED';
     }
-    if (interactiveQuest.status === 'CLAIMABLE') return 'CLAIMABLE';
-    if (interactiveQuest.status === 'COMPLETED') return 'COMPLETED';
-    if (interactiveQuest.status === 'ACCEPTED') return 'ACCEPTED';
-    if (interactiveQuest.status === 'AVAILABLE') return 'AVAILABLE';
-    if (interactiveQuest.status === 'REWARDED') return 'REWARDED';
+    if (interactiveQuest.status === 'VERIFIED') return 'VERIFIED';
+    if (interactiveQuest.status === 'SUBMITTED') return 'SUBMITTED';
+    if (interactiveQuest.status === 'ACTIVE') return 'ACTIVE';
+    if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId) return 'ACCEPTED';
+    if (interactiveQuest.status === 'AVAILABLE') return 'GENERATED';
     return 'PENDING';
   }
 
@@ -675,17 +668,18 @@ export default function CommandCenter() {
     if (status !== 'connected') return 'Wallet disconnected';
     if (!isCorrectNetwork) return 'Wrong network';
     if (authStatus !== 'authenticated') return 'Awaiting secure sign-in';
-    if (interactiveQuest?.status === 'COMPLETED') return 'Verification pending';
-    if (interactiveQuest?.status === 'CLAIMABLE') return 'Reward ready to claim';
+    if (!isRealtimeReady) return `Realtime ${hydrationStatus}`;
+    if (interactiveQuest?.status === 'SUBMITTED') return 'Verification pending';
+    if (interactiveQuest?.status === 'VERIFIED') return 'Reward ready to claim';
     if (interactiveQuest?.status === 'REWARDED') return 'Reward settlement complete';
-    if (interactiveQuest?.status === 'ACCEPTED') return 'Quest live';
+    if (interactiveQuest?.status === 'ACTIVE') return 'Quest live';
     if (interactiveQuest?.status === 'AVAILABLE') return 'Ready to begin';
     if (restoredQuest) return 'No new quest generated yet';
     return 'Forge ready';
   }
 
   async function submitForgeWrite(
-    functionName: 'createQuest' | 'acceptQuest' | 'createAndAcceptQuest' | 'submitQuest' | 'claimReward',
+    functionName: 'createQuest' | 'submitQuest' | 'claimReward',
     args: unknown[],
     options?: { value?: bigint; gasLimit?: bigint }
   ) {
@@ -705,10 +699,7 @@ export default function CommandCenter() {
     });
 
     try {
-      // Decide whether to use direct signer (ethers) or provider.request (WalletConnect / other injected providers)
-      const preferProviderRequest = Boolean(walletProvider && !walletProvider.isMetaMask && !walletProvider.isMiniPay);
-
-      if (!isMiniPay && !preferProviderRequest) {
+      if (!isMiniPay) {
         if (!signer) throw new Error('Wallet signer is unavailable');
 
         console.debug('[CommandCenter] Using standard wallet path', {
@@ -755,33 +746,6 @@ export default function CommandCenter() {
         if (functionName === 'createQuest') {
           // createQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds, options?)
           tx = await forgeQuestManager.createQuest(
-            args[0] as string,
-            args[1] as string,
-            args[2] as bigint,
-            args[3] as bigint,
-            args[4] as bigint,
-            txOptions
-          );
-        } else if (functionName === 'acceptQuest') {
-          // acceptQuest(questId)
-          tx = await forgeQuestManager.acceptQuest(args[0] as bigint, txOptions);
-        } else if (functionName === 'createAndAcceptQuest') {
-          // createAndAcceptQuest(title, metadataUri, rewardAmount, xpReward, durationSeconds)
-          // Use fallback gas estimation if not provided, as this is a more complex operation
-          if (!('gasLimit' in txOptions)) {
-            console.debug('[CommandCenter] Gas limit not provided for createAndAcceptQuest, using fallback');
-            txOptions.gasLimit = BigInt('500000');  // Fallback for createAndAcceptQuest
-          }
-          console.debug('[CommandCenter] Calling createAndAcceptQuest with args:', {
-            title: args[0],
-            metadataUri: args[1],
-            rewardAmount: args[2]?.toString(),
-            xpReward: args[3]?.toString(),
-            durationSeconds: args[4]?.toString(),
-            gasLimit: txOptions.gasLimit?.toString(),
-            value: txOptions.value?.toString()
-          });
-          tx = await forgeQuestManager.createAndAcceptQuest(
             args[0] as string,
             args[1] as string,
             args[2] as bigint,
@@ -836,7 +800,7 @@ export default function CommandCenter() {
         return { hash: tx.hash, receipt };
       }
 
-      if (!walletProvider) throw new Error('Wallet provider is unavailable');
+      if (!walletProvider) throw new Error('MiniPay provider is unavailable');
 
       const signerAddress = await signer?.getAddress();
       
@@ -931,31 +895,14 @@ export default function CommandCenter() {
 
       return { hash: txHash, receipt };
     } catch (error) {
-      // Try to extract revert reason if available
-      let revertReason = 'Unknown revert reason';
-      if (error instanceof Error) {
-        if (error.message.includes('execution reverted')) {
-          revertReason = error.message;
-        }
-        const errorData = (error as unknown as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
-        if (errorData && typeof errorData === 'object') {
-          if (typeof errorData.message === 'string') {
-            revertReason = errorData.message;
-          }
-        }
-      }
-
       console.error('[CommandCenter] submitForgeWrite failed', {
         functionName,
         errorName: error instanceof Error ? error.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
-        revertReason,
         isMiniPay,
         hasForgeQuestManager: !!forgeQuestManager,
         hasSigner: !!signer,
-        hasProvider: !!provider,
-        errorCode: (error as Record<string, unknown>)?.code,
-        errorData: (error as Record<string, unknown>)?.data
+        hasProvider: !!provider
       });
       setTxStatus({
         type: 'error',
@@ -968,19 +915,58 @@ export default function CommandCenter() {
 
   async function resolveQuestForChainAction(
     quest: QuestState,
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    _fallbackMessage: string
+    fallbackMessage: string
   ) {
-    // Without realtime context, just return quest as-is
-    if (!quest.chainQuestId) {
-      setMessage('Quest is syncing with backend...');
-      // In a real app, would fetch from API
+    let latestQuest = getQuest(questMatcher(quest)) ?? quest;
+    if (latestQuest.chainQuestId) return latestQuest;
+
+    setMessage('Quest is syncing with backend. Refreshing quest feed and realtime state...');
+
+    for (let attempt = 1; attempt <= 3 && !latestQuest.chainQuestId; attempt += 1) {
+      await refreshQuestFeed();
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+      if (latestQuest.chainQuestId) break;
+
+      await syncNow();
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+      if (latestQuest.chainQuestId) break;
+
+      await new Promise((resolve) => setTimeout(resolve, attempt * 750));
+      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
     }
-    return quest;
+
+    if (!latestQuest.chainQuestId) throw new Error(fallbackMessage);
+    return latestQuest;
   }
 
-  // registerOnchainQuestWithRetry removed: acceptance now calls acceptQuest onchain and
-  // frontend relies on QuestAccepted event and existing backend syncing paths.
+  async function registerOnchainQuestWithRetry(
+    questId: string,
+    chainQuestId: string,
+    creationTxHash: string,
+    maxRetries = 3
+  ): Promise<QuestState | null> {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt += 1) {
+      try {
+        const registrationResponse = await registerOnchainQuest(
+          questId,
+          chainQuestId,
+          creationTxHash
+        );
+        const registeredQuest = (registrationResponse.data as { quest?: QuestState }).quest;
+        return registeredQuest ?? null;
+      } catch (error) {
+        lastError = error;
+        if (attempt < maxRetries) {
+          const delayMs = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        }
+      }
+    }
+
+    throw lastError;
+  }
 
   async function handleGenerateQuest() {
     console.debug('[CommandCenter] handleGenerateQuest start', {
@@ -1046,18 +1032,64 @@ export default function CommandCenter() {
     }
   }
 
+  /**
+   * Validate all prerequisites for quest acceptance
+   * Returns a detailed diagnostics object for debugging
+   */
+  function validateQuestAcceptancePrerequisites() {
+    const diagnostics = {
+      timestamp: new Date().toISOString(),
+      walletConnected: !!address,
+      walletAddress: address ? `${address.slice(0, 6)}...${address.slice(-4)}` : 'N/A',
+      contractInitialized: !!forgeQuestManager,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      signerAvailable: !!signer,
+      providerAvailable: !!provider,
+      questExists: !!interactiveQuest || !!lastGeneratedQuest,
+      selectedQuest: (interactiveQuest || lastGeneratedQuest)?.id,
+      questStatus: (interactiveQuest || lastGeneratedQuest)?.status,
+      expectedQuestStatus: 'AVAILABLE',
+      isCorrectNetwork,
+      authStatus,
+      authReady: isAuthReady,
+      isMiniPay
+    };
+
+    console.group('[handleAcceptQuest] Validation Diagnostics');
+    console.table(diagnostics);
+    console.groupEnd();
+
+    return diagnostics;
+  }
+
   async function handleAcceptQuest() {
     console.log('[handleAcceptQuest] Button clicked - starting accept quest flow');
-
+    
+    // Run comprehensive validation diagnostics
+    validateQuestAcceptancePrerequisites();
+    
     const questToAccept = interactiveQuest ?? lastGeneratedQuest;
+    console.log('[handleAcceptQuest] Quest check:', {
+      hasInteractiveQuest: !!interactiveQuest,
+      hasLastGeneratedQuest: !!lastGeneratedQuest,
+      selectedQuest: questToAccept?.id,
+      selectedQuestStatus: questToAccept?.status
+    });
 
-    if (!questToAccept) {
-      setMessage('No quest to accept. Generate one first.');
-      return;
-    }
+    console.log('[handleAcceptQuest] Wallet check:', {
+      address,
+      hasForgeQuestManager: !!forgeQuestManager,
+      hasQuestToAccept: !!questToAccept
+    });
 
-    if (!address) {
-      setMessage('Connect wallet to accept quests.');
+    if (!address || !forgeQuestManager || !questToAccept) {
+      const reason = !address ? 'NO_WALLET_ADDRESS' : !forgeQuestManager ? 'NO_CONTRACT' : 'NO_QUEST';
+      console.error('[handleAcceptQuest] Early exit - reason:', reason, {
+        address,
+        forgeQuestManager: !!forgeQuestManager,
+        questToAccept: !!questToAccept
+      });
+      setMessage('Connect your wallet and generate a quest before accepting.');
       return;
     }
 
@@ -1066,54 +1098,110 @@ export default function CommandCenter() {
         status: questToAccept.status,
         expectedStatus: 'AVAILABLE'
       });
-      setMessage('Only available quests can be accepted.');
+      setMessage('Only generated quests can be accepted.');
       return;
     }
 
+    console.log('[handleAcceptQuest] Pre-auth validation passed, checking authentication...');
+    if (!(await requireReadyAuth('accepting quest'))) {
+      console.warn('[handleAcceptQuest] Authentication check failed or user rejected');
+      return;
+    }
+    
+    console.log('[handleAcceptQuest] Authentication passed, proceeding with transaction');
+
+    console.info('[CommandCenter] handleAcceptQuest: Quest validation passed, preparing transaction', {
+      questId: questToAccept.id,
+      questTitle: questToAccept.title,
+      rewardAmount: questToAccept.rewardAmount,
+      contractAddress: contractAddresses.forgeQuestManagerAddress,
+      walletAddress: address
+    });
+
     setLoading(true);
+    setTxStatus(null);
     setProofError(null);
-    setMessage('Accepting quest...');
+    setMessage('Accepting the quest onchain. Approve a 0.001 CELO transaction to begin.');
 
     try {
-      console.log('[handleAcceptQuest] Calling backend API to accept quest', {
-        questId: questToAccept.id,
-        address
+      const template = questToAccept as GeneratedQuestTemplate;
+      const rewardAmount = ethers.parseEther(template.rewardAmount.toString());
+      const xpReward = BigInt(template.xpReward);
+      const durationSeconds = BigInt(template.durationSeconds);
+      const createQuestArgs = [
+        template.title,
+        template.metadataUri,
+        rewardAmount,
+        xpReward,
+        durationSeconds
+      ] as const;
+
+      console.debug('[CommandCenter] handleAcceptQuest: Calling submitForgeWrite', {
+        functionName: 'createQuest',
+        title: template.title,
+        rewardAmount: template.rewardAmount,
+        xpReward: template.xpReward,
+        durationSeconds: template.durationSeconds,
+        acceptanceFee: '0.001 CELO'
       });
 
-      // Call backend API to accept quest using proper axios client
-      const response = await acceptQuest(questToAccept.id, address);
-      const acceptedQuestData = response.data;
-      console.log('[handleAcceptQuest] API response:', acceptedQuestData);
+      const { hash: creationTxHash, receipt } = await submitForgeWrite(
+        'createQuest',
+        [...createQuestArgs],
+        { value: ethers.parseEther('0.001') }
+      );
 
-      // Update local state to ACCEPTED
-      const acceptedQuest: QuestState = {
-        ...questToAccept,
-        status: 'ACCEPTED',
-        player: address,
-        playerId: address,
-        startedAt: Date.now() / 1000,
-        creator: address,
-        ...acceptedQuestData
-      };
+      console.info('[CommandCenter] handleAcceptQuest: Transaction receipt received', {
+        txHash: creationTxHash,
+        blockNumber: receipt?.blockNumber
+      });
 
-      setLastGeneratedQuest(acceptedQuest);
-      patchQuest(questToAccept.id, acceptedQuest);
-      upsertQuest(acceptedQuest);
+      const parsedLog = parseReceiptEvent(
+        receipt,
+        {
+          contractAddress: contractAddresses.forgeQuestManagerAddress,
+          contractInterface: forgeQuestManager.interface
+        },
+        'QuestCreated'
+      );
 
+      const chainQuestId = parsedLog?.args?.questId?.toString();
+      if (!chainQuestId) {
+        throw new Error('Quest creation receipt did not include a quest id');
+      }
+
+      setMessage('Quest accepted onchain. Syncing acceptance state with backend...');
+
+      const registeredQuest = await registerOnchainQuestWithRetry(
+        String(template.id),
+        chainQuestId,
+        creationTxHash
+      );
+
+      const persistedQuest: QuestState = registeredQuest
+        ? registeredQuest
+        : {
+            ...template,
+            creator: address,
+            chainQuestId,
+            status: 'ACCEPTED'
+          };
+
+      setLastGeneratedQuest(persistedQuest);
+      patchQuest(questMatcher(questToAccept), persistedQuest);
+      upsertQuest(persistedQuest);
       setRevealQuestModal(false);
-      setMessage('Quest accepted! Now complete the objective and submit your proof.');
-      setTxStatus({
-        type: 'confirmed',
-        hash: '',
-        label: 'Quest accepted',
-        message: 'Quest is now active. Submit your proof when done.'
-      });
-
+      setMessage('Quest accepted! Complete the objective and submit proof below.');
       await syncNow();
     } catch (error) {
-      console.error('[handleAcceptQuest] Error:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      setMessage(`Error accepting quest: ${errorMessage}`);
+      console.error('[CommandCenter] handleAcceptQuest failed', {
+        errorName: error instanceof Error ? error.name : 'Unknown',
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+        questId: questToAccept?.id,
+        questTitle: questToAccept?.title
+      });
+      setMessage(formatActionFailure(error, 'Quest acceptance failed.'));
     } finally {
       setLoading(false);
     }
@@ -1125,7 +1213,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status !== 'ACCEPTED' && !canRetryProofQueue) {
+    if (interactiveQuest.status !== 'ACTIVE' && !canRetryProofQueue) {
       setMessage('Quest is not ready for submission yet. Please wait for it to synchronize.');
       return;
     }
@@ -1140,51 +1228,84 @@ export default function CommandCenter() {
 
     setLoading(true);
     setProofError(null);
-    setMessage('Submitting your proof to the backend for verification...');
+    setMessage(
+      canRetryProofQueue
+        ? 'Retrying backend proof queue synchronization...'
+        : 'Submitting proof to the Forge Master for deterministic verification...'
+    );
     setTxStatus(null);
+    let queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(
         interactiveQuest,
-        'Quest is still missing its id after sync. Please wait a moment and try again.'
+        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
       );
       if (!resolvedQuest.id) {
         throw new Error('Quest is missing a persistent id');
       }
 
-      console.debug('[CommandCenter] Submitting proof to backend', {
+      let submissionTxHash = pendingProofRetry?.submissionTxHash;
+
+      if (!canRetryProofQueue) {
+        setMessage('Quest sync complete. Submitting proof onchain...');
+
+        const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+        const submission = await submitForgeWrite('submitQuest', [chainQuestId, normalizedProof]);
+        submissionTxHash = submission.hash;
+        queuedProofRetry = {
+          questId: resolvedQuest.id,
+          proofTxHash: normalizedProof,
+          submissionTxHash
+        };
+        setPendingProofRetry(queuedProofRetry);
+      }
+
+      if (!submissionTxHash) {
+        throw new Error('Proof submission transaction hash is missing for backend verification');
+      }
+
+      console.debug('[CommandCenter] Submitting proof to backend verification service', {
         questId: resolvedQuest.id,
-        proofText: normalizedProof
+        chainQuestId: resolvedQuest.chainQuestId,
+        proofTxHash: normalizedProof,
+        submissionTxHash
       });
 
-      const proofResponse = await submitProofForVerification(resolvedQuest.id, normalizedProof);
-      console.debug('[CommandCenter] Backend proof submission accepted', {
+      await submitProofForVerification(resolvedQuest.id, normalizedProof, submissionTxHash);
+      console.debug('[CommandCenter] Backend proof verification submission accepted', {
         questId: resolvedQuest.id,
-        responseStatus: proofResponse?.data?.status,
-        responseMessage: proofResponse?.data?.message
+        submissionTxHash
       });
-
-      // Update quest status based on API response or set to CLAIMABLE
-      const responseStatus = proofResponse?.data?.status || 'CLAIMABLE';
-      patchQuest(resolvedQuest?.id ?? '', {
-        status: responseStatus,
-        proofText: normalizedProof,
-        verificationResult: 'accepted',
-        verificationReason: proofResponse?.data?.message ?? 'Proof submitted successfully'
+      patchQuest(questMatcher(resolvedQuest), {
+        status: 'SUBMITTED',
+        proofTx: normalizedProof,
+        proofTxHash: submissionTxHash,
+        verificationResult: 'pending',
+        verificationReason: 'Queued for deterministic verification'
       });
-
+      setPendingProofRetry(null);
       setTxStatus({
-        type: 'success',
-        label: 'Proof submitted',
-        message: 'Your proof has been accepted. You can now claim your reward!'
+        type: 'pending',
+        hash: submissionTxHash,
+        label: 'Proof verification pending',
+        message: 'Deterministic verification is running. Results should stream back shortly.'
       });
-      setMessage('Proof accepted! Your quest is now ready to claim the reward.');
+      setMessage(
+        'Proof submitted. The backend is now verifying the result and streaming the outcome back to this screen.'
+      );
       await syncNow();
       await refreshQuestFeed();
       setProofUri('');
     } catch (error) {
-      console.error('[CommandCenter] submitProof failed', error);
-      setMessage(formatActionFailure(error, 'Proof submission failed.'));
+      console.error('[CommandCenter] submitQuest failed', error);
+      if (queuedProofRetry?.questId === interactiveQuest.id) {
+        setMessage(
+          'Your proof was accepted onchain, but the backend verification queue did not confirm yet. Try "Retry backend sync" after a moment.'
+        );
+      } else {
+        setMessage(formatActionFailure(error, 'Proof submission failed.'));
+      }
     } finally {
       setLoading(false);
     }
@@ -1192,7 +1313,7 @@ export default function CommandCenter() {
 
   async function handleClaimReward() {
     if (!address || !forgeQuestManager || !interactiveQuest) {
-      setMessage('Connect your wallet and select a quest to claim rewards.');
+      setMessage('Connect your wallet and select a claimable quest to claim rewards.');
       return;
     }
 
@@ -1243,7 +1364,7 @@ export default function CommandCenter() {
       const xpReward = rewardedLog?.args?.xpReward?.toString() ?? String(resolvedQuest.xpReward ?? '0');
       const proofHash = rewardedLog?.args?.proofHash ? String(rewardedLog.args.proofHash) : undefined;
 
-      patchQuest(resolvedQuest?.id ?? '', {
+      patchQuest(questMatcher(resolvedQuest), {
         status: 'REWARDED',
         treasuryPayout: {
           ...(resolvedQuest.treasuryPayout && typeof resolvedQuest.treasuryPayout === 'object'
@@ -1417,15 +1538,15 @@ export default function CommandCenter() {
               <p className="text-xs uppercase tracking-[0.2em] text-softyellow">Player Stats</p>
               <div className="mt-2 flex gap-4 text-sm">
                 <div>
-                  <p className="font-bold text-glowyellow">{(player?.xp ?? 0) || '0'}</p>
+                  <p className="font-bold text-glowyellow">{player?.xp || '0'}</p>
                   <p className="text-xs text-slate-400">XP</p>
                 </div>
                 <div>
-                  <p className="font-bold text-emerald-300">Level {(player?.level ?? 1) || '1'}</p>
+                  <p className="font-bold text-emerald-300">Level {player?.level || '1'}</p>
                   <p className="text-xs text-slate-400">Rank</p>
                 </div>
                 <div>
-                  <p className="font-bold text-purple-300">{(player?.questCount ?? 0) || '0'}</p>
+                  <p className="font-bold text-purple-300">{player?.questCount || '0'}</p>
                   <p className="text-xs text-slate-400">Quests</p>
                 </div>
               </div>
@@ -1527,7 +1648,7 @@ export default function CommandCenter() {
               >
                 <p className="text-xs uppercase tracking-[0.2em] text-amber-200">Restored Quest</p>
                 <p className="mt-3 text-xl font-bold text-white">
-                  {(restoredQuest?.title ?? null) || 'Previous quest found'}
+                  {restoredQuest.title || 'Previous quest found'}
                 </p>
                 <p className="mt-2 text-sm text-slate-200">
                   We found an older quest on this wallet, but connecting your wallet did not generate
@@ -1541,17 +1662,17 @@ export default function CommandCenter() {
                     whileHover={{ scale: 1.02 }}
                     whileTap={{ scale: 0.98 }}
                     onClick={resumeRestoredQuest}
-                    disabled={!(restoredQuest?.id ?? null)}
+                    disabled={!restoredQuest.id}
                     className="rounded-xl border border-amber-300 bg-amber-300/20 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/30 disabled:opacity-50"
                   >
-                    {(restoredQuest?.status ?? null) === 'ACTIVE'
+                    {restoredQuest.status === 'ACTIVE'
                       ? 'Resume and Submit Proof'
-                      : (restoredQuest?.status ?? null) === 'AVAILABLE'
+                      : restoredQuest.status === 'AVAILABLE'
                         ? 'Resume and Complete Quest'
                         : 'Resume Previous Quest'}
                   </motion.button>
                   <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
-                    Status: {String((restoredQuest?.status ?? 'Unknown') || 'Unknown')}
+                    Status: {restoredQuest.status || 'Unknown'}
                   </div>
                 </div>
               </motion.div>
@@ -1568,8 +1689,8 @@ export default function CommandCenter() {
                 <ActiveQuestPanel
                   quest={interactiveQuest}
                   onAcceptQuest={interactiveQuest.status === 'AVAILABLE' ? handleAcceptQuest : undefined}
-                  onSubmitProof={interactiveQuest.status === 'ACCEPTED' ? focusProofSubmission : undefined}
-                  onClaimReward={interactiveQuest.status === 'CLAIMABLE' ? handleClaimReward : undefined}
+                  onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
+                  onClaimReward={interactiveQuest.status === 'VERIFIED' ? handleClaimReward : undefined}
                   onReviewFailure={
                     interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED'
                       ? reviewFailureState
@@ -1593,7 +1714,7 @@ export default function CommandCenter() {
               )}
             </motion.div>
 
-            {interactiveQuest?.status === 'ACCEPTED' || canRetryProofQueue ? (
+            {interactiveQuest?.status === 'ACTIVE' || canRetryProofQueue ? (
               <motion.div
                 ref={proofPanelRef}
                 initial={{ opacity: 0, y: 20 }}
@@ -1620,7 +1741,7 @@ export default function CommandCenter() {
             ) : null}
 
             {!interactiveQuest ||
-            interactiveQuest.status === 'CLAIMABLE' ||
+            interactiveQuest.status === 'VERIFIED' ||
             interactiveQuest.status === 'FAILED' ||
             interactiveQuest.status === 'CANCELLED' ? (
               <motion.div
@@ -1751,13 +1872,13 @@ export default function CommandCenter() {
               <div className="mt-4 space-y-3">
                 {recentNotifications.length > 0 ? (
                   recentNotifications.map((event) => (
-                    <div key={`${String(event.eventName)}-${String(event.id ?? event.sourceId ?? event.createdAt ?? 'event')}`} className="rounded-2xl border border-white/10 bg-navy/40 p-4">
+                    <div key={`${event.eventName}-${event.id ?? event.sourceId ?? event.createdAt ?? 'event'}`} className="rounded-2xl border border-white/10 bg-navy/40 p-4">
                       <div className="flex items-start justify-between gap-3">
                         <p className="text-xs uppercase tracking-[0.18em] text-glowyellow">
-                          {formatActivityLabel(event.eventName as string | undefined)}
+                          {formatActivityLabel(event.eventName)}
                         </p>
                         <p className="text-[11px] text-slate-500">
-                          {event.createdAt && (typeof event.createdAt === 'string' || typeof event.createdAt === 'number') ? new Date(event.createdAt as string | number).toLocaleTimeString() : 'live'}
+                          {event.createdAt ? new Date(event.createdAt).toLocaleTimeString() : 'live'}
                         </p>
                       </div>
                       <p className="mt-2 text-sm text-slate-200">

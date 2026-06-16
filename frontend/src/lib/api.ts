@@ -516,6 +516,10 @@ export function fetchActiveQuests() {
   return api.get('/quests/active');
 }
 
+export function fetchQuestById(questId: string) {
+  return api.get(`/quests/${questId}`);
+}
+
 export function fetchNPCDialogue(type: string, player: string, wallet?: string | null) {
   return api.get('/npc/dialogue', { params: { type, player, wallet: wallet || undefined } });
 }
