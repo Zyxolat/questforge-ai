@@ -87,8 +87,8 @@ export default function ProofSubmissionPanel({
           />
           <div className="flex justify-between items-center px-2">
             <p className="text-xs text-slate-400">
-              {charCount > 0 && charCount < 20 && '⚠ Provide more detail (min. 20 chars)'}
-              {charCount >= 20 && charCount < 500 && '✓ Description recorded'}
+              {charCount > 0 && charCount < 5 && '⚠ Need at least 5 characters'}
+              {charCount >= 5 && charCount < 500 && '✓ Description recorded'}
               {charCount >= 500 && '⚠ Maximum length reached (500 chars)'}
             </p>
             <p className="text-xs text-slate-400 font-mono">{charCount}/500</p>

@@ -195,8 +195,8 @@ function normalizeProofReference(value: string) {
   }
 
   // Accept plain text descriptions (current text-based proof system)
-  // Must be at least 20 characters to ensure meaningful description
-  if (trimmed.length >= 20) {
+  // Minimum 5 characters ensures user provides some meaningful input
+  if (trimmed.length >= 5) {
     return trimmed;
   }
 
@@ -1207,8 +1207,8 @@ export default function CommandCenter() {
     }
 
     if (!normalizedProof) {
-      setProofError('Please describe how you completed the objective.');
-      setMessage('Proof description is required. Please provide details of how you completed the quest objective.');
+      setProofError('Proof requires at least 5 characters. Describe your approach.');
+      setMessage('Proof description is too short. Please provide a brief description of how you completed the objective.');
       return;
     }
 
