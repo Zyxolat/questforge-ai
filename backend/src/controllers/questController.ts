@@ -1075,6 +1075,79 @@ export async function submitProof(req: Request, res: Response) {
       newStatus: updatedQuest.status
     });
 
+    // Create quest on blockchain if not already created
+    if (!updatedQuest.chainQuestId && contracts.forgeQuestManagerWrite) {
+      try {
+        logger.info('[QUEST] Creating quest on blockchain', {
+          questId,
+          title: updatedQuest.title,
+          rewardAmount: updatedQuest.rewardAmount,
+          xpReward: updatedQuest.xpReward
+        });
+
+        const createTx = await contracts.forgeQuestManagerWrite.createQuest(
+          updatedQuest.title || 'Quest',
+          updatedQuest.description || 'A quest in ForgeQuest',
+          ethers.parseEther(updatedQuest.rewardAmount.toString()),
+          updatedQuest.xpReward || 0,
+          updatedQuest.durationSeconds || 86400 // Default 1 day
+        );
+
+        const receipt = await createTx.wait();
+
+        logger.info('[QUEST] Quest creation transaction confirmed', {
+          questId,
+          txHash: receipt?.hash,
+          blockNumber: receipt?.blockNumber
+        });
+
+        // Parse QuestCreated event from logs
+        let chainQuestId: bigint | null = null;
+
+        if (receipt && receipt.logs) {
+          for (const log of receipt.logs) {
+            try {
+              const parsed = contracts.forgeQuestManagerInterface.parseLog(log);
+              if (parsed && parsed.name === 'QuestCreated') {
+                // questId is a bigint from the contract event
+                const questIdArg = parsed.args[0];
+                chainQuestId = typeof questIdArg === 'bigint' ? questIdArg : BigInt(questIdArg.toString());
+                logger.info('[QUEST] QuestCreated event parsed', {
+                  questId,
+                  chainQuestId: chainQuestId.toString(),
+                  creator: parsed.args[1],
+                  title: parsed.args[2]
+                });
+                break;
+              }
+            } catch {
+              // Not a QuestCreated event, continue
+            }
+          }
+        }
+
+        // Save chainQuestId to database
+        if (chainQuestId) {
+          await prisma.quest.update({
+            where: { id: questId },
+            data: { chainQuestId }
+          });
+
+          logger.info('[QUEST] Quest chainQuestId saved to database', {
+            questId,
+            chainQuestId: chainQuestId.toString()
+          });
+        }
+      } catch (blockchainError) {
+        // Log the error but don't fail the proof submission
+        // The quest can still be claimed using the database ID
+        logger.error('[QUEST] Failed to create quest on blockchain', blockchainError, {
+          questId,
+          errorMessage: blockchainError instanceof Error ? blockchainError.message : String(blockchainError)
+        });
+      }
+    }
+
     res.json({
       success: true,
       quest: {
