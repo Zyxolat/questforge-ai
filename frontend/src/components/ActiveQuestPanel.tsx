@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import { useEffect, useState } from 'react';
+import ProofSubmissionPanel from './ProofSubmissionPanel';
 
 interface QuestState {
   id: string;
@@ -41,6 +42,11 @@ interface ActiveQuestPanelProps {
   onReviewFailure?: () => void;
   loading?: boolean;
   disabled?: boolean;
+  proofUri?: string;
+  onProofChange?: (value: string) => void;
+  proofError?: string;
+  normalizedProof?: string | null;
+  helperText?: string | null;
 }
 
 export default function ActiveQuestPanel({
@@ -50,7 +56,12 @@ export default function ActiveQuestPanel({
   onClaimReward,
   onReviewFailure,
   loading = false,
-  disabled = false
+  disabled = false,
+  proofUri = '',
+  onProofChange,
+  proofError,
+  normalizedProof,
+  helperText
 }: ActiveQuestPanelProps) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -92,10 +103,10 @@ export default function ActiveQuestPanel({
     return 'Common';
   };
 
-  const isAvailable = quest.status === 'AVAILABLE';
-  const isAccepted = quest.status === 'ACCEPTED';
-  const isCompleted = quest.status === 'COMPLETED';
-  const isClaimable = quest.status === 'CLAIMABLE';
+  const isAvailable = quest.status === 'AVAILABLE' && !quest.chainQuestId;
+  const isAccepted = quest.status === 'ACTIVE' || (quest.status === 'AVAILABLE' && !!quest.chainQuestId);
+  const isCompleted = quest.status === 'SUBMITTED';
+  const isClaimable = quest.status === 'VERIFIED';
   const isRewarded = quest.status === 'REWARDED';
   const isFailed = quest.status === 'FAILED' || quest.status === 'CANCELLED';
 
@@ -354,18 +365,18 @@ export default function ActiveQuestPanel({
           </div>
         </motion.div>
 
-        {/* Stake display if accepted */}
-        {isAccepted && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="grid gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4"
-          >
-            <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/10 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-300">Proof Target</p>
-              <p className="mt-2 text-sm text-white">Describe how you completed the objective.</p>
-            </div>
-          </motion.div>
+        {/* Proof submission when accepted */}
+        {isAccepted && onProofChange && onSubmitProof && (
+          <ProofSubmissionPanel
+            proofUri={proofUri}
+            onProofChange={onProofChange}
+            onSubmit={onSubmitProof}
+            loading={loading}
+            disabled={disabled}
+            error={proofError}
+            normalizedProof={normalizedProof}
+            helperText={helperText}
+          />
         )}
 
         {(quest.proofTx || quest.proofTxHash || quest.verificationTx || quest.treasuryPayout?.status || quest.rewardedEvent) && (

@@ -649,13 +649,6 @@ export default function CommandCenter() {
     }
   }
 
-  function focusProofSubmission() {
-    setMessage(
-      'Complete the objective, then paste the proof transaction below to trigger backend verification.'
-    );
-    proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-
   function reviewFailureState() {
     if (!interactiveQuest) {
       return;
@@ -1671,7 +1664,7 @@ export default function CommandCenter() {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   quest={interactiveQuest as any}
                   onAcceptQuest={interactiveQuest.status === 'AVAILABLE' ? handleAcceptQuest : undefined}
-                  onSubmitProof={interactiveQuest.status === 'ACTIVE' ? focusProofSubmission : undefined}
+                  onSubmitProof={interactiveQuest.status === 'ACTIVE' ? () => void handleSubmitProof() : undefined}
                   onClaimReward={interactiveQuest.status === 'VERIFIED' ? handleClaimReward : undefined}
                   onReviewFailure={
                     interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED'
@@ -1680,6 +1673,11 @@ export default function CommandCenter() {
                   }
                   loading={loading}
                   disabled={false}
+                  proofUri={proofUri}
+                  onProofChange={handleProofChange}
+                  proofError={proofError ?? undefined}
+                  normalizedProof={normalizedProof}
+                  helperText={proofHelperText}
                 />
               ) : (
                 <motion.div
