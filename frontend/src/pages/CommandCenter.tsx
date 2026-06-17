@@ -1253,15 +1253,19 @@ export default function CommandCenter() {
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(interactiveQuest);
-      // Use quest.id directly for database-first architecture
-      const questId = BigInt(String(resolvedQuest.id));
+      
+      if (!resolvedQuest.chainQuestId) {
+        throw new Error('Quest has not been created onchain yet. Please try again.');
+      }
+      
+      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
 
       console.debug('[CommandCenter] handleClaimReward: Calling submitForgeWrite', {
         functionName: 'claimReward',
-        questId: questId.toString()
+        chainQuestId: chainQuestId.toString()
       });
 
-      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [questId]);
+      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [chainQuestId]);
 
       const rewardedLog = parseReceiptEvent(
         receipt,
