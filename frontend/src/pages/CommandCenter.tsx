@@ -1260,7 +1260,7 @@ export default function CommandCenter() {
         try {
           setMessage('Creating quest on blockchain via backend...');
           
-          const response = await fetch(`${env.API_BASE_URL}/api/quests/${interactiveQuest.id}/create-onchain`, {
+          const response = await fetch(`${env.API_BASE_URL}/quests/${interactiveQuest.id}/create-onchain`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'
