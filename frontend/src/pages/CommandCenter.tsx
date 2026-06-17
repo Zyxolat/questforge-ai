@@ -21,6 +21,7 @@ import {
 } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
+import { describeTransactionFailure } from '../lib/transactionDiagnostics';
 import {
   estimateContractWriteGas,
   sendContractWrite,
