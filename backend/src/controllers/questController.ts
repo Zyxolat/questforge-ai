@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Prisma, type QuestStatus } from '@prisma/client';
+import { Prisma, type QuestStatus, Quest } from '@prisma/client';
 import { contracts } from '../services/contracts';
 import { normalizeWallet, prisma, upsertUser } from '../services/chain';
 import {
@@ -1222,8 +1222,7 @@ function formatQuestResponse(quest: Quest) {
     expiresAt: quest.expiresAt?.toISOString(),
     metadata: quest.metadata,
     proofTx: quest.proofTx,
-    playerId: quest.playerId,
-    player: quest.player?.username
+    playerId: quest.playerId
   };
 }
 
