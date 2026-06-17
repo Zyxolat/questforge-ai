@@ -1298,12 +1298,21 @@ export default function CommandCenter() {
     try {
       console.info('[CommandCenter] handleClaimReward: Claiming reward', {
         questId: interactiveQuest.id,
+        chainQuestId: interactiveQuest.chainQuestId,
         questTitle: interactiveQuest.title,
         walletAddress: address
       });
 
-      // ✅ Database-first: Just claim directly with quest ID
-      const { receipt } = await submitForgeWrite('claimReward', [interactiveQuest.id]);
+      // ✅ Use chainQuestId (numeric ID on blockchain)
+      const chainQuestId = interactiveQuest.chainQuestId;
+      if (!chainQuestId) {
+        setMessage('❌ Quest not registered on blockchain. Please resubmit your proof.');
+        setLoading(false);
+        return;
+      }
+
+      const questIdBigInt = BigInt(String(chainQuestId));
+      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
 
       setMessage('⏳ Transaction confirmed...');
 
@@ -1326,6 +1335,7 @@ export default function CommandCenter() {
           eventName: 'quest:rewarded',
           payload: {
             questId: interactiveQuest.id,
+            chainQuestId,
             title: `Reward claimed: ${rewardAmount} CELO`,
             detail: `${xpReward} XP awarded`,
             status: 'REWARDED'
@@ -1340,7 +1350,8 @@ export default function CommandCenter() {
       console.error('[CommandCenter] handleClaimReward failed', {
         errorName: error instanceof Error ? error.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
-        questId: interactiveQuest?.id
+        questId: interactiveQuest?.id,
+        chainQuestId: interactiveQuest?.chainQuestId
       });
       const errorMsg = error instanceof Error ? error.message : String(error);
       setMessage(`❌ Failed: ${errorMsg}`);
