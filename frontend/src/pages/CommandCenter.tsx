@@ -1255,47 +1255,25 @@ export default function CommandCenter() {
       const resolvedQuest = await resolveQuestForChainAction(interactiveQuest);
       let chainQuestId: string | bigint | null | undefined = resolvedQuest.chainQuestId;
       
-      // If quest doesn't have chainQuestId, create it on blockchain first
+      // If quest doesn't have chainQuestId, call backend to create it
       if (!chainQuestId) {
         try {
-          setMessage('Creating quest on blockchain before claiming reward...');
+          setMessage('Creating quest on blockchain via backend...');
           
-          // createQuest expects: title, metadataUri, rewardAmount, xpReward, durationSeconds
-          const { receipt: createReceipt } = await submitForgeWrite('createQuest', [
-            resolvedQuest.title,
-            resolvedQuest.description || 'No description',
-            ethers.parseEther(String(resolvedQuest.rewardAmount || '0')),
-            BigInt(String(resolvedQuest.xpReward || '0')),
-            BigInt(86400) // 1 day in seconds as default duration
-          ]);
-          
-          // Extract questId from QuestCreated event
-          const questCreatedLog = parseReceiptEvent(
-            createReceipt,
-            {
-              contractAddress: contractAddresses.forgeQuestManagerAddress,
-              contractInterface: forgeQuestManager.interface
-            },
-            'QuestCreated'
-          );
-          
-          if (!questCreatedLog?.args?.questId) {
-            throw new Error('Failed to extract questId from blockchain event');
-          }
-          
-          chainQuestId = questCreatedLog.args.questId;
-          
-          // Update database with chainQuestId
-          const chainQuestIdStr = String(chainQuestId);
-          const updateResponse = await fetch(`${env.API_BASE_URL}/api/quests/${resolvedQuest.id}/chain-quest-id`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ chainQuestId: chainQuestIdStr })
+          const response = await fetch(`${env.API_BASE_URL}/api/quests/${interactiveQuest.id}/create-onchain`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            }
           });
           
-          if (!updateResponse.ok) {
-            console.warn('[CommandCenter] Failed to update database with chainQuestId', updateResponse);
+          if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.error || 'Failed to create quest on blockchain');
           }
+          
+          const data = await response.json();
+          chainQuestId = data.chainQuestId;
           
           setMessage('Quest created on blockchain. Claiming reward...');
         } catch (error) {

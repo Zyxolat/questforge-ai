@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { Prisma, type QuestStatus, Quest } from '@prisma/client';
+import { ethers } from 'ethers';
 import { contracts } from '../services/contracts';
 import { normalizeWallet, prisma, upsertUser } from '../services/chain';
 import {
@@ -1297,5 +1298,120 @@ export async function getRealtimeBootstrap(req: Request, res: Response) {
   } catch (error) {
     logger.error('Realtime bootstrap lookup failed', error, { wallet });
     res.status(500).json({ error: 'Unable to load realtime bootstrap' });
+  }
+}
+
+export async function createOnchainQuest(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+  const { questId } = req.params;
+
+  if (!wallet || !questId) {
+    return res.status(400).json({
+      error: 'Wallet and questId are required'
+    });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { wallet: normalizeWallet(wallet) }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const quest = await prisma.quest.findUnique({
+      where: { id: questId }
+    });
+
+    if (!quest) {
+      return res.status(404).json({ error: 'Quest not found' });
+    }
+
+    if (quest.playerId !== user.id) {
+      return res.status(403).json({ error: 'Not your quest' });
+    }
+
+    // If quest already has chainQuestId, return it
+    if (quest.chainQuestId) {
+      return res.json({
+        success: true,
+        chainQuestId: quest.chainQuestId.toString()
+      });
+    }
+
+    // Create quest on blockchain using backend signer
+    if (!contracts.forgeQuestManagerWrite) {
+      return res.status(500).json({ error: 'Blockchain write interface not available' });
+    }
+
+    logger.info('[QUEST] Creating quest on blockchain', {
+      wallet,
+      questId,
+      title: quest.title,
+      rewardAmount: quest.rewardAmount
+    });
+
+    const tx = await contracts.forgeQuestManagerWrite.createQuest(
+      quest.title,
+      quest.description || 'No description',
+      ethers.parseEther(String(quest.rewardAmount || '0')),
+      BigInt(String(quest.xpReward || '0')),
+      BigInt(86400) // 1 day duration
+    );
+
+    const receipt = await tx.wait();
+
+    if (!receipt) {
+      throw new Error('Transaction receipt is null');
+    }
+
+    logger.info('[QUEST] Transaction confirmed', {
+      questId,
+      transactionHash: receipt.hash,
+      blockNumber: receipt.blockNumber
+    });
+
+    // Parse QuestCreated event to extract chainQuestId
+    const iface = contracts.forgeQuestManagerInterface;
+    let chainQuestId: bigint | null = null;
+
+    for (const log of receipt.logs) {
+      try {
+        const parsed = iface.parseLog(log);
+        if (parsed && parsed.name === 'QuestCreated') {
+          chainQuestId = parsed.args.questId as bigint;
+          break;
+        }
+      } catch {
+        // Skip logs that don't parse
+      }
+    }
+
+    if (!chainQuestId) {
+      throw new Error('Failed to extract questId from QuestCreated event');
+    }
+
+    logger.info('[QUEST] Quest created on blockchain', {
+      questId,
+      chainQuestId: chainQuestId.toString()
+    });
+
+    // Update database with chainQuestId
+    const updatedQuest = await prisma.quest.update({
+      where: { id: questId },
+      data: {
+        chainQuestId: chainQuestId
+      }
+    });
+
+    res.json({
+      success: true,
+      chainQuestId: updatedQuest.chainQuestId?.toString() ?? null
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to create quest on blockchain';
+    logger.error('[QUEST] Create onchain quest failed', error, { wallet, questId });
+    res.status(500).json({ error: message });
   }
 }
