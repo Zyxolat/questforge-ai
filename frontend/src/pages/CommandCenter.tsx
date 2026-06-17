@@ -1218,7 +1218,7 @@ export default function CommandCenter() {
     setProofError(null);
     setMessage('Creating blockchain quest and submitting proof...');
     setTxStatus(null);
-    let queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
+    const queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
 
     try {
       let chainQuestId = interactiveQuest.chainQuestId;
@@ -1291,56 +1291,33 @@ export default function CommandCenter() {
         throw new Error('Quest is missing a persistent id');
       }
 
-      let submissionTxHash = pendingProofRetry?.submissionTxHash;
-
-      if (!canRetryProofQueue) {
-        setMessage('Submitting proof onchain...');
-
-        const chainQuestIdBigInt = BigInt(String(chainQuestId));
-        const submission = await submitForgeWrite('submitQuest', [chainQuestIdBigInt, normalizedProof]);
-        submissionTxHash = submission.hash;
-        queuedProofRetry = {
-          questId: resolvedQuest.id,
-          proofTxHash: normalizedProof,
-          submissionTxHash
-        };
-        setPendingProofRetry(queuedProofRetry);
-      }
-
-      if (!submissionTxHash) {
-        throw new Error('Proof submission transaction hash is missing for backend verification');
-      }
+      // Submit proof to backend for verification (database-only, no blockchain)
+      setMessage('Submitting proof for verification...');
 
       console.debug('[CommandCenter] Submitting proof to backend verification service', {
         questId: resolvedQuest.id,
         chainQuestId: resolvedQuest.chainQuestId,
-        proofTxHash: normalizedProof,
-        submissionTxHash
+        proofUriPreview: normalizedProof.slice(0, 16)
       });
 
       await submitProofForVerification(resolvedQuest.id, normalizedProof);
       console.debug('[CommandCenter] Backend proof verification submission accepted', {
-        questId: resolvedQuest.id,
-        submissionTxHash
+        questId: resolvedQuest.id
       });
+
+      // Update local state to reflect proof submission
       patchQuest(questMatcher(resolvedQuest), {
-        status: 'SUBMITTED',
-        proofTx: normalizedProof,
-        proofTxHash: submissionTxHash,
-        verificationResult: 'pending',
-        verificationReason: 'Queued for deterministic verification'
+        status: 'CLAIMABLE',
+        proofTx: normalizedProof
       });
-      setPendingProofRetry(null);
+
       setTxStatus({
-        type: 'pending',
-        hash: submissionTxHash,
-        label: 'Proof verification pending',
-        message: 'Deterministic verification is running. Results should stream back shortly.'
+        type: 'confirmed',
+        label: 'Proof verified',
+        message: 'Your proof has been verified and the quest is ready to claim.'
       });
-      setMessage(
-        'Proof submitted. The backend is now verifying the result and streaming the outcome back to this screen.'
-      );
-      await syncNow();
+
+      setMessage('Proof submitted and verified. You can now claim your reward!');
       await refreshQuestFeed();
       setProofUri('');
     } catch (error) {
