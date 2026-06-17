@@ -10,8 +10,7 @@ import {
   submitProof,
   acceptQuest,
   updateChainQuestId,
-  getQuestById,
-  createOnchainQuest
+  getQuestById
 } from '../controllers/questController';
 import { getPlayerStats, getProgression, claimDailyLoginBonus } from '../controllers/userController';
 import { getNFTMetadata } from '../controllers/metadataController';
@@ -57,7 +56,7 @@ apiRouter.post('/auth/logout', logoutSession);
 
 apiRouter.post('/quests/generate', requireAuth, questGenerationLimiter, generateQuest);
 apiRouter.post('/quests/:questId/accept', requireAuth, acceptQuest);
-apiRouter.post('/quests/:questId/create-onchain', requireAuth, createOnchainQuest);
+// Removed: POST /quests/:questId/create-onchain - using database-first claim instead
 apiRouter.get('/quests/:questId', requireAuth, getQuestById);
 apiRouter.patch('/quests/:questId/chain-quest-id', requireAuth, updateChainQuestId);
 apiRouter.post('/quests/register-onchain', requireAuth, registerOnchainQuest);

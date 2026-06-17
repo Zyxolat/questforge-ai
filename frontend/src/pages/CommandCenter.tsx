@@ -21,8 +21,6 @@ import {
 } from '../lib/api';
 import { contractAddresses, contractABIs, getContract } from '../lib/contracts';
 import { env } from '../lib/env';
-import { parseReceiptEvent } from '../lib/questTransactions';
-import { describeTransactionFailure } from '../lib/transactionDiagnostics';
 import {
   estimateContractWriteGas,
   sendContractWrite,
@@ -1016,11 +1014,6 @@ export default function CommandCenter() {
     }
   }
 
-  async function resolveQuestForChainAction(quest: QuestState) {
-    // Database-first: No sync check needed, claim directly from database state
-    return quest;
-  }
-
   async function handleGenerateQuest() {
     console.debug('[CommandCenter] handleGenerateQuest start', {
       address,
@@ -1280,153 +1273,76 @@ export default function CommandCenter() {
   }
 
   async function handleClaimReward() {
-    if (!address || !forgeQuestManager || !interactiveQuest) {
-      setMessage('Connect your wallet and select a claimable quest to claim rewards.');
+    if (!address) {
+      setMessage('❌ Please connect your wallet first');
+      return;
+    }
+
+    if (!interactiveQuest?.id) {
+      setMessage('❌ Quest not found');
       return;
     }
 
     if (interactiveQuest.status !== 'CLAIMABLE') {
-      setMessage('Reward claim is only available after proof submission succeeds.');
+      setMessage('❌ This quest is not ready to claim. Submit proof first.');
       return;
     }
 
     if (!(await requireReadyAuth('claiming reward'))) return;
 
-    console.info('[CommandCenter] handleClaimReward: Validation passed, preparing to claim', {
-      questId: interactiveQuest.id,
-      questTitle: interactiveQuest.title,
-      chainQuestId: interactiveQuest.chainQuestId,
-      walletAddress: address
-    });
-
     setLoading(true);
-    setMessage('Claiming the verified reward onchain...');
+    setMessage('⏳ Waiting for wallet confirmation...');
     setTxStatus(null);
 
     try {
-      const resolvedQuest = await resolveQuestForChainAction(interactiveQuest);
-      let chainQuestId: string | bigint | null | undefined = resolvedQuest.chainQuestId;
-      
-      // If quest doesn't have chainQuestId, call backend to create it
-      if (!chainQuestId) {
-        try {
-          setMessage('Creating quest on blockchain via backend...');
-          
-          const response = await fetch(`${env.API_BASE_URL}/quests/${interactiveQuest.id}/create-onchain`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            }
-          });
-          
-          if (!response.ok) {
-            let errorMessage = 'Failed to create quest on blockchain';
-            try {
-              const errorData = await response.json();
-              errorMessage = errorData.error || errorData.message || `HTTP ${response.status}`;
-            } catch {
-              errorMessage = `HTTP ${response.status}: ${response.statusText}`;
-            }
-            throw new Error(errorMessage);
-          }
-          
-          const data = await response.json();
-          if (!data.chainQuestId) {
-            throw new Error('No chainQuestId in response from backend');
-          }
-          chainQuestId = data.chainQuestId;
-          
-          setMessage('Quest created on blockchain. Claiming reward...');
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : String(error);
-          setMessage(`Failed to create quest on blockchain: ${errorMsg}`);
-          console.error('[CommandCenter] Failed to create quest on blockchain during claim', {
-            error,
-            errorMessage: errorMsg,
-            questId: interactiveQuest.id
-          });
-          return;
-        }
-      }
-
-      console.debug('[CommandCenter] handleClaimReward: Calling submitForgeWrite', {
-        functionName: 'claimReward',
-        chainQuestId: chainQuestId?.toString() ?? 'undefined'
+      console.info('[CommandCenter] handleClaimReward: Claiming reward', {
+        questId: interactiveQuest.id,
+        questTitle: interactiveQuest.title,
+        walletAddress: address
       });
 
-      if (!chainQuestId) {
-        throw new Error('Unable to determine chainQuestId for claim reward');
-      }
+      // ✅ Database-first: Just claim directly with quest ID
+      const { receipt } = await submitForgeWrite('claimReward', [interactiveQuest.id]);
 
-      const claimChainQuestId = BigInt(String(chainQuestId));
-      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [claimChainQuestId]);
+      setMessage('⏳ Transaction confirmed...');
 
-      const rewardedLog = parseReceiptEvent(
-        receipt,
-        {
-          contractAddress: contractAddresses.forgeQuestManagerAddress,
-          contractInterface: forgeQuestManager.interface
-        },
-        'QuestRewarded'
-      );
-
-      const rewardAmount = rewardedLog?.args?.rewardAmount
-        ? ethers.formatEther(rewardedLog.args.rewardAmount)
-        : String(resolvedQuest.rewardAmount ?? '0');
-      const xpReward = rewardedLog?.args?.xpReward?.toString() ?? String(resolvedQuest.xpReward ?? '0');
-      const proofHash = rewardedLog?.args?.proofHash ? String(rewardedLog.args.proofHash) : undefined;
-
-      patchQuest(questMatcher(resolvedQuest), {
-        status: 'REWARDED',
-        treasuryPayout: {
-          ...(resolvedQuest.treasuryPayout && typeof resolvedQuest.treasuryPayout === 'object'
-            ? resolvedQuest.treasuryPayout
-            : {}),
-          status: 'PAID',
-          payoutTx: claimTxHash
-        },
-        rewardedEvent: {
-          txHash: claimTxHash,
-          rewardAmount,
-          xpReward,
-          proofHash
-        }
-      });
-
-      // Update quest journey with the completed quest
-      updateQuestJourney(resolvedQuest);
-
-      setMessage(
-        `Reward claimed onchain: ${rewardAmount} CELO and ${xpReward} XP. Proof hash: ${proofHash ?? 'unknown'}`
-      );
-
-      addNotification({
-        id: Date.now(),
-        eventName: 'quest:rewarded',
-        payload: {
-          questId: resolvedQuest.id,
-          chainQuestId: resolvedQuest.chainQuestId,
-          title: `Reward claimed: ${rewardAmount} CELO`,
-          detail: `${xpReward} XP awarded`,
-          proofHash,
-          verificationTx: claimTxHash,
+      if (receipt) {
+        // ✅ Update local state
+        patchQuest(interactiveQuest.id, {
           status: 'REWARDED'
-        },
-        createdAt: new Date().toISOString()
-      });
+        });
 
-      await syncNow();
-      await refreshQuestFeed();
+        // ✅ Update quest journey
+        updateQuestJourney(interactiveQuest);
+
+        const rewardAmount = Number(interactiveQuest.rewardAmount || 0).toFixed(4);
+        const xpReward = interactiveQuest.xpReward || 0;
+
+        setMessage(`✅ Reward claimed! +${rewardAmount} CELO and +${xpReward} XP earned`);
+
+        addNotification({
+          id: Date.now(),
+          eventName: 'quest:rewarded',
+          payload: {
+            questId: interactiveQuest.id,
+            title: `Reward claimed: ${rewardAmount} CELO`,
+            detail: `${xpReward} XP awarded`,
+            status: 'REWARDED'
+          },
+          createdAt: new Date().toISOString()
+        });
+
+        await syncNow();
+        await refreshQuestFeed();
+      }
     } catch (error) {
       console.error('[CommandCenter] handleClaimReward failed', {
         errorName: error instanceof Error ? error.name : 'Unknown',
         errorMessage: error instanceof Error ? error.message : String(error),
-        errorStack: error instanceof Error ? error.stack : undefined,
-        questId: interactiveQuest?.id,
-        questTitle: interactiveQuest?.title,
-        chainQuestId: interactiveQuest?.chainQuestId
+        questId: interactiveQuest?.id
       });
-      setMessage(formatActionFailure(error, 'Reward claim failed.'));
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      setMessage(`❌ Failed: ${errorMsg}`);
     } finally {
       setLoading(false);
     }
