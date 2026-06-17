@@ -971,22 +971,32 @@ export default function CommandCenter() {
     let latestQuest = getQuest(questMatcher(quest)) ?? quest;
     if (latestQuest.chainQuestId) return latestQuest;
 
-    setMessage('Quest is syncing with backend. Refreshing quest feed and realtime state...');
+    // Try to fetch latest quest from backend (chainQuestId may have been set there)
+    setMessage('Fetching latest quest state from backend...');
 
-    for (let attempt = 1; attempt <= 3 && !latestQuest.chainQuestId; attempt += 1) {
-      await refreshQuestFeed();
-      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
-      if (latestQuest.chainQuestId) break;
+    try {
+      const response = await fetch(`${env.API_BASE_URL}/api/quests/${quest.id}`);
 
-      await syncNow();
-      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
-      if (latestQuest.chainQuestId) break;
-
-      await new Promise((resolve) => setTimeout(resolve, attempt * 750));
-      latestQuest = getQuest(questMatcher(quest)) ?? latestQuest;
+      if (response.ok) {
+        const data = await response.json();
+        if (data.quest?.chainQuestId) {
+          latestQuest = {
+            ...latestQuest,
+            chainQuestId: data.quest.chainQuestId
+          };
+          upsertQuest(latestQuest);
+          return latestQuest;
+        }
+      }
+    } catch (error) {
+      console.warn('[CommandCenter] Failed to fetch latest quest state', error);
     }
 
-    if (!latestQuest.chainQuestId) throw new Error(fallbackMessage);
+    // If still no chainQuestId, throw error
+    if (!latestQuest.chainQuestId) {
+      throw new Error(fallbackMessage);
+    }
+
     return latestQuest;
   }
 
@@ -1206,19 +1216,77 @@ export default function CommandCenter() {
 
     setLoading(true);
     setProofError(null);
-    setMessage(
-      canRetryProofQueue
-        ? 'Retrying backend proof queue synchronization...'
-        : 'Submitting proof to the Forge Master for deterministic verification...'
-    );
+    setMessage('Creating blockchain quest and submitting proof...');
     setTxStatus(null);
     let queuedProofRetry: PendingProofRetry | null = canRetryProofQueue ? pendingProofRetry : null;
 
     try {
-      const resolvedQuest = await resolveQuestForChainAction(
-        interactiveQuest,
-        'Quest is still missing its onchain id after sync. Please wait a moment and try again.'
-      );
+      let chainQuestId = interactiveQuest.chainQuestId;
+
+      // If chainQuestId doesn't exist, create the blockchain quest first
+      if (!chainQuestId) {
+        console.info('[CommandCenter] Creating blockchain quest before proof submission', {
+          questId: interactiveQuest.id,
+          title: interactiveQuest.title
+        });
+
+        setMessage('Creating blockchain quest...');
+
+        // Create the blockchain quest
+        const createTxResult = await submitForgeWrite('createQuest', [
+          interactiveQuest.title,
+          interactiveQuest.metadata?.metadataUri ?? interactiveQuest.description ?? 'Quest',
+          ethers.parseEther(String(interactiveQuest.rewardAmount ?? '0')),
+          BigInt(interactiveQuest.xpReward ?? 0),
+          BigInt(interactiveQuest.durationSeconds ?? 86400)
+        ]);
+
+        if (!createTxResult.receipt) {
+          throw new Error('No receipt returned from blockchain quest creation');
+        }
+
+        // Extract questId from the QuestCreated event
+        const questCreatedEvent = createTxResult.receipt.logs
+          .map((log) => {
+            try {
+              return forgeQuestManager.interface.parseLog(log);
+            } catch {
+              return null;
+            }
+          })
+          .find((event) => event?.name === 'QuestCreated');
+
+        chainQuestId = questCreatedEvent?.args?.questId;
+
+        if (!chainQuestId) {
+          throw new Error('Failed to extract chainQuestId from blockchain quest creation');
+        }
+
+        console.info('[CommandCenter] Blockchain quest created successfully', {
+          questId: interactiveQuest.id,
+          chainQuestId: chainQuestId.toString()
+        });
+
+        // Update the quest in local state
+        patchQuest(questMatcher(interactiveQuest), {
+          chainQuestId: chainQuestId.toString()
+        });
+
+        // Store in database via API
+        try {
+          await fetch(`${env.API_BASE_URL}/api/quests/${interactiveQuest.id}/chain-quest-id`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chainQuestId: chainQuestId.toString() })
+          });
+        } catch (apiError) {
+          console.warn('[CommandCenter] Failed to store chainQuestId in database', apiError);
+          // Continue anyway - we have the chainQuestId from blockchain
+        }
+      }
+
+      const resolvedQuest = { ...interactiveQuest, chainQuestId: chainQuestId?.toString() };
+
       if (!resolvedQuest.id) {
         throw new Error('Quest is missing a persistent id');
       }
@@ -1226,10 +1294,10 @@ export default function CommandCenter() {
       let submissionTxHash = pendingProofRetry?.submissionTxHash;
 
       if (!canRetryProofQueue) {
-        setMessage('Quest sync complete. Submitting proof onchain...');
+        setMessage('Submitting proof onchain...');
 
-        const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
-        const submission = await submitForgeWrite('submitQuest', [chainQuestId, normalizedProof]);
+        const chainQuestIdBigInt = BigInt(String(chainQuestId));
+        const submission = await submitForgeWrite('submitQuest', [chainQuestIdBigInt, normalizedProof]);
         submissionTxHash = submission.hash;
         queuedProofRetry = {
           questId: resolvedQuest.id,

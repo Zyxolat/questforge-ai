@@ -1104,6 +1104,129 @@ export async function submitProof(req: Request, res: Response) {
   }
 }
 
+export async function updateChainQuestId(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+  const { questId } = req.params;
+  const { chainQuestId } = req.body;
+
+  if (!wallet || !questId || !chainQuestId) {
+    return res.status(400).json({
+      error: 'Wallet, questId, and chainQuestId are required'
+    });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { wallet: normalizeWallet(wallet) }
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const quest = await prisma.quest.findUnique({
+      where: { id: questId }
+    });
+
+    if (!quest) {
+      return res.status(404).json({ error: 'Quest not found' });
+    }
+
+    if (quest.playerId !== user.id) {
+      return res.status(403).json({ error: 'Not your quest' });
+    }
+
+    // Update chainQuestId
+    const updatedQuest = await prisma.quest.update({
+      where: { id: questId },
+      data: {
+        chainQuestId: BigInt(String(chainQuestId))
+      }
+    });
+
+    logger.info('[QUEST] Chain quest ID updated', {
+      wallet,
+      questId,
+      chainQuestId: chainQuestId.toString()
+    });
+
+    res.json({
+      success: true,
+      quest: {
+        id: updatedQuest.id,
+        chainQuestId: updatedQuest.chainQuestId?.toString() ?? null
+      }
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to update chain quest ID';
+    logger.error('Update chain quest ID failed', error, { wallet, questId });
+    res.status(500).json({ error: message });
+  }
+}
+
+export async function getQuestById(req: Request, res: Response) {
+  const wallet = req.auth?.wallet;
+  const { questId } = req.params;
+
+  if (!questId) {
+    return res.status(400).json({ error: 'Quest ID is required' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({
+      where: { wallet: normalizeWallet(wallet ?? '') }
+    });
+
+    const quest = await prisma.quest.findUnique({
+      where: { id: questId },
+      include: { player: true }
+    });
+
+    if (!quest) {
+      return res.status(404).json({ error: 'Quest not found' });
+    }
+
+    // Allow access if user is the player or if it's a public quest
+    if (quest.playerId && user?.id !== quest.playerId) {
+      return res.status(403).json({ error: 'Not your quest' });
+    }
+
+    const questData = formatQuestResponse(quest);
+
+    res.json({
+      success: true,
+      quest: questData
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to fetch quest';
+    logger.error('Get quest failed', error, { questId });
+    res.status(500).json({ error: message });
+  }
+}
+
+function formatQuestResponse(quest: Quest) {
+  return {
+    id: quest.id,
+    orchestrationId: quest.orchestrationId,
+    status: quest.status,
+    chainQuestId: quest.chainQuestId?.toString() ?? null,
+    title: quest.title,
+    description: quest.description,
+    objective: quest.objective,
+    lore: quest.lore,
+    questType: quest.questType,
+    difficulty: quest.difficulty,
+    rewardAmount: quest.rewardAmount,
+    xpReward: quest.xpReward,
+    durationSeconds: quest.durationSeconds,
+    expiresAt: quest.expiresAt?.toISOString(),
+    metadata: quest.metadata,
+    proofTx: quest.proofTx,
+    playerId: quest.playerId,
+    player: quest.player?.username
+  };
+}
+
 export async function getRealtimeBootstrap(req: Request, res: Response) {
   const wallet = req.auth?.wallet;
 

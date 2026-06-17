@@ -8,7 +8,9 @@ import {
   getQuestOrchestrationDiagnostics,
   registerOnchainQuest,
   submitProof,
-  acceptQuest
+  acceptQuest,
+  updateChainQuestId,
+  getQuestById
 } from '../controllers/questController';
 import { getPlayerStats, getProgression, claimDailyLoginBonus } from '../controllers/userController';
 import { getNFTMetadata } from '../controllers/metadataController';
@@ -54,6 +56,8 @@ apiRouter.post('/auth/logout', logoutSession);
 
 apiRouter.post('/quests/generate', requireAuth, questGenerationLimiter, generateQuest);
 apiRouter.post('/quests/:questId/accept', requireAuth, acceptQuest);
+apiRouter.get('/quests/:questId', requireAuth, getQuestById);
+apiRouter.patch('/quests/:questId/chain-quest-id', requireAuth, updateChainQuestId);
 apiRouter.post('/quests/register-onchain', requireAuth, registerOnchainQuest);
 apiRouter.post('/quests/submit-proof', requireAuth, proofSubmissionLimiter, submitProof);
 apiRouter.get('/quests/daily', getDailyMissions);
