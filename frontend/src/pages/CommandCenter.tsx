@@ -1268,17 +1268,31 @@ export default function CommandCenter() {
           });
           
           if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Failed to create quest on blockchain');
+            let errorMessage = 'Failed to create quest on blockchain';
+            try {
+              const errorData = await response.json();
+              errorMessage = errorData.error || errorData.message || `HTTP ${response.status}`;
+            } catch {
+              errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+            }
+            throw new Error(errorMessage);
           }
           
           const data = await response.json();
+          if (!data.chainQuestId) {
+            throw new Error('No chainQuestId in response from backend');
+          }
           chainQuestId = data.chainQuestId;
           
           setMessage('Quest created on blockchain. Claiming reward...');
         } catch (error) {
-          setMessage(`Failed to create quest on blockchain: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          console.error('[CommandCenter] Failed to create quest on blockchain during claim', error);
+          const errorMsg = error instanceof Error ? error.message : String(error);
+          setMessage(`Failed to create quest on blockchain: ${errorMsg}`);
+          console.error('[CommandCenter] Failed to create quest on blockchain during claim', {
+            error,
+            errorMessage: errorMsg,
+            questId: interactiveQuest.id
+          });
           return;
         }
       }
