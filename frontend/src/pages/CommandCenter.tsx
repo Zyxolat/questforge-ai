@@ -387,6 +387,18 @@ export default function CommandCenter() {
   const [pendingProofRetry, setPendingProofRetry] = useState<PendingProofRetry | null>(() =>
     loadPendingProofRetry()
   );
+  const [questJourney, setQuestJourney] = useState({
+    questsCompleted: 0,
+    totalCeloClaimed: 0,
+    totalXPEarned: 0,
+    recentQuests: [] as Array<{
+      id: string;
+      title: string;
+      reward: number | string;
+      completedAt: Date;
+    }>,
+    currentStreak: 0
+  });
 
   const forgeQuestManager = useMemo(() => {
     if (!signer) return null;
@@ -628,6 +640,46 @@ export default function CommandCenter() {
     celebrationQuestId,
     completedQuestIds
   ]);
+
+  useEffect(() => {
+    const loadQuestJourney = async () => {
+      try {
+        // Try to fetch player stats from backend
+        const response = await fetch(`${env.API_BASE_URL}/player/stats`);
+
+        if (response.ok) {
+          const stats = await response.json();
+          setQuestJourney({
+            questsCompleted: stats.questsCompleted || 0,
+            totalCeloClaimed: Number(stats.totalCeloClaimed) || 0,
+            totalXPEarned: stats.totalXPEarned || 0,
+            recentQuests: (stats.recentQuests || []).map((q: Record<string, unknown>) => {
+              let completedAt: Date;
+              try {
+                completedAt = q.completedAt ? new Date(q.completedAt as string | number) : new Date();
+              } catch {
+                completedAt = new Date();
+              }
+              return {
+                id: String(q.id || ''),
+                title: String(q.title || 'Unknown Quest'),
+                reward: q.reward || 0,
+                completedAt
+              };
+            }).slice(0, 5),
+            currentStreak: stats.currentStreak || 0
+          });
+        }
+      } catch (error) {
+        console.debug('[CommandCenter] Failed to load quest journey stats:', error);
+        // Keep default state if API fails
+      }
+    };
+
+    if (address && authStatus === 'authenticated') {
+      loadQuestJourney();
+    }
+  }, [address, authStatus]);
 
   function markQuestCompleted(questId?: string) {
     if (!questId) {
@@ -1341,6 +1393,9 @@ export default function CommandCenter() {
         }
       });
 
+      // Update quest journey with the completed quest
+      updateQuestJourney(resolvedQuest);
+
       setMessage(
         `Reward claimed onchain: ${rewardAmount} CELO and ${xpReward} XP. Proof hash: ${proofHash ?? 'unknown'}`
       );
@@ -1398,6 +1453,24 @@ export default function CommandCenter() {
     }
 
     return true;
+  }
+
+  function updateQuestJourney(completedQuest: QuestState) {
+    setQuestJourney(prev => ({
+      questsCompleted: prev.questsCompleted + 1,
+      totalCeloClaimed: prev.totalCeloClaimed + (Number(completedQuest.rewardAmount) || 0),
+      totalXPEarned: prev.totalXPEarned + (Number(completedQuest.xpReward) || 0),
+      recentQuests: [
+        {
+          id: completedQuest.id,
+          title: completedQuest.title || 'Unknown Quest',
+          reward: completedQuest.rewardAmount || 0,
+          completedAt: new Date()
+        },
+        ...prev.recentQuests
+      ].slice(0, 5), // Keep last 5
+      currentStreak: prev.currentStreak + 1
+    }));
   }
 
   if (status !== 'connected') {
@@ -1599,6 +1672,49 @@ export default function CommandCenter() {
             >
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               <QuestFlowTracker currentStep={getFlowStep() as any} statusLabel={flowStatusLabel()} />
+            </motion.div>
+
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="rounded-[2rem] border border-cyan-500/30 bg-gradient-to-r from-cyan-900/30 to-purple-900/30 p-6 shadow-xl"
+            >
+              <h3 className="text-lg font-bold text-cyan-300 mb-4">🏆 Quest Journey</h3>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <div className="bg-slate-900/50 p-3 rounded-lg">
+                  <p className="text-cyan-400 text-xs font-semibold mb-1">Quests Completed</p>
+                  <p className="text-2xl font-bold text-white">{questJourney.questsCompleted}</p>
+                </div>
+                
+                <div className="bg-slate-900/50 p-3 rounded-lg">
+                  <p className="text-emerald-400 text-xs font-semibold mb-1">CELO Earned</p>
+                  <p className="text-2xl font-bold text-white">{questJourney.totalCeloClaimed.toFixed(2)}</p>
+                </div>
+                
+                <div className="bg-slate-900/50 p-3 rounded-lg">
+                  <p className="text-amber-400 text-xs font-semibold mb-1">XP Earned</p>
+                  <p className="text-2xl font-bold text-white">{questJourney.totalXPEarned}</p>
+                </div>
+                
+                <div className="bg-slate-900/50 p-3 rounded-lg">
+                  <p className="text-purple-400 text-xs font-semibold mb-1">Current Streak</p>
+                  <p className="text-2xl font-bold text-white">🔥 {questJourney.currentStreak}</p>
+                </div>
+              </div>
+              
+              {questJourney.recentQuests.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-white/10">
+                  <p className="text-sm text-cyan-300 mb-3 font-semibold">Recent Quests:</p>
+                  <div className="space-y-2">
+                    {questJourney.recentQuests.map((q) => (
+                      <div key={q.id} className="text-xs text-slate-300 bg-slate-900/30 px-3 py-2 rounded">
+                        ✅ {q.title} • +{Number(q.reward).toFixed(2)} CELO
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </motion.div>
 
             {!interactiveQuest && restoredQuest ? (
