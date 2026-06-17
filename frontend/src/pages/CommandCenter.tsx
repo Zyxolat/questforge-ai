@@ -179,18 +179,28 @@ function normalizeProofReference(value: string) {
     return null;
   }
 
+  // Accept transaction hashes (0x followed by 64 hex characters)
   const txHashMatch = trimmed.match(/0x[a-fA-F0-9]{64}/);
   if (txHashMatch) {
     return txHashMatch[0].toLowerCase();
   }
 
+  // Try parsing as URL and extract hash if present
   try {
     const url = new URL(trimmed);
     const pathHash = url.pathname.match(/0x[a-fA-F0-9]{64}/);
-    return pathHash ? pathHash[0].toLowerCase() : null;
+    if (pathHash) return pathHash[0].toLowerCase();
   } catch {
-    return null;
+    // Not a valid URL, continue to next check
   }
+
+  // Accept plain text descriptions (current text-based proof system)
+  // Must be at least 20 characters to ensure meaningful description
+  if (trimmed.length >= 20) {
+    return trimmed;
+  }
+
+  return null;
 }
 
 function formatActionFailure(error: unknown, fallbackLabel: string) {
