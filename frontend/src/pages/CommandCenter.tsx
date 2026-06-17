@@ -1253,19 +1253,67 @@ export default function CommandCenter() {
 
     try {
       const resolvedQuest = await resolveQuestForChainAction(interactiveQuest);
+      let chainQuestId: string | bigint | null | undefined = resolvedQuest.chainQuestId;
       
-      if (!resolvedQuest.chainQuestId) {
-        throw new Error('Quest has not been created onchain yet. Please try again.');
+      // If quest doesn't have chainQuestId, create it on blockchain first
+      if (!chainQuestId) {
+        try {
+          setMessage('Creating quest on blockchain before claiming reward...');
+          
+          const { receipt: createReceipt } = await submitForgeWrite('createQuest', [
+            resolvedQuest.title,
+            resolvedQuest.description || '',
+            ethers.parseEther(String(resolvedQuest.xpReward || '0')),
+            resolvedQuest.difficulty || 'MEDIUM'
+          ]);
+          
+          // Extract questId from QuestCreated event
+          const questCreatedLog = parseReceiptEvent(
+            createReceipt,
+            {
+              contractAddress: contractAddresses.forgeQuestManagerAddress,
+              contractInterface: forgeQuestManager.interface
+            },
+            'QuestCreated'
+          );
+          
+          if (!questCreatedLog?.args?.questId) {
+            throw new Error('Failed to extract questId from blockchain event');
+          }
+          
+          chainQuestId = questCreatedLog.args.questId;
+          
+          // Update database with chainQuestId
+          const chainQuestIdStr = String(chainQuestId);
+          const updateResponse = await fetch(`${env.API_BASE_URL}/api/quests/${resolvedQuest.id}/chain-quest-id`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chainQuestId: chainQuestIdStr })
+          });
+          
+          if (!updateResponse.ok) {
+            console.warn('[CommandCenter] Failed to update database with chainQuestId', updateResponse);
+          }
+          
+          setMessage('Quest created on blockchain. Claiming reward...');
+        } catch (error) {
+          setMessage(`Failed to create quest on blockchain: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          console.error('[CommandCenter] Failed to create quest on blockchain during claim', error);
+          return;
+        }
       }
-      
-      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
 
       console.debug('[CommandCenter] handleClaimReward: Calling submitForgeWrite', {
         functionName: 'claimReward',
-        chainQuestId: chainQuestId.toString()
+        chainQuestId: chainQuestId?.toString() ?? 'undefined'
       });
 
-      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [chainQuestId]);
+      if (!chainQuestId) {
+        throw new Error('Unable to determine chainQuestId for claim reward');
+      }
+
+      const claimChainQuestId = BigInt(String(chainQuestId));
+      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [claimChainQuestId]);
 
       const rewardedLog = parseReceiptEvent(
         receipt,
