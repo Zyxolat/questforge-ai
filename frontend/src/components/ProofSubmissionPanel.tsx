@@ -1,4 +1,6 @@
 import { motion } from 'framer-motion';
+import GameUIContainer from './GameUIContainer';
+import GameButton from './GameButton';
 
 interface ProofSubmissionPanelProps {
   proofUri: string;
@@ -25,31 +27,17 @@ export default function ProofSubmissionPanel({
 }: ProofSubmissionPanelProps) {
   const trimmedProof = proofUri.trim();
   const canSubmit = !loading && !disabled && trimmedProof.length > 0;
+  const charCount = trimmedProof.length;
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="relative space-y-4 overflow-hidden rounded-[1.5rem] border-2 border-emerald-500 bg-gradient-to-br from-emerald-500/10 to-green-600/10 p-4 shadow-lg sm:rounded-[2rem] sm:p-6 md:p-8"
+    <GameUIContainer
+      icon="📋"
+      title="Submit Your Proof"
+      subtitle="Describe how you completed the objective"
+      variant="primary"
     >
-      <motion.div
-        animate={{ opacity: [0.15, 0.4, 0.15] }}
-        transition={{ duration: 2, repeat: Infinity }}
-        className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(16,185,129,0.28),transparent_55%)]"
-      />
-
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="text-3xl sm:text-4xl">📋</div>
-        <div>
-          <h3 className="text-xl font-bold text-white sm:text-2xl">Submit Your Proof</h3>
-          <p className="text-sm text-slate-300">
-            Describe how you completed the objective for off-chain verification.
-          </p>
-        </div>
-      </div>
-
       <form
-        className="relative z-10 space-y-3"
+        className="space-y-5"
         onSubmit={(event) => {
           event.preventDefault();
           if (canSubmit) {
@@ -57,88 +45,123 @@ export default function ProofSubmissionPanel({
           }
         }}
       >
-        <div className="rounded-2xl border border-emerald-400/30 bg-emerald-500/10 p-4">
-          <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">How to submit</p>
-          <p className="mt-2 text-sm text-white">
-            Enter a description of how you completed the objective. The backend will verify your proof.
+        {/* Instructions */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.2 }}
+          className="rounded-xl border border-cyan-400/20 bg-cyan-400/5 p-4 backdrop-blur-sm"
+        >
+          <p className="text-xs uppercase tracking-[0.15em] text-cyan-300/70 font-semibold">
+            📝 How to Submit
           </p>
-          {helperText ? <p className="mt-2 text-xs text-emerald-100/90">{helperText}</p> : null}
-        </div>
+          <p className="mt-2 text-sm text-cyan-100/80 leading-relaxed">
+            Describe your approach and method. The backend will verify your proof off-chain without requiring a blockchain transaction.
+          </p>
+          {helperText && (
+            <p className="mt-2 text-xs text-emerald-300/80 font-medium">✓ {helperText}</p>
+          )}
+        </motion.div>
 
-        <label className="block">
-          <p className="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-emerald-300">
-            Proof Reference
-          </p>
+        {/* Textarea */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.25 }}
+          className="space-y-2"
+        >
+          <label htmlFor="proof-input" className="block">
+            <p className="text-sm font-bold uppercase tracking-[0.15em] bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-teal-400">
+              Your Proof Description
+            </p>
+          </label>
           <textarea
+            id="proof-input"
             value={proofUri}
             onChange={(e) => onProofChange(e.target.value)}
-            placeholder="Describe how you completed the objective..."
-            className="min-h-[112px] w-full rounded-2xl border-2 border-white/10 bg-white/5 p-4 text-sm text-white placeholder-slate-500 outline-none transition focus:border-emerald-500/50 sm:min-h-[128px] sm:text-base"
-            rows={4}
+            placeholder="Enter a description of how you completed the objective..."
+            className="w-full min-h-[120px] rounded-xl border-2 border-cyan-400/20 bg-slate-800/50 p-4 text-sm text-white placeholder-slate-500 outline-none transition-all duration-300 focus:border-cyan-400/50 focus:bg-slate-800/70 focus:ring-2 focus:ring-cyan-400/20 backdrop-blur-sm"
+            rows={5}
             disabled={loading || disabled}
+            maxLength={500}
           />
-        </label>
+          <div className="flex justify-between items-center px-2">
+            <p className="text-xs text-slate-400">
+              {charCount > 0 && charCount < 20 && '⚠ Provide more detail (min. 20 chars)'}
+              {charCount >= 20 && charCount < 500 && '✓ Description recorded'}
+              {charCount >= 500 && '⚠ Maximum length reached (500 chars)'}
+            </p>
+            <p className="text-xs text-slate-400 font-mono">{charCount}/500</p>
+          </div>
+        </motion.div>
 
-        {trimmedProof && !normalizedProof && !error ? (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-sm text-amber-300"
-          >
-            Your proof description has been recorded.
-          </motion.p>
-        ) : null}
-
+        {/* Status Messages */}
         {error && (
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="text-sm text-red-400"
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 backdrop-blur-sm"
           >
-            ⚠ {error}
-          </motion.p>
+            <p className="text-sm text-red-300 font-semibold">⚠ Error: {error}</p>
+          </motion.div>
         )}
 
-        {normalizedProof ? (
+        {trimmedProof && !error && (
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            className="rounded-2xl border border-white/10 bg-white/5 p-4"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 backdrop-blur-sm"
           >
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Detected Proof Hash</p>
-            <p className="mt-2 break-all font-mono text-xs text-white sm:text-sm">
-              {normalizedProof}
-            </p>
+            <p className="text-sm text-emerald-300 font-semibold">✓ Proof recorded and ready</p>
           </motion.div>
-        ) : null}
+        )}
 
-        {disabledReason ? <p className="text-xs text-amber-200">{disabledReason}</p> : null}
+        {disabledReason && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 backdrop-blur-sm"
+          >
+            <p className="text-sm text-amber-300">ℹ {disabledReason}</p>
+          </motion.div>
+        )}
 
-        <p className="text-xs text-slate-400">
-          Your proof will be verified off-chain by the backend. No blockchain transaction is required.
-        </p>
+        {normalizedProof && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="rounded-xl border border-purple-500/30 bg-purple-500/10 p-4 backdrop-blur-sm"
+          >
+            <p className="text-xs uppercase tracking-[0.1em] text-purple-300/70 font-semibold mb-2">
+              🔐 Verified Proof Hash
+            </p>
+            <p className="break-all font-mono text-xs text-purple-100">{normalizedProof}</p>
+          </motion.div>
+        )}
 
-        <motion.button
-          type="submit"
-          whileHover={{ scale: canSubmit ? 1.02 : 1 }}
-          whileTap={{ scale: canSubmit ? 0.98 : 1 }}
-          disabled={!canSubmit}
-          className="flex min-h-[48px] w-full items-center justify-center rounded-2xl bg-gradient-to-r from-emerald-500 to-green-600 px-4 py-3 text-center text-sm font-bold uppercase tracking-[0.16em] text-white shadow-lg transition hover:shadow-xl disabled:cursor-not-allowed disabled:opacity-50 sm:min-h-[52px] sm:px-6 sm:py-4 sm:text-base"
+        {/* Submit Button */}
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.35 }}
         >
-          {loading ? (
-            <motion.span
-              animate={{ opacity: [0.5, 1, 0.5] }}
-              transition={{ duration: 1.5, repeat: Infinity }}
-            >
-              ⟳ Submitting Proof...
-            </motion.span>
-          ) : trimmedProof && !normalizedProof ? (
-            'Paste a Valid Proof Hash'
-          ) : (
-            '✓ Submit Proof for Verification'
-          )}
-        </motion.button>
+          <GameButton
+            onClick={onSubmit}
+            variant="success"
+            size="lg"
+            disabled={!canSubmit}
+            loading={loading}
+            fullWidth
+          >
+            {loading ? '⟳ Verifying Proof' : '⚔️ Submit Proof for Verification'}
+          </GameButton>
+        </motion.div>
+
+        {/* Info note */}
+        <p className="text-center text-xs text-slate-400/60 pt-2">
+          Off-chain verification • No blockchain transaction required
+        </p>
       </form>
-    </motion.div>
+    </GameUIContainer>
   );
 }

@@ -1,10 +1,9 @@
 import { motion } from 'framer-motion';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ethers } from 'ethers';
 import QuestFlowTracker from '../components/QuestFlowTracker';
 import ActiveQuestPanel from '../components/ActiveQuestPanel';
-import ProofSubmissionPanel from '../components/ProofSubmissionPanel';
 import TransactionStatusCard from '../components/TransactionStatusCard';
 import QuestRevealModal from '../components/QuestRevealModal';
 import QuestCompletionModal from '../components/QuestCompletionModal';
@@ -378,7 +377,6 @@ export default function CommandCenter() {
   const [pendingProofRetry, setPendingProofRetry] = useState<PendingProofRetry | null>(() =>
     loadPendingProofRetry()
   );
-  const proofPanelRef = useRef<HTMLDivElement | null>(null);
 
   const forgeQuestManager = useMemo(() => {
     if (!signer) return null;
@@ -673,9 +671,6 @@ export default function CommandCenter() {
 
     if (restoredQuest.status === 'ACCEPTED') {
       setMessage('Previous active quest resumed. Describe how you completed the objective below when you are ready.');
-      window.setTimeout(() => {
-        proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 120);
       return;
     }
 
@@ -1693,32 +1688,6 @@ export default function CommandCenter() {
                 </motion.div>
               )}
             </motion.div>
-
-            {interactiveQuest?.status === 'ACCEPTED' || canRetryProofQueue ? (
-              <motion.div
-                ref={proofPanelRef}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-              >
-                <ProofSubmissionPanel
-                  proofUri={proofUri}
-                  onProofChange={handleProofChange}
-                  onSubmit={() => void handleSubmitProof()}
-                  loading={loading}
-                  disabled={false}
-                  disabledReason={
-                    !isCorrectNetwork
-                      ? `Switch to ${env.CELO_CHAIN_NAME} before submitting proof.`
-                      : authStatus !== 'authenticated'
-                        ? 'Submitting will prompt secure sign-in before sending the transaction.'
-                        : null
-                  }
-                  error={proofError ?? undefined}
-                  normalizedProof={normalizedProof}
-                  helperText={proofHelperText}
-                />
-              </motion.div>
-            ) : null}
 
             {!interactiveQuest ||
             interactiveQuest.status === 'CLAIMABLE' ||
