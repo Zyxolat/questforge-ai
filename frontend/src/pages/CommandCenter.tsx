@@ -964,40 +964,9 @@ export default function CommandCenter() {
     }
   }
 
-  async function resolveQuestForChainAction(
-    quest: QuestState,
-    fallbackMessage: string
-  ) {
-    let latestQuest = getQuest(questMatcher(quest)) ?? quest;
-    if (latestQuest.chainQuestId) return latestQuest;
-
-    // Try to fetch latest quest from backend (chainQuestId may have been set there)
-    setMessage('Fetching latest quest state from backend...');
-
-    try {
-      const response = await fetch(`${env.API_BASE_URL}/api/quests/${quest.id}`);
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.quest?.chainQuestId) {
-          latestQuest = {
-            ...latestQuest,
-            chainQuestId: data.quest.chainQuestId
-          };
-          upsertQuest(latestQuest);
-          return latestQuest;
-        }
-      }
-    } catch (error) {
-      console.warn('[CommandCenter] Failed to fetch latest quest state', error);
-    }
-
-    // If still no chainQuestId, throw error
-    if (!latestQuest.chainQuestId) {
-      throw new Error(fallbackMessage);
-    }
-
-    return latestQuest;
+  async function resolveQuestForChainAction(quest: QuestState) {
+    // Database-first: No sync check needed, claim directly from database state
+    return quest;
   }
 
   async function handleGenerateQuest() {
@@ -1283,18 +1252,16 @@ export default function CommandCenter() {
     setTxStatus(null);
 
     try {
-      const resolvedQuest = await resolveQuestForChainAction(
-        interactiveQuest,
-        'Unable to claim reward because the quest is still syncing with backend state.'
-      );
-      const chainQuestId = BigInt(String(resolvedQuest.chainQuestId));
+      const resolvedQuest = await resolveQuestForChainAction(interactiveQuest);
+      // Use quest.id directly for database-first architecture
+      const questId = BigInt(String(resolvedQuest.id));
 
       console.debug('[CommandCenter] handleClaimReward: Calling submitForgeWrite', {
         functionName: 'claimReward',
-        chainQuestId: chainQuestId.toString()
+        questId: questId.toString()
       });
 
-      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [chainQuestId]);
+      const { hash: claimTxHash, receipt } = await submitForgeWrite('claimReward', [questId]);
 
       const rewardedLog = parseReceiptEvent(
         receipt,
