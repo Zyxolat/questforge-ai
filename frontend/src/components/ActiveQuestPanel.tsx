@@ -103,10 +103,10 @@ export default function ActiveQuestPanel({
     return 'Common';
   };
 
-  const isAvailable = quest.status === 'AVAILABLE' && !quest.chainQuestId;
-  const isAccepted = quest.status === 'ACTIVE' || (quest.status === 'AVAILABLE' && !!quest.chainQuestId);
-  const isCompleted = quest.status === 'SUBMITTED';
-  const isClaimable = quest.status === 'VERIFIED';
+  const isAvailable = quest.status === 'AVAILABLE';
+  const isAccepted = quest.status === 'ACCEPTED';
+  const isCompleted = quest.status === 'SUBMITTED' || quest.status === 'COMPLETED';
+  const isClaimable = quest.status === 'CLAIMABLE';
   const isRewarded = quest.status === 'REWARDED';
   const isFailed = quest.status === 'FAILED' || quest.status === 'CANCELLED';
 

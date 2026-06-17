@@ -507,7 +507,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status === 'VERIFIED' || interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED') {
+    if (interactiveQuest.status === 'CLAIMABLE' || interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED') {
       if (pendingProofRetry?.questId === interactiveQuest.id) {
         setPendingProofRetry(null);
       }
@@ -543,7 +543,7 @@ export default function CommandCenter() {
       return;
     }
 
-    if (interactiveQuest.status === 'VERIFIED') {
+    if (interactiveQuest.status === 'CLAIMABLE') {
       setTxStatus((current) =>
         current && !isProofVerificationStatus(current)
           ? current
@@ -671,7 +671,7 @@ export default function CommandCenter() {
 
     setResumedQuestId(restoredQuest.id);
 
-    if (restoredQuest.status === 'ACTIVE') {
+    if (restoredQuest.status === 'ACCEPTED') {
       setMessage('Previous active quest resumed. Describe how you completed the objective below when you are ready.');
       window.setTimeout(() => {
         proofPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -693,18 +693,18 @@ export default function CommandCenter() {
     }
 
     if (
-      interactiveQuest.status === 'VERIFIED' &&
+      interactiveQuest.status === 'CLAIMABLE' &&
       interactiveQuest.id &&
       completedQuestIds.includes(interactiveQuest.id)
     ) {
       return 'COMPLETED';
     }
-    if (interactiveQuest.status === 'VERIFIED' && (completionModal || showRewardAnimation)) {
+    if (interactiveQuest.status === 'CLAIMABLE' && (completionModal || showRewardAnimation)) {
       return 'REWARDED';
     }
-    if (interactiveQuest.status === 'VERIFIED') return 'VERIFIED';
-    if (interactiveQuest.status === 'SUBMITTED') return 'SUBMITTED';
-    if (interactiveQuest.status === 'ACTIVE') return 'ACTIVE';
+    if (interactiveQuest.status === 'CLAIMABLE') return 'VERIFIED';
+    if (interactiveQuest.status === 'COMPLETED') return 'SUBMITTED';
+    if (interactiveQuest.status === 'ACCEPTED') return 'ACTIVE';
     if (interactiveQuest.status === 'AVAILABLE' && interactiveQuest.chainQuestId) return 'ACCEPTED';
     if (interactiveQuest.status === 'AVAILABLE') return 'GENERATED';
     return 'PENDING';
@@ -716,9 +716,9 @@ export default function CommandCenter() {
     if (authStatus !== 'authenticated') return 'Awaiting secure sign-in';
     if (!isRealtimeReady) return `Realtime ${hydrationStatus}`;
     if (interactiveQuest?.status === 'SUBMITTED') return 'Verification pending';
-    if (interactiveQuest?.status === 'VERIFIED') return 'Reward ready to claim';
+    if (interactiveQuest?.status === 'CLAIMABLE') return 'Reward ready to claim';
     if (interactiveQuest?.status === 'REWARDED') return 'Reward settlement complete';
-    if (interactiveQuest?.status === 'ACTIVE') return 'Quest live';
+    if (interactiveQuest?.status === 'ACCEPTED') return 'Quest live';
     if (interactiveQuest?.status === 'AVAILABLE') return 'Ready to begin';
     if (restoredQuest) return 'No new quest generated yet';
     return 'Forge ready';
@@ -1639,7 +1639,7 @@ export default function CommandCenter() {
                     disabled={!(restoredQuest as QuestState | null)?.id}
                     className="rounded-xl border border-amber-300 bg-amber-300/20 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-300/30 disabled:opacity-50"
                   >
-                    {(restoredQuest as QuestState | null)?.status === 'ACTIVE'
+                    {(restoredQuest as QuestState | null)?.status === 'ACCEPTED'
                       ? 'Resume and Submit Proof'
                       : (restoredQuest as QuestState | null)?.status === 'AVAILABLE'
                         ? 'Resume and Complete Quest'
@@ -1664,8 +1664,8 @@ export default function CommandCenter() {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   quest={interactiveQuest as any}
                   onAcceptQuest={interactiveQuest.status === 'AVAILABLE' ? handleAcceptQuest : undefined}
-                  onSubmitProof={interactiveQuest.status === 'ACTIVE' ? () => void handleSubmitProof() : undefined}
-                  onClaimReward={interactiveQuest.status === 'VERIFIED' ? handleClaimReward : undefined}
+                  onSubmitProof={interactiveQuest.status === 'ACCEPTED' ? () => void handleSubmitProof() : undefined}
+                  onClaimReward={interactiveQuest.status === 'CLAIMABLE' ? handleClaimReward : undefined}
                   onReviewFailure={
                     interactiveQuest.status === 'FAILED' || interactiveQuest.status === 'CANCELLED'
                       ? reviewFailureState
@@ -1694,7 +1694,7 @@ export default function CommandCenter() {
               )}
             </motion.div>
 
-            {interactiveQuest?.status === 'ACTIVE' || canRetryProofQueue ? (
+            {interactiveQuest?.status === 'ACCEPTED' || canRetryProofQueue ? (
               <motion.div
                 ref={proofPanelRef}
                 initial={{ opacity: 0, y: 20 }}
@@ -1721,7 +1721,7 @@ export default function CommandCenter() {
             ) : null}
 
             {!interactiveQuest ||
-            interactiveQuest.status === 'VERIFIED' ||
+            interactiveQuest.status === 'CLAIMABLE' ||
             interactiveQuest.status === 'FAILED' ||
             interactiveQuest.status === 'CANCELLED' ? (
               <motion.div
