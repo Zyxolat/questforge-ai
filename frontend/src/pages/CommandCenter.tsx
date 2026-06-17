@@ -1260,11 +1260,13 @@ export default function CommandCenter() {
         try {
           setMessage('Creating quest on blockchain before claiming reward...');
           
+          // createQuest expects: title, metadataUri, rewardAmount, xpReward, durationSeconds
           const { receipt: createReceipt } = await submitForgeWrite('createQuest', [
             resolvedQuest.title,
-            resolvedQuest.description || '',
-            ethers.parseEther(String(resolvedQuest.xpReward || '0')),
-            resolvedQuest.difficulty || 'MEDIUM'
+            resolvedQuest.description || 'No description',
+            ethers.parseEther(String(resolvedQuest.rewardAmount || '0')),
+            BigInt(String(resolvedQuest.xpReward || '0')),
+            BigInt(86400) // 1 day in seconds as default duration
           ]);
           
           // Extract questId from QuestCreated event
