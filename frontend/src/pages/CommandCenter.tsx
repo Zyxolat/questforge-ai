@@ -1279,16 +1279,16 @@ export default function CommandCenter() {
       return;
     }
     
-    if (!interactiveQuest?.id) {
-      setMessage('❌ Quest not found');
+    if (!interactiveQuest?.chainQuestId) {
+      setMessage('❌ Quest not found on chain');
       return;
     }
     
     try {
       setMessage('⏳ Opening wallet for claim...');
       
-      // ✅ JUST CLAIM - use quest ID directly (no createQuest)
-      const questIdBigInt = BigInt(String(interactiveQuest.id));
+      // ✅ JUST CLAIM - use chainQuestId for BigInt conversion
+      const questIdBigInt = BigInt(String(interactiveQuest.chainQuestId));
       const rewardAmountWei = ethers.parseEther(interactiveQuest.rewardAmount?.toString() || '0');
       const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt, rewardAmountWei]);
       
