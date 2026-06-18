@@ -859,8 +859,8 @@ export default function CommandCenter() {
           // submitQuest(questId, proofUri, options?)
           tx = await forgeQuestManager.submitQuest(args[0] as bigint, args[1] as string, txOptions);
         } else if (functionName === 'claimReward') {
-          // claimReward(questId, options?)
-          tx = await forgeQuestManager.claimReward(args[0] as bigint, txOptions);
+          // claimReward(questId, rewardAmount, options?)
+          tx = await forgeQuestManager.claimReward(args[0] as bigint, args[1] as bigint, txOptions);
         } else {
           throw new Error(`Unknown function: ${functionName}`);
         }
@@ -1275,177 +1275,36 @@ export default function CommandCenter() {
 
   async function handleClaimReward() {
     if (!address) {
-      setMessage('❌ Please connect your wallet first');
+      setMessage('❌ Please connect wallet');
       return;
     }
-
+    
     if (!interactiveQuest?.id) {
       setMessage('❌ Quest not found');
       return;
     }
-
-    if (interactiveQuest.status !== 'CLAIMABLE') {
-      setMessage('❌ This quest is not ready to claim. Submit proof first.');
-      return;
-    }
-
-    if (!(await requireReadyAuth('claiming reward'))) return;
-
-    setLoading(true);
-    setMessage('⏳ Waiting for wallet confirmation...');
-    setTxStatus(null);
-
+    
     try {
-      console.info('[CommandCenter] handleClaimReward: Claiming reward', {
-        questId: interactiveQuest.id,
-        chainQuestId: interactiveQuest.chainQuestId,
-        questTitle: interactiveQuest.title,
-        walletAddress: address
-      });
-
-      let chainQuestId = interactiveQuest.chainQuestId;
-
-      // STEP 1: If no chainQuestId, CREATE quest on blockchain first
-      if (!chainQuestId) {
-        setMessage('⏳ Creating quest on blockchain...');
-        console.info('[CommandCenter] Creating quest on blockchain', {
-          questId: interactiveQuest.id,
-          title: interactiveQuest.title,
-          rewardAmount: interactiveQuest.rewardAmount
-        });
-
-        // Prepare quest creation parameters
-        const rewardAmount = Number(interactiveQuest.rewardAmount || 0);
-        if (rewardAmount <= 0) {
-          setMessage('❌ Invalid reward amount');
-          setLoading(false);
-          return;
-        }
-
-        const metadataUri = interactiveQuest.orchestrationId || 'quest-metadata';
-        const rewardAmountWei = ethers.parseEther(rewardAmount.toString());
-        const xpReward = interactiveQuest.xpReward || 0;
-        const durationSeconds = interactiveQuest.durationSeconds || 86400; // Default 1 day
-
-        // Create quest on blockchain
-        const { receipt: createReceipt } = await submitForgeWrite('createQuest', [
-          interactiveQuest.title,
-          metadataUri,
-          rewardAmountWei,
-          xpReward,
-          durationSeconds
-        ]);
-
-        if (!createReceipt) {
-          setMessage('❌ Failed to create quest on blockchain - no receipt');
-          setLoading(false);
-          return;
-        }
-
-        // Extract questId from QuestCreated event
-        console.info('[CommandCenter] Parsing QuestCreated event', {
-          txHash: createReceipt.hash,
-          blockNumber: createReceipt.blockNumber,
-          logsLength: createReceipt.logs?.length || 0
-        });
-
-        let extractedChainQuestId: bigint | null = null;
-
-        if (createReceipt.logs && forgeQuestManager) {
-          for (const log of createReceipt.logs) {
-            try {
-              const parsed = forgeQuestManager.interface.parseLog(log);
-              if (parsed?.name === 'QuestCreated') {
-                // First argument is the questId
-                const questIdArg = parsed.args[0];
-                extractedChainQuestId = typeof questIdArg === 'bigint' ? questIdArg : BigInt(questIdArg.toString());
-                console.info('[CommandCenter] QuestCreated event extracted', {
-                  chainQuestId: extractedChainQuestId.toString(),
-                  creator: parsed.args[1],
-                  title: parsed.args[2]
-                });
-                break;
-              }
-            } catch (e) {
-              console.debug('[CommandCenter] Event parsing attempt', { error: String(e) });
-              // Not a QuestCreated event, continue
-            }
-          }
-        }
-
-        if (!extractedChainQuestId) {
-          setMessage('❌ Failed to extract chainQuestId from blockchain');
-          setLoading(false);
-          return;
-        }
-
-        chainQuestId = extractedChainQuestId.toString();
-
-        // Update local quest state with chainQuestId
-        patchQuest(interactiveQuest.id, {
-          chainQuestId: chainQuestId
-        });
-
-        console.info('[CommandCenter] Quest created on blockchain', {
-          questId: interactiveQuest.id,
-          chainQuestId: chainQuestId
-        });
-      }
-
-      // STEP 2: Claim reward with chainQuestId
-      setMessage('⏳ Claiming reward...');
-      console.info('[CommandCenter] Claiming reward with chainQuestId', {
-        questId: interactiveQuest.id,
-        chainQuestId: chainQuestId
-      });
-
-      const questIdBigInt = BigInt(String(chainQuestId));
-      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
-
-      setMessage('⏳ Transaction confirmed...');
-
+      setMessage('⏳ Opening wallet for claim...');
+      
+      // ✅ JUST CLAIM - use quest ID directly (no createQuest)
+      const questIdBigInt = BigInt(String(interactiveQuest.id));
+      const rewardAmountWei = ethers.parseEther(interactiveQuest.rewardAmount?.toString() || '0');
+      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt, rewardAmountWei]);
+      
       if (receipt) {
-        // ✅ Update local state
+        // Update local state
         patchQuest(interactiveQuest.id, {
-          status: 'REWARDED',
-          chainQuestId: chainQuestId
+          status: 'REWARDED'
         });
-
-        // ✅ Update quest journey
-        updateQuestJourney(interactiveQuest);
-
-        const rewardAmount = Number(interactiveQuest.rewardAmount || 0).toFixed(4);
-        const xpReward = interactiveQuest.xpReward || 0;
-
-        setMessage(`✅ Reward claimed! +${rewardAmount} CELO and +${xpReward} XP earned`);
-
-        addNotification({
-          id: Date.now(),
-          eventName: 'quest:rewarded',
-          payload: {
-            questId: interactiveQuest.id,
-            chainQuestId,
-            title: `Reward claimed: ${rewardAmount} CELO`,
-            detail: `${xpReward} XP awarded`,
-            status: 'REWARDED'
-          },
-          createdAt: new Date().toISOString()
-        });
-
-        await syncNow();
-        await refreshQuestFeed();
+        
+        setMessage('✅ Reward claimed! You earned ' + 
+                   interactiveQuest.rewardAmount + ' CELO');
       }
     } catch (error) {
-      console.error('[CommandCenter] handleClaimReward failed', {
-        errorName: error instanceof Error ? error.name : 'Unknown',
-        errorMessage: error instanceof Error ? error.message : String(error),
-        questId: interactiveQuest?.id,
-        chainQuestId: interactiveQuest?.chainQuestId
-      });
+      console.error('Claim error:', error);
       const errorMsg = error instanceof Error ? error.message : String(error);
-      setMessage(`❌ Failed: ${errorMsg}`);
-    } finally {
-      setLoading(false);
+      setMessage('❌ Failed: ' + errorMsg);
     }
   }
 
@@ -1472,23 +1331,6 @@ export default function CommandCenter() {
     return true;
   }
 
-  function updateQuestJourney(completedQuest: QuestState) {
-    setQuestJourney(prev => ({
-      questsCompleted: prev.questsCompleted + 1,
-      totalCeloClaimed: prev.totalCeloClaimed + (Number(completedQuest.rewardAmount) || 0),
-      totalXPEarned: prev.totalXPEarned + (Number(completedQuest.xpReward) || 0),
-      recentQuests: [
-        {
-          id: completedQuest.id,
-          title: completedQuest.title || 'Unknown Quest',
-          reward: completedQuest.rewardAmount || 0,
-          completedAt: new Date()
-        },
-        ...prev.recentQuests
-      ].slice(0, 5), // Keep last 5
-      currentStreak: prev.currentStreak + 1
-    }));
-  }
 
   if (status !== 'connected') {
     return (

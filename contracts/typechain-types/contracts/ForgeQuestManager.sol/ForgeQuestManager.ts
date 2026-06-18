@@ -114,7 +114,7 @@ export interface ForgeQuestManagerInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "claimReward",
-    values: [BigNumberish]
+    values: [BigNumberish, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "createAndAcceptQuest",
@@ -664,7 +664,7 @@ export interface ForgeQuestManager extends BaseContract {
   >;
 
   claimReward: TypedContractMethod<
-    [questId: BigNumberish],
+    [questId: BigNumberish, rewardAmount: BigNumberish],
     [void],
     "nonpayable"
   >;
@@ -866,7 +866,11 @@ export interface ForgeQuestManager extends BaseContract {
   ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
   getFunction(
     nameOrSignature: "claimReward"
-  ): TypedContractMethod<[questId: BigNumberish], [void], "nonpayable">;
+  ): TypedContractMethod<
+    [questId: BigNumberish, rewardAmount: BigNumberish],
+    [void],
+    "nonpayable"
+  >;
   getFunction(
     nameOrSignature: "createAndAcceptQuest"
   ): TypedContractMethod<

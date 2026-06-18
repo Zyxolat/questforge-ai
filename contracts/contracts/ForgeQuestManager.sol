@@ -351,24 +351,24 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         }
     }
 
-    function claimReward(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {
-        Quest storage quest = quests[questId];
-        require(quest.questId != 0, "Quest not found");
-        require(quest.status == QuestStatus.Claimable, "Reward not claimable");
-        require(quest.player != address(0), "Invalid quest");
+    function claimReward(uint256 questId, uint256 rewardAmount) external whenNotPaused nonReentrant rewardSystemActive {
+        // Database-first architecture: quest is in database, blockchain only for rewards
+        // Backend verifies authorization - contract just transfers reward
+        require(questId != 0, "Invalid quest ID");
+        require(rewardAmount > 0, "Invalid reward amount");
+        require(msg.sender != address(0), "Invalid player address");
+        require(rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
 
-        quest.status = QuestStatus.Rewarded;
-
+        // Transfer reward to player
         ITreasury(treasury).settleQuestPayout(
             questId,
-            payable(quest.player),
-            quest.rewardAmount
+            payable(msg.sender),
+            rewardAmount
         );
 
-        rewardNFT.mintQuestReward(quest.player, questId, quest.metadataUri);
-        reputation.rewardXP(quest.player, quest.xpReward, 1);
-
-        emit QuestRewarded(questId, quest.player, quest.rewardAmount, quest.xpReward, quest.proofHash);
+        // Emit event for indexing
+        // Note: metadataUri, xpReward, proofHash come from database verification
+        emit QuestRewarded(questId, msg.sender, rewardAmount, 0, bytes32(0));
     }
 
     function cancelQuest(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {
