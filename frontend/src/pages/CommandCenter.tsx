@@ -1303,13 +1303,101 @@ export default function CommandCenter() {
         walletAddress: address
       });
 
-      // ✅ Use chainQuestId (numeric ID on blockchain)
-      const chainQuestId = interactiveQuest.chainQuestId;
+      let chainQuestId = interactiveQuest.chainQuestId;
+
+      // STEP 1: If no chainQuestId, CREATE quest on blockchain first
       if (!chainQuestId) {
-        setMessage('❌ Quest not registered on blockchain. Please resubmit your proof.');
-        setLoading(false);
-        return;
+        setMessage('⏳ Creating quest on blockchain...');
+        console.info('[CommandCenter] Creating quest on blockchain', {
+          questId: interactiveQuest.id,
+          title: interactiveQuest.title,
+          rewardAmount: interactiveQuest.rewardAmount
+        });
+
+        // Prepare quest creation parameters
+        const rewardAmount = Number(interactiveQuest.rewardAmount || 0);
+        if (rewardAmount <= 0) {
+          setMessage('❌ Invalid reward amount');
+          setLoading(false);
+          return;
+        }
+
+        const metadataUri = interactiveQuest.orchestrationId || 'quest-metadata';
+        const rewardAmountWei = ethers.parseEther(rewardAmount.toString());
+        const xpReward = interactiveQuest.xpReward || 0;
+        const durationSeconds = interactiveQuest.durationSeconds || 86400; // Default 1 day
+
+        // Create quest on blockchain
+        const { receipt: createReceipt } = await submitForgeWrite('createQuest', [
+          interactiveQuest.title,
+          metadataUri,
+          rewardAmountWei,
+          xpReward,
+          durationSeconds
+        ]);
+
+        if (!createReceipt) {
+          setMessage('❌ Failed to create quest on blockchain - no receipt');
+          setLoading(false);
+          return;
+        }
+
+        // Extract questId from QuestCreated event
+        console.info('[CommandCenter] Parsing QuestCreated event', {
+          txHash: createReceipt.hash,
+          blockNumber: createReceipt.blockNumber,
+          logsLength: createReceipt.logs?.length || 0
+        });
+
+        let extractedChainQuestId: bigint | null = null;
+
+        if (createReceipt.logs && forgeQuestManager) {
+          for (const log of createReceipt.logs) {
+            try {
+              const parsed = forgeQuestManager.interface.parseLog(log);
+              if (parsed?.name === 'QuestCreated') {
+                // First argument is the questId
+                const questIdArg = parsed.args[0];
+                extractedChainQuestId = typeof questIdArg === 'bigint' ? questIdArg : BigInt(questIdArg.toString());
+                console.info('[CommandCenter] QuestCreated event extracted', {
+                  chainQuestId: extractedChainQuestId.toString(),
+                  creator: parsed.args[1],
+                  title: parsed.args[2]
+                });
+                break;
+              }
+            } catch (e) {
+              console.debug('[CommandCenter] Event parsing attempt', { error: String(e) });
+              // Not a QuestCreated event, continue
+            }
+          }
+        }
+
+        if (!extractedChainQuestId) {
+          setMessage('❌ Failed to extract chainQuestId from blockchain');
+          setLoading(false);
+          return;
+        }
+
+        chainQuestId = extractedChainQuestId.toString();
+
+        // Update local quest state with chainQuestId
+        patchQuest(interactiveQuest.id, {
+          chainQuestId: chainQuestId
+        });
+
+        console.info('[CommandCenter] Quest created on blockchain', {
+          questId: interactiveQuest.id,
+          chainQuestId: chainQuestId
+        });
       }
+
+      // STEP 2: Claim reward with chainQuestId
+      setMessage('⏳ Claiming reward...');
+      console.info('[CommandCenter] Claiming reward with chainQuestId', {
+        questId: interactiveQuest.id,
+        chainQuestId: chainQuestId
+      });
 
       const questIdBigInt = BigInt(String(chainQuestId));
       const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
@@ -1319,7 +1407,8 @@ export default function CommandCenter() {
       if (receipt) {
         // ✅ Update local state
         patchQuest(interactiveQuest.id, {
-          status: 'REWARDED'
+          status: 'REWARDED',
+          chainQuestId: chainQuestId
         });
 
         // ✅ Update quest journey
