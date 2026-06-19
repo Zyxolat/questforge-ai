@@ -23,9 +23,17 @@ import type {
 
 export interface ITreasuryInterface extends Interface {
   getFunction(
-    nameOrSignature: "refundQuest" | "reserveReward" | "settleQuestPayout"
+    nameOrSignature:
+      | "questFunds"
+      | "refundQuest"
+      | "reserveReward"
+      | "settleQuestPayout"
   ): FunctionFragment;
 
+  encodeFunctionData(
+    functionFragment: "questFunds",
+    values: [BigNumberish]
+  ): string;
   encodeFunctionData(
     functionFragment: "refundQuest",
     values: [BigNumberish, AddressLike, BigNumberish, BytesLike]
@@ -39,6 +47,7 @@ export interface ITreasuryInterface extends Interface {
     values: [BigNumberish, AddressLike, BigNumberish]
   ): string;
 
+  decodeFunctionResult(functionFragment: "questFunds", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "refundQuest",
     data: BytesLike
@@ -96,6 +105,18 @@ export interface ITreasury extends BaseContract {
     event?: TCEvent
   ): Promise<this>;
 
+  questFunds: TypedContractMethod<
+    [questId: BigNumberish],
+    [
+      [bigint, string, bigint] & {
+        reservedReward: bigint;
+        player: string;
+        state: bigint;
+      }
+    ],
+    "view"
+  >;
+
   refundQuest: TypedContractMethod<
     [
       questId: BigNumberish,
@@ -127,6 +148,19 @@ export interface ITreasury extends BaseContract {
     key: string | FunctionFragment
   ): T;
 
+  getFunction(
+    nameOrSignature: "questFunds"
+  ): TypedContractMethod<
+    [questId: BigNumberish],
+    [
+      [bigint, string, bigint] & {
+        reservedReward: bigint;
+        player: string;
+        state: bigint;
+      }
+    ],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "refundQuest"
   ): TypedContractMethod<

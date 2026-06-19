@@ -23,6 +23,8 @@ interface ITreasury {
         uint256 expectedRewardAmount,
         bytes32 reason
     ) external;
+
+    function questFunds(uint256 questId) external view returns (uint256 reservedReward, address player, uint8 state);
 }
 
 contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl {
@@ -351,24 +353,28 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         }
     }
 
-    function claimReward(uint256 questId, uint256 rewardAmount) external whenNotPaused nonReentrant rewardSystemActive {
+    function claimReward(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive {
         // Database-first architecture: quest is in database, blockchain only for rewards
         // Backend verifies authorization - contract just transfers reward
         require(questId != 0, "Invalid quest ID");
-        require(rewardAmount > 0, "Invalid reward amount");
         require(msg.sender != address(0), "Invalid player address");
-        require(rewardAmount <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
+
+        // Get the reserved reward amount from Treasury
+        (uint256 reservedReward, address expectedPlayer, ) = ITreasury(treasury).questFunds(questId);
+        require(reservedReward > 0, "No reward available");
+        require(expectedPlayer == msg.sender, "Player mismatch");
+        require(reservedReward <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
 
         // Transfer reward to player
         ITreasury(treasury).settleQuestPayout(
             questId,
             payable(msg.sender),
-            rewardAmount
+            reservedReward
         );
 
         // Emit event for indexing
         // Note: metadataUri, xpReward, proofHash come from database verification
-        emit QuestRewarded(questId, msg.sender, rewardAmount, 0, bytes32(0));
+        emit QuestRewarded(questId, msg.sender, reservedReward, 0, bytes32(0));
     }
 
     function cancelQuest(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {

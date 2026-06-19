@@ -16,6 +16,35 @@ const _abi = [
         name: "questId",
         type: "uint256",
       },
+    ],
+    name: "questFunds",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "reservedReward",
+        type: "uint256",
+      },
+      {
+        internalType: "address",
+        name: "player",
+        type: "address",
+      },
+      {
+        internalType: "uint8",
+        name: "state",
+        type: "uint8",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "uint256",
+        name: "questId",
+        type: "uint256",
+      },
       {
         internalType: "address payable",
         name: "recipient",

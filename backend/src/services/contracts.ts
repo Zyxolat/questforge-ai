@@ -7,6 +7,9 @@ const verifierSigner = env.VERIFIER_PRIVATE_KEY ? new ethers.Wallet(env.VERIFIER
 const dailyRewardSigner = env.DAILY_REWARD_TREASURY_PRIVATE_KEY
   ? new ethers.Wallet(env.DAILY_REWARD_TREASURY_PRIVATE_KEY, provider)
   : verifierSigner;
+const questCreatorSigner = env.QUEST_CREATOR_PRIVATE_KEY
+  ? new ethers.Wallet(env.QUEST_CREATOR_PRIVATE_KEY, provider)
+  : verifierSigner;
 
 const forgeQuestManagerAddress = env.FORGE_QUEST_MANAGER_ADDRESS;
 const rewardNFTAddress = env.REWARD_NFT_ADDRESS;
@@ -57,8 +60,10 @@ export const contracts = {
   provider,
   verifierSigner,
   dailyRewardSigner,
+  questCreatorSigner,
   forgeQuestManager,
   forgeQuestManagerWrite: verifierSigner ? (forgeQuestManager.connect(verifierSigner) as ethers.Contract) : null,
+  forgeQuestManagerWriteForQuestCreation: questCreatorSigner ? (forgeQuestManager.connect(questCreatorSigner) as ethers.Contract) : null,
   rewardNFT: new ethers.Contract(rewardNFTAddress, RewardNFTABI, provider),
   reputation: new ethers.Contract(reputationAddress, ReputationABI, provider),
   treasury: new ethers.Contract(treasuryAddress, TreasuryABI, provider),

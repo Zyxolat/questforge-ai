@@ -16,6 +16,7 @@ import {
   acceptQuest,
   extractAuthFailure,
   fetchDailyMissions,
+  fetchQuestById,
   generateQuest,
   submitProofForVerification
 } from '../lib/api';
@@ -859,8 +860,8 @@ export default function CommandCenter() {
           // submitQuest(questId, proofUri, options?)
           tx = await forgeQuestManager.submitQuest(args[0] as bigint, args[1] as string, txOptions);
         } else if (functionName === 'claimReward') {
-          // claimReward(questId, rewardAmount, options?)
-          tx = await forgeQuestManager.claimReward(args[0] as bigint, args[1] as bigint, txOptions);
+          // claimReward(questId, options?)
+          tx = await forgeQuestManager.claimReward(args[0] as bigint, txOptions);
         } else {
           throw new Error(`Unknown function: ${functionName}`);
         }
@@ -1279,18 +1280,28 @@ export default function CommandCenter() {
       return;
     }
     
-    if (!interactiveQuest?.chainQuestId) {
-      setMessage('❌ Quest not found on chain');
+    if (!interactiveQuest?.id) {
+      setMessage('❌ Quest not found');
       return;
     }
     
     try {
+      setMessage('⏳ Verifying quest on blockchain...');
+      
+      // Fetch latest quest data to ensure we have chainQuestId
+      const response = await fetchQuestById(interactiveQuest.id);
+      const latestQuest = response.data;
+      
+      if (!latestQuest.chainQuestId) {
+        setMessage('❌ Quest not yet registered on blockchain. Please wait a moment and try again.');
+        return;
+      }
+      
       setMessage('⏳ Opening wallet for claim...');
       
-      // ✅ JUST CLAIM - use chainQuestId for BigInt conversion
-      const questIdBigInt = BigInt(String(interactiveQuest.chainQuestId));
-      const rewardAmountWei = ethers.parseEther(interactiveQuest.rewardAmount?.toString() || '0');
-      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt, rewardAmountWei]);
+      // ✅ JUST CLAIM - quest already exists on blockchain
+      const questIdBigInt = BigInt(String(latestQuest.chainQuestId));
+      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
       
       if (receipt) {
         // Update local state

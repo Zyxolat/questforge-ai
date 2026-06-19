@@ -36,6 +36,7 @@ export type AppEnv = {
   INDEXER_POLL_INTERVAL_MS: number;
   VERIFIER_PRIVATE_KEY?: string;
   DAILY_REWARD_TREASURY_PRIVATE_KEY?: string;
+  QUEST_CREATOR_PRIVATE_KEY?: string;
   VERIFICATION_WORKER_INTERVAL_MS: number;
   VERIFICATION_BATCH_SIZE: number;
   AUTH_DOMAIN: string;
@@ -399,6 +400,12 @@ export function validateEnvironment(): EnvValidationResult {
     warnings,
     (raw) => parseOptionalPrivateKey('DAILY_REWARD_TREASURY_PRIVATE_KEY', raw)
   );
+  const questCreatorPrivateKey = captureOptional(
+    'QUEST_CREATOR_PRIVATE_KEY',
+    'Quest Creation',
+    warnings,
+    (raw) => parseOptionalPrivateKey('QUEST_CREATOR_PRIVATE_KEY', raw)
+  );
 
   const authUriRaw = optionalEnv('AUTH_URI') || frontendUrl?.toString();
   let authUri: URL | undefined;
@@ -480,6 +487,7 @@ export function validateEnvironment(): EnvValidationResult {
         ),
         VERIFIER_PRIVATE_KEY: verifierPrivateKey,
         DAILY_REWARD_TREASURY_PRIVATE_KEY: dailyRewardTreasuryPrivateKey,
+        QUEST_CREATOR_PRIVATE_KEY: questCreatorPrivateKey,
         VERIFICATION_WORKER_INTERVAL_MS: parsePositiveInt(
           'VERIFICATION_WORKER_INTERVAL_MS',
           optionalEnv('VERIFICATION_WORKER_INTERVAL_MS') || '2000'
