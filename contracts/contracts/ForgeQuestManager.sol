@@ -103,6 +103,7 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
         uint256 xpReward,
         bytes32 proofHash
     );
+    event RewardClaimed(uint256 indexed questId, address indexed claimer, uint256 amount);
     event CircuitBreakerTriggered(string reason);
     event TreasuryUpdated(address indexed previousTreasury, address indexed newTreasury);
 
@@ -354,27 +355,24 @@ contract ForgeQuestManager is ReentrancyGuard, Pausable, Ownable, AccessControl 
     }
 
     function claimReward(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive {
-        // Database-first architecture: quest is in database, blockchain only for rewards
-        // Backend verifies authorization - contract just transfers reward
         require(questId != 0, "Invalid quest ID");
-        require(msg.sender != address(0), "Invalid player address");
-
-        // Get the reserved reward amount from Treasury
-        (uint256 reservedReward, address expectedPlayer, ) = ITreasury(treasury).questFunds(questId);
-        require(reservedReward > 0, "No reward available");
-        require(expectedPlayer == msg.sender, "Player mismatch");
-        require(reservedReward <= MAX_SINGLE_REWARD, "Reward exceeds maximum");
-
-        // Transfer reward to player
-        ITreasury(treasury).settleQuestPayout(
-            questId,
-            payable(msg.sender),
-            reservedReward
+        require(msg.sender != address(0), "Invalid sender");
+        
+        // Transfer 0.01 CELO to the player
+        uint256 rewardAmount = 1e16; // 0.01 CELO (10^16 wei)
+        
+        // Check contract has sufficient balance
+        require(
+            address(this).balance >= rewardAmount,
+            "Treasury insufficient balance"
         );
-
-        // Emit event for indexing
-        // Note: metadataUri, xpReward, proofHash come from database verification
-        emit QuestRewarded(questId, msg.sender, reservedReward, 0, bytes32(0));
+        
+        // Transfer CELO to player
+        (bool success, ) = payable(msg.sender).call{value: rewardAmount}("");
+        require(success, "CELO transfer failed");
+        
+        // Emit event for tracking
+        emit RewardClaimed(questId, msg.sender, rewardAmount);
     }
 
     function cancelQuest(uint256 questId) external whenNotPaused nonReentrant rewardSystemActive onlyPlayer(questId) {

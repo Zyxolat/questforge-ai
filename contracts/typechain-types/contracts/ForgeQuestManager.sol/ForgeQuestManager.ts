@@ -77,6 +77,7 @@ export interface ForgeQuestManagerInterface extends Interface {
       | "QuestRewarded"
       | "QuestSubmitted"
       | "QuestVerified"
+      | "RewardClaimed"
       | "RoleAdminChanged"
       | "RoleGranted"
       | "RoleRevoked"
@@ -509,6 +510,24 @@ export namespace QuestVerifiedEvent {
     rewardAmount: bigint;
     xpReward: bigint;
     proofHash: string;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
+export namespace RewardClaimedEvent {
+  export type InputTuple = [
+    questId: BigNumberish,
+    claimer: AddressLike,
+    amount: BigNumberish
+  ];
+  export type OutputTuple = [questId: bigint, claimer: string, amount: bigint];
+  export interface OutputObject {
+    questId: bigint;
+    claimer: string;
+    amount: bigint;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1106,6 +1125,13 @@ export interface ForgeQuestManager extends BaseContract {
     QuestVerifiedEvent.OutputObject
   >;
   getEvent(
+    key: "RewardClaimed"
+  ): TypedContractEvent<
+    RewardClaimedEvent.InputTuple,
+    RewardClaimedEvent.OutputTuple,
+    RewardClaimedEvent.OutputObject
+  >;
+  getEvent(
     key: "RoleAdminChanged"
   ): TypedContractEvent<
     RoleAdminChangedEvent.InputTuple,
@@ -1228,6 +1254,17 @@ export interface ForgeQuestManager extends BaseContract {
       QuestVerifiedEvent.InputTuple,
       QuestVerifiedEvent.OutputTuple,
       QuestVerifiedEvent.OutputObject
+    >;
+
+    "RewardClaimed(uint256,address,uint256)": TypedContractEvent<
+      RewardClaimedEvent.InputTuple,
+      RewardClaimedEvent.OutputTuple,
+      RewardClaimedEvent.OutputObject
+    >;
+    RewardClaimed: TypedContractEvent<
+      RewardClaimedEvent.InputTuple,
+      RewardClaimedEvent.OutputTuple,
+      RewardClaimedEvent.OutputObject
     >;
 
     "RoleAdminChanged(bytes32,bytes32,bytes32)": TypedContractEvent<

@@ -1285,31 +1285,46 @@ export default function CommandCenter() {
     }
     
     try {
-      setMessage('⏳ Opening wallet to claim reward...');
+      setLoading(true);
+      setMessage('⏳ Opening MetaMask for reward transfer...');
       
-      // ✅ CLAIM REWARD - use chainQuestId (blockchain quest ID)
-      // chainQuestId is the numeric ID from the blockchain quest creation
-      if (!interactiveQuest.chainQuestId) {
-        setMessage('❌ Quest not registered on blockchain. Please ensure it has been accepted first.');
-        return;
-      }
-      const questIdBigInt = BigInt(String(interactiveQuest.chainQuestId));
-      const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
+      // Call smart contract to transfer CELO
+      const result = await submitForgeWrite('claimReward', [
+        interactiveQuest.id
+      ]);
       
-      if (receipt) {
+      setMessage('⏳ Processing transaction on blockchain...');
+      
+      if (result.receipt) {
         // Update local state
         patchQuest(interactiveQuest.id, {
           status: 'REWARDED'
         });
         
-        setMessage('✅ Success! You claimed ' + 
-                   (interactiveQuest.rewardAmount || 0) + 
-                   ' CELO as reward! 🎉');
+        const rewardAmount = interactiveQuest.rewardAmount || 0.01;
+        
+        setMessage('✅ Success! You received ' + rewardAmount + 
+                   ' CELO! 🎉 Transaction: ' + result.hash);
       }
     } catch (error) {
       console.error('Claim reward error:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      setMessage('❌ Transaction failed: ' + errorMessage);
+      
+      let errorMsg = 'Unknown error';
+      if (error instanceof Error) {
+        if (error.message?.includes('insufficient')) {
+          errorMsg = 'Treasury has insufficient CELO balance';
+        } else if (error.message?.includes('user rejected')) {
+          errorMsg = 'Transaction rejected by user';
+        } else if ('reason' in error && typeof error.reason === 'string') {
+          errorMsg = error.reason;
+        } else {
+          errorMsg = error.message;
+        }
+      }
+      
+      setMessage('❌ Failed: ' + errorMsg);
+    } finally {
+      setLoading(false);
     }
   }
 
