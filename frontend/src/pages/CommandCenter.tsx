@@ -1287,10 +1287,13 @@ export default function CommandCenter() {
     try {
       setMessage('⏳ Opening wallet to claim reward...');
       
-      // ✅ JUST CLAIM - use questId directly
-      // No need for chainQuestId
-      // No need for quest to exist on blockchain
-      const questIdBigInt = BigInt(String(interactiveQuest.id));
+      // ✅ CLAIM REWARD - use chainQuestId (blockchain quest ID)
+      // chainQuestId is the numeric ID from the blockchain quest creation
+      if (!interactiveQuest.chainQuestId) {
+        setMessage('❌ Quest not registered on blockchain. Please ensure it has been accepted first.');
+        return;
+      }
+      const questIdBigInt = BigInt(String(interactiveQuest.chainQuestId));
       const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
       
       if (receipt) {
