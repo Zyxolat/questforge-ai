@@ -1072,91 +1072,16 @@ export async function submitProof(req: Request, res: Response) {
       wallet,
       userId: user.id,
       questId,
-      newStatus: updatedQuest.status
+      newStatus: updatedQuest.status,
+      rewardAmount: updatedQuest.rewardAmount,
+      reason: 'No blockchain quest creation needed - claimReward uses questId directly'
     });
-
-    // Create quest on blockchain (backend has admin role)
-    if (!updatedQuest.chainQuestId && contracts.forgeQuestManagerWriteForQuestCreation) {
-      try {
-        logger.info('[QUEST] Creating quest on blockchain', {
-          wallet,
-          questId,
-          title: updatedQuest.title,
-          rewardAmount: updatedQuest.rewardAmount
-        });
-
-        const rewardAmountWei = ethers.parseEther(updatedQuest.rewardAmount.toString());
-        const xpReward = updatedQuest.xpReward || 100n;
-        const durationSeconds = updatedQuest.durationSeconds || 86400n;
-
-        const createTx = await contracts.forgeQuestManagerWriteForQuestCreation.createQuest(
-          updatedQuest.title,
-          updatedQuest.description || 'A quest in ForgeQuest',
-          rewardAmountWei,
-          xpReward,
-          durationSeconds
-        );
-
-        logger.info('[QUEST] Blockchain quest creation transaction submitted', {
-          wallet,
-          questId,
-          txHash: createTx.hash
-        });
-
-        const receipt = await createTx.wait();
-
-        if (receipt) {
-          // Parse QuestCreated event from receipt logs
-          let chainQuestId: bigint | null = null;
-
-          for (const log of receipt.logs) {
-            try {
-              const parsed = contracts.forgeQuestManagerInterface.parseLog(log);
-              if (parsed?.name === 'QuestCreated') {
-                chainQuestId = parsed.args[0]; // questId is first argument
-                break;
-              }
-            } catch {
-              // Not a QuestCreated event, continue
-            }
-          }
-
-          if (chainQuestId !== null) {
-            await prisma.quest.update({
-              where: { id: questId },
-              data: { chainQuestId }
-            });
-
-            logger.info('[QUEST] Quest successfully created on blockchain', {
-              wallet,
-              questId,
-              chainQuestId: chainQuestId.toString(),
-              txHash: receipt.hash
-            });
-          } else {
-            logger.warn('[QUEST] No QuestCreated event found in receipt', {
-              wallet,
-              questId,
-              txHash: receipt.hash
-            });
-          }
-        }
-      } catch (error) {
-        logger.error('[QUEST] Failed to create quest on blockchain', error, {
-          wallet,
-          questId,
-          errorMessage: error instanceof Error ? error.message : String(error)
-        });
-        // Continue anyway - chainQuestId can be null
-      }
-    }
 
     res.json({
       success: true,
       quest: {
         id: updatedQuest.id,
         status: updatedQuest.status,
-        chainQuestId: updatedQuest.chainQuestId?.toString() ?? null,
         rewardAmount: updatedQuest.rewardAmount,
         xpReward: updatedQuest.xpReward,
         proofTx: updatedQuest.proofTx,
@@ -1169,7 +1094,7 @@ export async function submitProof(req: Request, res: Response) {
         expiresAt: updatedQuest.expiresAt?.toISOString(),
         metadata: updatedQuest.metadata
       },
-      message: 'Proof accepted. Quest is now ready to claim reward.'
+      message: 'Proof accepted! Quest ready to claim reward on blockchain.'
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to submit proof';

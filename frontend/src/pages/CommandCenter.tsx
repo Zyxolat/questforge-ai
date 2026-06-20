@@ -16,7 +16,6 @@ import {
   acceptQuest,
   extractAuthFailure,
   fetchDailyMissions,
-  fetchQuestById,
   generateQuest,
   submitProofForVerification
 } from '../lib/api';
@@ -1286,21 +1285,12 @@ export default function CommandCenter() {
     }
     
     try {
-      setMessage('⏳ Verifying quest on blockchain...');
+      setMessage('⏳ Opening wallet to claim reward...');
       
-      // Fetch latest quest data to ensure we have chainQuestId
-      const response = await fetchQuestById(interactiveQuest.id);
-      const latestQuest = response.data;
-      
-      if (!latestQuest.chainQuestId) {
-        setMessage('❌ Quest not yet registered on blockchain. Please wait a moment and try again.');
-        return;
-      }
-      
-      setMessage('⏳ Opening wallet for claim...');
-      
-      // ✅ JUST CLAIM - quest already exists on blockchain
-      const questIdBigInt = BigInt(String(latestQuest.chainQuestId));
+      // ✅ JUST CLAIM - use questId directly
+      // No need for chainQuestId
+      // No need for quest to exist on blockchain
+      const questIdBigInt = BigInt(String(interactiveQuest.id));
       const { receipt } = await submitForgeWrite('claimReward', [questIdBigInt]);
       
       if (receipt) {
@@ -1309,13 +1299,14 @@ export default function CommandCenter() {
           status: 'REWARDED'
         });
         
-        setMessage('✅ Reward claimed! You earned ' + 
-                   interactiveQuest.rewardAmount + ' CELO');
+        setMessage('✅ Success! You claimed ' + 
+                   (interactiveQuest.rewardAmount || 0) + 
+                   ' CELO as reward! 🎉');
       }
     } catch (error) {
-      console.error('Claim error:', error);
-      const errorMsg = error instanceof Error ? error.message : String(error);
-      setMessage('❌ Failed: ' + errorMsg);
+      console.error('Claim reward error:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      setMessage('❌ Transaction failed: ' + errorMessage);
     }
   }
 
