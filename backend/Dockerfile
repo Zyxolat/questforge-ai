@@ -11,6 +11,7 @@ RUN npx prisma generate --schema prisma/schema.prisma
 RUN npm run build
 
 FROM node:20-bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 
